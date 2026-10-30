@@ -1,0 +1,8 @@
+.state/
+.DS_Store
+*.log
+
+# per-project team files and prompts stay local
+teams/*
+!teams/example.yaml
+projects/

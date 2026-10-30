@@ -1,0 +1,103 @@
+# A team definition for factory.sh. Copy this file to teams/team.yaml (the default) or anywhere
+# else and edit it, then:
+#
+#   ./factory.sh check                     validate the file and show where everything will live
+#   ./factory.sh up                        start the team
+#   ./factory.sh -c path/to/other.yaml up  use a different file (or set TEAM_CONFIG)
+#
+# To change the team dynamics: add, remove or reorder roles, change the prompts, models or
+# storage. Unknown keys are errors, so a typo cannot silently fall back to a default.
+# Relative paths below are relative to this file. A leading ~ is the home directory.
+
+team: example                 # names the state folder (.state/<team>/) and appears in prompts
+owner: Your Name              # the human the team works for; named in the prompts
+
+# The project: the local checkout, its GitHub repo, and the GitHub Project (board) the team
+# tracks work on. The prompts name these, so this is the only edit to retarget a team.
+repo:
+  path: /path/to/your/checkout
+  github: owner/name            # origin must contain this before a worktree is created
+  base: origin/main             # new worktrees start detached here
+
+project:
+  name: Your Project Board
+  url: https://github.com/users/your-login/projects/1
+
+# Where worktrees live. Every role with `workdir.type: worktree` is created under
+# <volume>/<root>/. The volume must be a mounted volume (checked from the mount table, at the
+# moment a worktree is created); the launcher never falls back to another disk.
+storage:
+  volume: /Volumes/YourDrive
+  root: Projects/example-worktrees
+
+sessions:
+  prefix: example             # tmux session name is <prefix>-<role id> unless a role sets `session`
+  claude:
+    # Optional program that runs claude, for example an app that holds macOS privacy grants
+    # (Downloads, removable volumes) that a seat started from tmux would otherwise lack. It is
+    # called as: <wrapper> <path to claude> <args...>. Leave unset to run claude directly. If it
+    # is set but the file is missing, claude runs directly.
+    # wrapper: ~/Applications/SomeWrapper.app/Contents/MacOS/SomeWrapper
+    args:
+      - --dangerously-skip-permissions   # no permission prompts: the prompts' hard rules are the guardrail
+    # Model and effort for every seat (a role can override either). Left unset, the flag is
+    # omitted and each seat inherits `model` and `effortLevel` from ~/.claude/settings.json.
+    # model takes an alias or a full id; effort is low | medium | high | xhigh | max.
+    # model: opus
+    # effort: xhigh
+
+prompts:
+  common: ../roles/common.md   # prepended to every seat's prompt. Placeholders: @@TEAM@@ @@OWNER@@
+                               # @@TITLE@@ @@ROLE@@ @@SESSION@@ @@PREFIX@@ @@SCRIPT@@ @@LOG@@ @@REPO@@
+                               # @@GITHUB_REPO@@ @@GITHUB_URL@@ @@PROJECT_NAME@@ @@PROJECT_URL@@
+                               # @@WORKDIR@@ @@WORKTREE_ROOT@@ @@VOLUME@@ @@ROSTER@@
+
+# First message typed into a seat at startup (a role can override it with its own `kickoff`).
+kickoff: >-
+  Team session started: you are the @@TITLE@@ (session @@SESSION@@). Your full role
+  instructions are in your system prompt. Reply with one line confirming your role and working
+  directory, then wait for a message from the EM or @@OWNER@@. Do not start any work until you
+  receive one.
+
+# Seats start in this order. Each needs: title, workdir, and one of `prompt` (a file) or
+# `prompt_text` (inline). `summary` is the line shown in the roster every seat sees.
+# Optional per role: `model:` and `effort:` (override sessions.claude), `session:` (tmux name),
+# `kickoff:` (first message).
+#   workdir.type: project   an existing folder: path: ...
+#   workdir.type: worktree  a git worktree under storage (optional: name: folder-name)
+roles:
+  em:
+    title: Engineering Manager
+    summary: owns the board, assigns work, the owner's single contact
+    workdir: { type: project, path: /path/to/your/checkout }
+    prompt: ../roles/em.md
+    kickoff: >-
+      Team session started: you are the @@TITLE@@ (session @@SESSION@@). Your full role
+      instructions are in your system prompt. Reply with one line confirming your role and
+      working directory, then wait for @@OWNER@@. Do not message teammates or start work until
+      they give you something to do.
+  tl:
+    title: Tech Lead
+    summary: design direction, reviews every PR
+    workdir: { type: worktree }
+    prompt: ../roles/tl.md
+  fs1:
+    title: Senior Full-Stack Software Engineer
+    summary: implements assigned issues
+    workdir: { type: worktree }
+    prompt: ../roles/fs.md
+  fs2:
+    title: Senior Full-Stack Software Engineer
+    summary: implements assigned issues
+    workdir: { type: worktree }
+    prompt: ../roles/fs.md
+  qa:
+    title: QA Engineer
+    summary: verifies behaviour, owns regression coverage
+    workdir: { type: worktree }
+    prompt: ../roles/qa.md
+  sec:
+    title: Security Engineer
+    summary: security review and triage
+    workdir: { type: worktree }
+    prompt: ../roles/sec.md
