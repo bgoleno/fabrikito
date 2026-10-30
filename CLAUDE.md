@@ -35,5 +35,5 @@ together in one iTerm tab. Read `README.md` for use and `teams/example.yaml` for
 - iTerm: Finder's desktop bounds span all displays, so window sizing uses NSScreen. Scripting iTerm needs a
   macOS Automation grant, and a pending prompt blocks osascript forever: run it with a time limit.
 - System ruby is 2.6: no endless method definitions. YAML flow mappings need quoted URLs.
-- Durable knowledge about this project lives in the Obsidian vault under `projects/software-factory/`
-  (staged in `_raw/` until ingested), not in Claude Code's own memory files.
+- Durable knowledge about this project lives in the Obsidian vault under `projects/software-factory/`,
+  not in Claude Code's own memory files.
