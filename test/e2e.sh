@@ -52,6 +52,8 @@ grep -E "^(em|w1) " $T/args.log | grep -c -- "--effort" | grep -q '^1$' && ok "o
 echo "--- say"
 TEAM_ROLE=em $S -c $T/team.yaml say w1 "hello w1 from em" && sleep 1
 tmux capture-pane -p -t '=tt-w1:' | grep -q "from em\] hello w1" && ok "message arrived in w1's pane" || bad "message arrived"
+tmux show-options -t '=tt-w1:' set-titles-string | grep -q 'set-titles-string "w1 | Worker One | tt-w1"' && ok "pane title set at startup: role | title | session" || bad "pane title at startup"
+tmux set-option -t '=tt-w1:' set-titles-string "stale" && $S -c $T/team.yaml titles >/dev/null && tmux show-options -t '=tt-w1:' set-titles-string | grep -q '"w1 | Worker One | tt-w1"' && ok "titles command repairs a changed title" || bad "titles command"
 echo "--- migrate then up w2"
 $S -c $T/team.yaml migrate w2 2>&1 | grep -E "moved|REFUSE|skip" | cut -c1-150
 $S -c $T/team.yaml up w2 2>&1 | grep -E "start|error" | cut -c1-150
@@ -71,6 +73,21 @@ echo '  w3: { title: Worker Three, workdir: { type: worktree }, prompt_text: "w3
 rm_out=$($S -c $T/team2.yaml up w3 2>&1); echo "$rm_out" | grep -E "error|skip" | cut -c1-150 | head -2
 echo "$rm_out" | grep -q "is not mounted; refusing" && ok "unmounted volume refused with a clear error" || { bad "unmounted volume refused"; echo "<<<$rm_out>>>"; }
 [ ! -e /Volumes/NotMounted ] && ok "nothing created at the missing volume" || bad "nothing created at the missing volume"
+echo "--- iTerm view layout (generated script only; iTerm itself is not driven)"
+v3=$($S -c $T/team.yaml view --print)
+echo "$v3" | grep -n 'write text' | head -1 | grep -q "tt-em" && ok "view: primary seat (em) is first" || bad "view: primary seat first"
+[ "$(echo "$v3" | grep -c 'write text')" = 3 ] && ok "view: one pane per seat (3)" || bad "view: pane count"
+[ "$(echo "$v3" | grep -c 'split vertically')" = 2 ] && [ "$(echo "$v3" | grep -c 'split horizontally')" = 0 ] && ok "view: em | w1 | w2 uses 2 vertical splits, no row stack" || bad "view: 3-seat splits"
+for k in w3 w4 w5; do echo "  $k: { title: Worker $k, workdir: { type: worktree }, prompt_text: \"$k\" }" >> $T/team.yaml; done
+v6=$($S -c $T/team.yaml view --print)
+[ "$(echo "$v6" | grep -c 'write text')" = 6 ] && ok "view: 6 seats, 6 panes" || bad "view: 6-seat pane count"
+[ "$(echo "$v6" | grep -c 'split horizontally')" = 2 ] && ok "view: 5 other seats make 3 rows (2 row splits)" || bad "view: row splits"
+[ "$(echo "$v6" | grep -c 'split vertically')" = 3 ] && ok "view: 1 left/right split + 2 column splits (odd last row full width)" || bad "view: column splits"
+echo "$v6" | grep -q "tell s0 to write text .*tt-em" && ok "view: em is in the left pane (s0)" || bad "view: em left"
+sed 's#^storage:#display: { primary: w2 }\nstorage:#' $T/team.yaml > $T/team3.yaml
+$S -c $T/team3.yaml view --print | grep "tell s0 to write text" | grep -q "tt-w2" && ok "view: display.primary moves w2 to the left" || bad "view: display.primary"
+sed 's#^storage:#display: { primary: nobody }\nstorage:#' $T/team.yaml > $T/team4.yaml
+$S -c $T/team4.yaml check 2>&1 | grep -q "not a role id" && ok "view: unknown display.primary rejected" || bad "view: unknown primary"
 echo "--- cleanup"
 $S -c $T/team.yaml down --yes >/dev/null 2>&1; tmux kill-server 2>/dev/null
 for w in team-w1 team-w2; do git -C $T/repo worktree remove --force $VOL/$ROOT/$w 2>/dev/null; git -C $T/repo worktree remove --force $T/repo/.claude/worktrees/$w 2>/dev/null; done

@@ -8,7 +8,13 @@
 #   factory.sh [-c team.yaml] <command>
 #
 #   check                      validate the team file and show where everything will live
-#   up [role...]               start the team (default: every role, in file order); skips seats that are up
+#   up [--no-view] [role...]   start the team (default: every role, in file order); skips seats that are up,
+#                              then opens the iTerm tab (see `view`) unless --no-view or display.iterm is false
+#   titles                     set each running seat's terminal title to "<role> | <title> | <session>" (up and
+#                              view do this too); it is what iTerm shows in each pane's header
+#   view                       open a new iTerm tab with every running seat in a pane: the primary seat
+#                              (display.primary, default the first role) on the left at full height, the others
+#                              in rows on the right; the window is sized to its screen (display.window)
 #   status                     which seats are up, and where each one works
 #   say <role|all> <message>   type a message into a seat (this is how seats talk to each other)
 #   attach <role>              attach your terminal to a seat (detach: ctrl-b d)
@@ -67,6 +73,9 @@ VOLUME=$(cfg get storage.volume)
 WT_ROOT=$(cfg get storage.worktree_root)
 PREFIX=$(cfg get sessions.prefix)
 WRAPPER=$(cfg get sessions.wrapper)
+VIEW_ITERM=$(cfg get display.iterm)
+VIEW_PRIMARY=$(cfg get display.primary)
+VIEW_WINDOW=$(cfg get display.window)
 ROLES=$(cfg ids | tr '\n' ' ')
 STATE=${TEAM_STATE_DIR:-$HERE/.state/$TEAM}
 LOG="$STATE/messages.log"
@@ -149,7 +158,11 @@ cmd_check() {
 }
 
 cmd_up() {
-  local roles=${*:-$ROLES} r sess dir launch a args_q
+  local want_view=1 started=0 args="" roles r sess dir launch a args_q
+  for a in "$@"; do
+    if [ "$a" = --no-view ]; then want_view=0; else args="$args $a"; fi
+  done
+  roles=${args:-$ROLES}
   command -v tmux >/dev/null || die "tmux not found"
   command -v claude >/dev/null || die "claude not found"
   for r in $roles; do check_role "$r"; done
@@ -187,8 +200,10 @@ cmd_up() {
 
     tmux new-session -d -s "$sess" -c "$dir" -x 220 -y 50 \
       -e "TEAM_ROLE=$r" -e "TEAM_CONFIG=$CONFIG" -e "TEAM_SCRIPT=$SELF"
+    apply_title "$r"
     tmux send-keys -t "=$sess:" "$launch" Enter
     echo "start  $r: $(title "$r") -> tmux session $sess ($dir)"
+    started=$((started + 1))
     sleep 1
   done
   # A seat started in a folder Claude Code has not seen stops at a trust dialog (and the first
@@ -202,6 +217,154 @@ cmd_up() {
     fi
   done
   echo "Attach with: $SELF attach <role>"
+  # Show the team: one iTerm tab with every running seat. A failure here never fails `up`.
+  if [ "$started" -gt 0 ] && [ "$want_view" = 1 ] && [ "$VIEW_ITERM" = true ] && [ "${TEAM_VIEW:-1}" != 0 ]; then
+    cmd_view || echo "warning: could not open the iTerm view (the seats are running; try: $SELF view)" >&2
+  fi
+}
+
+# Make tmux set the terminal title for this seat while a client is attached, so a pane header (iTerm
+# shows it) says which seat it is: "<role> | <title> | <session>". A session option, so it holds
+# wherever the seat is attached. '#' starts a tmux format, hence the doubling.
+apply_title() {
+  local r=$1 sess str
+  sess=$(session "$r")
+  str="$r | $(title "$r") | $sess"
+  tmux set-option -t "=$sess:" set-titles on
+  tmux set-option -t "=$sess:" set-titles-string "${str//#/##}"
+}
+
+cmd_titles() {
+  local r n=0
+  for r in $ROLES; do
+    alive "$r" || continue
+    apply_title "$r"
+    n=$((n + 1))
+  done
+  echo "set the terminal title of $n running seat(s)"
+}
+
+# Run osascript with a time limit. A macOS Automation permission prompt would otherwise leave it
+# waiting forever, and `up` with it.
+run_osa() {
+  local out p i rc=0
+  out=$(mktemp "${TMPDIR:-/tmp}/factory-osa.XXXXXX")
+  osascript "$@" >"$out" 2>&1 &
+  p=$!
+  for i in $(seq 1 60); do
+    kill -0 "$p" 2>/dev/null || break
+    sleep 0.5
+  done
+  if kill -0 "$p" 2>/dev/null; then
+    kill "$p" 2>/dev/null
+    rm -f "$out"
+    echo "osascript timed out after 30s (is a macOS Automation permission prompt waiting for iTerm?)" >&2
+    return 1
+  fi
+  wait "$p" || rc=$?
+  cat "$out"
+  rm -f "$out"
+  return "$rc"
+}
+
+# The AppleScript that builds the tab. Arguments: role ids, the primary first.
+#   left:  the primary seat, the full height of the tab
+#   right: one row per two of the other seats, rows stacked; with an odd number of seats the last
+#          row is one pane across the full width
+# Splits are created first and the attach commands typed afterwards, so a pane is not resized
+# while its tmux client is starting. iTerm keeps same-direction splits at equal sizes.
+view_script() {
+  local first=$1 n r rows i a b
+  shift
+  n=$#
+  rows=$(((n + 1) / 2))
+  echo 'tell application "iTerm2"'
+  echo '  if (count of windows) = 0 then'
+  echo '    set w to (create window with default profile)'
+  echo '  else'
+  echo '    set w to current window'
+  echo '    tell w to create tab with default profile'
+  echo '  end if'
+  echo '  tell w'
+  echo '    set s0 to current session of current tab'
+  if [ "$n" -gt 0 ]; then
+    echo '    tell s0 to set r1 to (split vertically with default profile)'
+    r=2
+    while [ "$r" -le "$rows" ]; do
+      echo "    tell r$((r - 1)) to set r$r to (split horizontally with default profile)"
+      r=$((r + 1))
+    done
+    r=1
+    i=1
+    while [ "$i" -le "$n" ]; do
+      [ $((i + 1)) -le "$n" ] && echo "    tell r$r to set c$r to (split vertically with default profile)"
+      i=$((i + 2))
+      r=$((r + 1))
+    done
+  fi
+  echo "    tell s0 to write text \"$(attach_cmd "$first")\""
+  r=1
+  i=1
+  while [ "$i" -le "$n" ]; do
+    a=${!i}
+    echo "    tell r$r to write text \"$(attach_cmd "$a")\""
+    if [ $((i + 1)) -le "$n" ]; then
+      b=$((i + 1))
+      echo "    tell c$r to write text \"$(attach_cmd "${!b}")\""
+    fi
+    i=$((i + 2))
+    r=$((r + 1))
+  done
+  echo '    select s0'
+  echo '  end tell'
+  echo '  activate'
+  echo '  return id of w'
+  echo 'end tell'
+}
+
+# Quoted for the user's shell: a bare =name would be expanded by zsh.
+attach_cmd() { printf "tmux attach -t '=%s'" "$(session "$1")"; }
+
+# Resize the iTerm window to the usable area of the screen it is on (not the menu bar or Dock).
+# Finder's desktop bounds are no use: with two displays they describe one rectangle spanning both.
+size_window() {
+  local wid=$1 b l t r bt cx cy sb
+  b=$(run_osa -e "tell application \"iTerm2\" to get bounds of window id $wid") || return 1
+  IFS=', ' read -r l t r bt <<EOF2
+$b
+EOF2
+  cx=$(((l + r) / 2))
+  cy=$(((t + bt) / 2))
+  sb=$(osascript -l JavaScript "$HERE/lib/screen_bounds.js" "$cx" "$cy") || return 1
+  set -- $sb
+  run_osa -e "tell application \"iTerm2\" to set bounds of window id $wid to {$1, $2, $3, $4}" >/dev/null
+}
+
+cmd_view() {
+  local print=0 list="" ordered r wid
+  [ "${1:-}" = --print ] && print=1
+  # --print shows the layout for every role in the file, up or not (used by the tests)
+  for r in $ROLES; do
+    if [ $print -eq 1 ] || alive "$r"; then list="$list $r"; fi
+  done
+  [ -n "$list" ] || die "no seats are running; start them with: $SELF up"
+  # Seats started before titles existed get theirs now (print mode touches nothing).
+  if [ $print -eq 0 ]; then for r in $list; do apply_title "$r"; done; fi
+  ordered=""
+  case "$list " in *" $VIEW_PRIMARY "*) ordered=$VIEW_PRIMARY ;; esac
+  for r in $list; do [ "$r" = "$ordered" ] || ordered="$ordered $r"; done
+  # shellcheck disable=SC2086
+  set -- $ordered
+  if [ $print -eq 1 ]; then
+    view_script "$@"
+    return 0
+  fi
+  command -v osascript >/dev/null || die "osascript not found (the iTerm view is macOS only)"
+  wid=$(run_osa -e "$(view_script "$@")") || { echo "$wid" >&2; return 1; }
+  echo "opened an iTerm tab with $# seat(s): $ordered"
+  if [ "$VIEW_WINDOW" = full ]; then
+    size_window "$wid" || echo "warning: could not resize the iTerm window" >&2
+  fi
 }
 
 cmd_status() {
@@ -349,9 +512,11 @@ case "${1:-}" in
   check) cmd_check ;;
   up) shift; cmd_up "$@" ;;
   status) cmd_status ;;
+  view) shift; cmd_view "$@" ;;
+  titles) cmd_titles ;;
   say) shift; cmd_say "$@" ;;
   attach) shift; cmd_attach "$@" ;;
   migrate) shift; cmd_migrate "$@" ;;
   down) shift; cmd_down "$@" ;;
-  *) sed -n '3,22p' "$0" | sed 's/^# \{0,1\}//'; exit 64 ;;
+  *) sed -n '3,30p' "$0" | sed 's/^# \{0,1\}//'; exit 64 ;;
 esac

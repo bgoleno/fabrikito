@@ -46,6 +46,17 @@ sessions:
     # model: opus
     # effort: xhigh
 
+# What `up` shows once the seats are running, and what `./factory.sh view` shows any time: a new
+# iTerm tab with every running seat in a pane. The primary seat is on the left at the full height
+# of the tab (it is the one you talk to); the others are in rows on the right, two per row, and
+# an odd last seat gets a full-width row. Needs iTerm2 and, the first time, macOS Automation
+# permission for the program running factory.sh to control iTerm.
+display:
+  iterm: true                 # false: do not open the tab (up --no-view skips it once)
+  primary: em                 # role id shown on the left; default is the first role
+  window: full                # full: size the window to the usable area of its screen (not the
+                              # menu bar or Dock); keep: leave the window size alone
+
 prompts:
   common: ../roles/common.md   # prepended to every seat's prompt. Placeholders: @@TEAM@@ @@OWNER@@
                                # @@TITLE@@ @@ROLE@@ @@SESSION@@ @@PREFIX@@ @@SCRIPT@@ @@LOG@@ @@REPO@@

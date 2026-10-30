@@ -22,7 +22,8 @@ def die(msg)
   exit 1
 end
 
-TOP_KEYS = %w[team owner repo project storage sessions prompts kickoff roles].freeze
+TOP_KEYS = %w[team owner repo project storage sessions display prompts kickoff roles].freeze
+DISPLAY_KEYS = %w[iterm primary window].freeze
 PROJECT_KEYS = %w[name url].freeze
 EFFORTS = %w[low medium high xhigh max].freeze
 REPO_KEYS = %w[path github base].freeze
@@ -88,6 +89,22 @@ class TeamConfig
   def claude
     (sessions['claude'] || {}).tap { |h| die "'sessions.claude' must be a mapping" unless h.is_a?(Hash) }
   end
+  def display
+    section('display', DISPLAY_KEYS, required: false)
+  end
+
+  def view_iterm
+    display.key?('iterm') ? display['iterm'] : true
+  end
+
+  def view_primary
+    (display['primary'] || roles.keys.first).to_s
+  end
+
+  def view_window
+    (display['window'] || 'full').to_s
+  end
+
   def owner
     (@c['owner'] || 'the owner').to_s
   end
@@ -230,6 +247,9 @@ class TeamConfig
     die 'storage.root is required and must be relative to the volume' if storage['root'].to_s.empty? || storage['root'].to_s.start_with?('/')
     die 'storage.root must not contain ..' if storage['root'].to_s.split('/').include?('..')
     die "sessions.prefix must match #{PREFIX_RE.source}" unless prefix =~ PREFIX_RE
+    die 'display.iterm must be true or false' unless [true, false].include?(view_iterm)
+    die "display.window must be 'full' or 'keep'" unless %w[full keep].include?(view_window)
+    die "display.primary '#{view_primary}' is not a role id (roles: #{roles.keys.join(' ')})" unless roles.key?(view_primary)
     bad = claude.keys - CLAUDE_KEYS
     die "unknown key(s) under 'sessions.claude': #{bad.join(', ')}" unless bad.empty?
     die "sessions.claude.effort must be one of #{EFFORTS.join(', ')}" if claude['effort'] && !EFFORTS.include?(claude['effort'].to_s)
@@ -289,6 +309,9 @@ when 'get'
   when 'storage.root' then puts cfg.root
   when 'storage.worktree_root' then puts cfg.worktree_root
   when 'sessions.prefix' then puts cfg.prefix
+  when 'display.iterm' then puts cfg.view_iterm
+  when 'display.primary' then puts cfg.view_primary
+  when 'display.window' then puts cfg.view_window
   when 'sessions.wrapper' then puts(cfg.claude['wrapper'] ? cfg.expand(cfg.claude['wrapper']) : '')
   else die "unknown key '#{key}'"
   end

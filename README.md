@@ -20,6 +20,8 @@ cp teams/example.yaml teams/team.yaml     then edit it: repo, project, storage, 
 ./factory.sh check                        validate the team file, show where everything lives
 ./factory.sh up [role...]                 start the team (all roles, in file order)
 ./factory.sh status                       which seats are up, and where each works
+./factory.sh view                         open an iTerm tab with every running seat in a pane
+./factory.sh titles                       set each running seat's terminal title (role | title | session)
 ./factory.sh say <role|all> "..."         type a message into a seat (this is how seats talk)
 ./factory.sh attach <role>                attach your terminal (detach: ctrl-b d)
 ./factory.sh migrate [role...]            remove clean worktrees that are not on the storage volume
@@ -31,6 +33,17 @@ The team file is `-c`, else `$TEAM_CONFIG`, else `teams/team.yaml`. `teams/examp
 key. Team files other than the example, and anything under `projects/`, are git-ignored so each
 project's specifics stay out of this repository. Keep a project's own prompts under `projects/<name>/`
 and point the team file at them.
+
+## The iTerm view
+
+`up` opens a new iTerm tab showing every running seat, unless `--no-view` is given or `display.iterm`
+is `false`; `view` opens it any time. The primary seat (`display.primary`, default the first role) is
+the left half at full height, since it is the one you talk to. The others fill rows on the right, two
+per row, and an odd last seat gets a full-width row. The window is sized to the usable area of the
+screen it is on (`display.window: full`). Each pane is a `tmux attach` to the seat's session, so
+closing the tab detaches and never stops a seat. Each pane's header reads `<role> | <title> | <session>`:
+the launcher sets tmux's `set-titles-string` on every seat (at start, and again by `view` or `titles`). The first run asks macOS for permission to control
+iTerm.
 
 ## The team file
 
