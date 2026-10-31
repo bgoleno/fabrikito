@@ -34,6 +34,7 @@ on_exit() {
   local rc=$?
   [ -n "$finished" ] && return
   tmux kill-server 2>/dev/null
+  [ -n "${LIVE_D:-}" ] && $SRC/test/live-env.sh down "$LIVE_D" 2>/dev/null
   for w in "$VOL/$ROOT"/*; do [ -d "$w" ] && git -C $T/repo worktree remove --force "$w" 2>/dev/null; done
   rmdir "$VOL/$ROOT" 2>/dev/null; rm -rf "$T"
   echo "ABORTED before the end (exit $rc): pass=${pass:-0} fail=${fail:-0}" >&2
@@ -591,9 +592,14 @@ em_screen=$(tmux capture-pane -p -t '=tt-em:')
   ok "say from inside a seat with TEAM_ROLE unset is not labelled [from owner]" || { bad "say inside a seat was labelled owner"; tail -1 $T/state/messages.log; }
 echo "$em_screen" | grep -qF "[from w1] unset role inside w1" && [ "$(tail -1 $T/state/messages.log | cut -f2-4)" = "w1	em	delivered" ] &&
   ok "say from inside a seat with TEAM_ROLE unset is labelled with that seat's role" || { bad "say inside a seat: label"; tail -1 $T/state/messages.log; echo "$em_screen" | tail -8; }
-# Outside every seat: this test's own process (its terminal is not a seat's pane) is the owner.
-n=$(wc -l < $T/state/messages.log)
-env -u TEAM_ROLE $S -c $T/team.yaml say w1 "unset role outside every seat" >/dev/null 2>&1; sleep 1
+# Outside every seat: the owner. This test often runs inside a seat (the stop gate, a reviewer),
+# where a tmux server is among its ancestors and say refuses (#115). So say runs detached: the outer
+# subshell exits at once, and the inner job, re-parented to launchd by the time its second of sleep is
+# over, runs say with no tmux server above it, as from the owner's own terminal. (No $BASHPID: macOS
+# bash 3.2 has none.)
+n=$(wc -l < $T/state/messages.log); rm -f $T/detached.rc
+( ( sleep 1; env -u TEAM_ROLE $S -c $T/team.yaml say w1 "unset role outside every seat" >/dev/null 2>&1; echo $? > $T/detached.rc ) & )
+for i in $(seq 1 40); do [ -s $T/detached.rc ] && break; sleep 0.25; done; sleep 1
 tmux capture-pane -p -t '=tt-w1:' | grep -qF "[from owner] unset role outside every seat" && [ "$(tail -n +$((n + 1)) $T/state/messages.log | cut -f2-4)" = "owner	w1	delivered" ] &&
   ok "say from outside every seat with TEAM_ROLE unset is still [from owner]" || { bad "say outside seats: owner label"; tail -1 $T/state/messages.log; }
 # A tmux pane of the owner's that is not a seat, on the seats' own server, named with the team prefix.
@@ -620,7 +626,7 @@ pout=$(PATH=$T/psfail:$PATH env -u TEAM_ROLE $S -c $T/team.yaml say w1 "ps canno
   ok "say with TEAM_ROLE unset refuses when ps fails, and logs NOT-DELIVERED" || { bad "say when ps fails (rc=$rc)"; echo "$pout"; tail -1 $T/state/messages.log; }
 # ps fails for say's parent only (an ancestor that exited mid-walk): refuse too, never owner. The
 # sh records its pid for the stand-in and runs say as a child (not exec), so it is say's parent.
-mkdir -p $T/psparent && printf '#!/bin/sh\n[ "$*" = "-o ppid=,tty= -p $(cat %s/psparent.pid)" ] && exit 1\nexec /bin/ps "$@"\n' "$T" > $T/psparent/ps && chmod +x $T/psparent/ps
+mkdir -p $T/psparent && printf '#!/bin/sh\ncase "$*" in "-o ppid="*" -p $(cat %s/psparent.pid)") exit 1 ;; esac\nexec /bin/ps "$@"\n' "$T" > $T/psparent/ps && chmod +x $T/psparent/ps
 n=$(wc -l < $T/state/messages.log); k=$(wc -c < $T/keys-w1.log)
 pout=$(PATH=$T/psparent:$PATH sh -c 'echo $$ > "$1/psparent.pid"; env -u TEAM_ROLE "$2" -c "$1/team.yaml" say w1 "ps cannot read the parent"; rc=$?; exit $rc' sh "$T" "$S" 2>&1); rc=$?; sleep 1
 [ $rc -ne 0 ] && echo "$pout" | grep -q "ps could not read" && lastlog '?' w1 'ps cannot read the parent' && [ "$(wc -c < $T/keys-w1.log)" = "$k" ] &&
@@ -633,10 +639,10 @@ tmux send-keys -t '=tt-w1:' -l "!env -u TEAM_ROLE $S -c $T/other.yaml say em 'fr
 waitlog "$n"; sleep 1
 lastlog '?' em 'from a seat of another team' && grep -q "a seat of another team" $T/other.out &&
   ok "say with TEAM_ROLE unset from a seat of another team is refused, not [from owner]" || { bad "say from another team's seat"; tail -1 $T/state/messages.log; cat $T/other.out; }
-# A pane of em's with an empty tty (tmux prints the line " tt-em") matches no caller: say from a pane
+# A pane of em's with an empty tty (tmux prints the line "<server pid>  tt-em") matches no caller: say from a pane
 # that is not a seat, whose ancestors share one tty (so its tty list has two spaces in a row), is
 # still the owner, never em.
-mkdir -p $T/ttyless && printf '#!/bin/sh\n[ "$1" = list-panes ] && printf " tt-em\\n"\nexec %s "$@"\n' "$(command -v tmux)" > $T/ttyless/tmux && chmod +x $T/ttyless/tmux
+mkdir -p $T/ttyless && printf '#!/bin/sh\n[ "$1" = list-panes ] && printf "%%s  tt-em\\n" "$(%s list-panes -a -F "#{pid}" | head -1)"\nexec %s "$@"\n' "$(command -v tmux)" "$(command -v tmux)" > $T/ttyless/tmux && chmod +x $T/ttyless/tmux
 n=$(wc -l < $T/state/messages.log)
 tmux new-session -d -s tt-ttyless "PATH=$T/ttyless:\$PATH env -u TEAM_ROLE $S -c $T/team.yaml say w1 'beside a pane with no tty'; sleep 30"
 waitlog "$n"; sleep 1; tmux kill-session -t '=tt-ttyless' 2>/dev/null
@@ -647,6 +653,54 @@ n=$(wc -l < $T/state/messages.log)
 TEAM_ROLE=w1 $S -c $T/team.yaml say w1 "to myself" >/dev/null 2>&1; rc=$?
 [ $rc -ne 0 ] && [ "$(wc -l < $T/state/messages.log)" -eq $((n + 1)) ] && lastlog w1 w1 'to myself' &&
   ok "say from a seat to itself is refused and logged NOT-DELIVERED" || { bad "say to itself (rc=$rc)"; tail -1 $T/state/messages.log; }
+echo "--- say across tmux servers (#115): never [from owner] from a pane of another server"
+# Server 2 is a live-env environment (test/live-env.sh) with one stand-in seat on it, tx-em, of a
+# copy of the team with prefix tx. Its log is the environment's own.
+LIVE_D=$($SRC/test/live-env.sh new); XLOG=$LIVE_D/state/messages.log
+lenv() { $SRC/test/live-env.sh run "$LIVE_D" "$@"; }
+sed 's/^  prefix: tt$/  prefix: tx/' $T/team.yaml > $T/xs.yaml
+lenv $S -c $T/xs.yaml up --no-view em >/dev/null 2>&1; sleep 2; touch $XLOG $T/keys-em.log
+lenv tmux has-session -t '=tx-em' 2>/dev/null && ok "a stand-in seat runs on a second tmux server (live-env)" || bad "seat on the second server"
+# waitfile <file> <lines before>: wait up to 10s for a line to be appended to the file.
+waitfile() { local i; for i in $(seq 1 20); do [ "$(wc -l < "$1")" -gt "$2" ] && return 0; sleep 0.5; done; return 1; }
+# 1. Inside seat w1 (server 1), say addressed to server 2 with TEAM_ROLE unset: refused, no keys.
+n=$(wc -l < $XLOG); k=$(wc -c < $T/keys-em.log)
+tmux send-keys -t '=tt-w1:' -l "!env -u TEAM_ROLE -u TMUX TMUX_TMPDIR=$LIVE_D/tmux TEAM_STATE_DIR=$LIVE_D/state $S -c $T/xs.yaml say em 'from w1 to server 2' > $T/xs1.out 2>&1"; tmux send-keys -t '=tt-w1:' Enter
+waitfile $XLOG "$n"; sleep 1
+[ "$(tail -1 $XLOG | cut -f2-5)" = "?	em	NOT-DELIVERED	from w1 to server 2" ] && [ "$(wc -c < $T/keys-em.log)" = "$k" ] && grep -q "another tmux server" $T/xs1.out &&
+  ok "say with TEAM_ROLE unset from a seat on one tmux server to another is refused (no keys, NOT-DELIVERED), not [from owner]" || { bad "say from a seat to another server"; tail -1 $XLOG; cat $T/xs1.out; }
+# 2. A plain pane on server 2, say addressed to server 1 with TEAM_ROLE unset: refused, no keys.
+n=$(wc -l < $T/state/messages.log); k=$(wc -c < $T/keys-w1.log)
+lenv tmux new-session -d -s tx-plain "env -u TEAM_ROLE -u TMUX TMUX_TMPDIR=$T/tmux TEAM_STATE_DIR=$T/state $S -c $T/team.yaml say w1 'from a pane on server 2' > $T/xs2.out 2>&1; sleep 30"
+waitlog "$n"; sleep 1; lenv tmux kill-session -t '=tx-plain' 2>/dev/null
+lastlog '?' w1 'from a pane on server 2' && [ "$(wc -c < $T/keys-w1.log)" = "$k" ] && grep -q "another tmux server" $T/xs2.out && grep -q "terminal outside tmux" $T/xs2.out &&
+  ok "say with TEAM_ROLE unset from a pane of another tmux server is refused, naming a terminal outside tmux" || { bad "say from a pane of another server"; tail -1 $T/state/messages.log; cat $T/xs2.out; }
+# 3. A driver: inside seat w1, through live-env run, say to the seat on server 2 is [from live-test].
+n=$(wc -l < $XLOG); k=$(wc -c < $T/keys-em.log)
+tmux send-keys -t '=tt-w1:' -l "!$SRC/test/live-env.sh run $LIVE_D $S -c $T/xs.yaml say em 'driven through live-env' > $T/xs3.out 2>&1"; tmux send-keys -t '=tt-w1:' Enter
+waitfile $XLOG "$n"; sleep 1
+[ "$(tail -1 $XLOG | cut -f2-4)" = "live-test	em	delivered" ] && tail -c +$((k + 1)) $T/keys-em.log | grep -qF "[from live-test] driven through live-env" &&
+  ok "a live-env driver inside a seat sends as [from live-test], logged live-test" || { bad "live-env driver label"; tail -1 $XLOG; cat $T/xs3.out; }
+# 4. live-test addressed to the default server is refused before say runs any tmux command: TMUX and
+# TMUX_TMPDIR unset, and a stand-in tmux first on PATH that records every call and runs none. The team
+# file here is a throwaway one, which say refuses on the default server anyway (#105), so
+# --default-socket lets say past that guard to show that live-test is refused on its own.
+mkdir -p $T/rec && printf '#!/bin/sh\necho "tmux $*" >> %s/rec.log\nexit 1\n' "$T" > $T/rec/tmux && chmod +x $T/rec/tmux; rm -f $T/rec.log
+n=$(wc -l < $T/state/messages.log)
+out=$(env -u TMUX -u TMUX_TMPDIR PATH="$T/rec:$PATH" TEAM_ROLE=live-test $S -c $T/team.yaml say --default-socket w1 "live-test to the default server" 2>&1); rc=$?
+[ $rc -ne 0 ] && [ ! -e $T/rec.log ] && lastlog live-test w1 'live-test to the default server' && echo "$out" | grep -q "default tmux server" &&
+  ok "TEAM_ROLE=live-test addressed to the default tmux server is refused before any tmux command, logged NOT-DELIVERED" || { bad "live-test on the default server (rc=$rc)"; echo "$out"; cat $T/rec.log 2>&1; tail -1 $T/state/messages.log; }
+# 5. This test's own process: when a tmux server is among its ancestors (run from a seat), say with
+# TEAM_ROLE unset from it is refused. Run from a plain terminal, it has none, and this is not asserted.
+anc_tmux() { local p=$$ pp c; while [ "$p" -gt 1 ]; do read -r pp c < <(ps -o ppid=,comm= -p "$p") || return 1
+  case ${c##*/} in tmux|tmux:*|"tmux "*) return 0 ;; esac; p=$pp; done; return 1; }
+if anc_tmux; then
+  n=$(wc -l < $T/state/messages.log); k=$(wc -c < $T/keys-w1.log)
+  out=$(env -u TEAM_ROLE $S -c $T/team.yaml say w1 "from the test process inside tmux" 2>&1); rc=$?; sleep 1
+  [ $rc -ne 0 ] && lastlog '?' w1 'from the test process inside tmux' && [ "$(wc -c < $T/keys-w1.log)" = "$k" ] && echo "$out" | grep -q "another tmux server" &&
+    ok "say with TEAM_ROLE unset from this test's process, inside another tmux server's pane, is refused" || { bad "say from the test process inside tmux (rc=$rc)"; echo "$out"; tail -1 $T/state/messages.log; }
+else echo "NOTE no tmux server among this test's ancestors (not run from a tmux pane): the test-process case is not asserted"; fi
+lenv $S -c $T/xs.yaml down --yes >/dev/null 2>&1; $SRC/test/live-env.sh down "$LIVE_D"; [ ! -e "$LIVE_D" ] && LIVE_D= && ok "the live-env environment is removed" || bad "live-env down"
 echo "--- say refuses a TEAM_ROLE that is not a sender of this team (#89)"
 # notsender <TEAM_ROLE> <what>: say exits non-zero naming TEAM_ROLE, sends w1 no keys at all, and
 # logs one NOT-DELIVERED line whose sender field is the value, escaped.
@@ -1545,8 +1599,9 @@ lereal=$(cd "$le" 2>/dev/null && pwd -P)
 got=$(TMUX=$DEFSOCK,1,0 TMUX_TMPDIR=/tmp TEAM_STATE_DIR=/somewhere $LE run "$le" sh -c 'printf "%s|%s|%s|%s" "${TMUX-unset}" "$TMUX_TMPDIR" "$TEAM_STATE_DIR" "$TEAM_VIEW"' 2>&1)
 [ "$got" = "unset|$lereal/tmux|$lereal/state|0" ] && ok "live-env run: TMUX unset, TMUX_TMPDIR and TEAM_STATE_DIR (resolved) in the environment, TEAM_VIEW=0, whatever the caller had" || bad "live-env run environment: $got"
 # A seat has its real team in TEAM_CONFIG, which factory.sh uses when -c is missing: run must drop it.
+# Its role gives way to the driver label live-test (#115).
 got=$(TEAM_CONFIG=$T/team.yaml TEAM_ROLE=em TEAM_SCRIPT=$S $LE run "$le" sh -c 'printf "%s|%s|%s" "${TEAM_CONFIG-unset}" "${TEAM_ROLE-unset}" "${TEAM_SCRIPT-unset}"' 2>&1)
-[ "$got" = "unset|unset|unset" ] && ok "live-env run: TEAM_CONFIG, TEAM_ROLE and TEAM_SCRIPT of the calling seat are unset" || bad "live-env run seat variables: $got"
+[ "$got" = "unset|live-test|unset" ] && ok "live-env run: TEAM_CONFIG and TEAM_SCRIPT of the calling seat are unset, and TEAM_ROLE is live-test" || bad "live-env run seat variables: $got"
 # A relative folder must reach the command as an absolute one, or a command that changes directory sends tmux to /tmp.
 got=$(cd "$(dirname "$le")" && $LE run "$(basename "$le")" sh -c 'cd / && printf "%s|%s" "$TMUX_TMPDIR" "$TEAM_STATE_DIR"' 2>&1)
 [ "$got" = "$lereal/tmux|$lereal/state" ] && ok "live-env run: a relative folder is exported as its absolute, resolved path" || bad "live-env run with a relative folder: $got"

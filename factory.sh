@@ -913,64 +913,84 @@ log_field() {
 # terminal: that child and its descendants have no tty, but the claude process above them still
 # holds its pane's tty. A pane that is not a seat's (the owner's own tmux pane) matches no seat.
 #
-# It fails closed (status 1, the reason on stdout) whenever it cannot tell (#97): when ps cannot
-# read this process or any of its ancestors; when an ancestor has a tty but tmux cannot list its panes (only a process with
-# no tty at all is taken to be outside tmux); and when the tty is a pane of a seat of another team
-# on this server (its session sets TEAM_ROLE, as up sets it for every seat), which is a seat but has
-# no role in this team to be labelled with.
+# It fails closed (status 1, the reason on stdout) whenever it cannot tell (#97):
+# - ps cannot read this process or any of its ancestors;
+# - an ancestor has a tty but tmux cannot list its panes (only a process with no tty and no tmux
+#   server above it is taken to be outside tmux);
+# - the tty is a pane of a seat of another team on this server (its session sets TEAM_ROLE, as up
+#   sets it for every seat), which is a seat but has no role in this team to be labelled with;
+# - a tmux server is among the ancestors and it is not the server say addresses (#115): this runs
+#   in a pane of another server, whose seats this server's pane list cannot show. That covers a seat
+#   of any team on any other server, and also the owner's own pane there, who can run say from a
+#   terminal outside tmux instead (TEAM_ROLE=owner is refused). A live-test driver sets
+#   TEAM_ROLE=live-test (test/live-env.sh run does), so this check does not apply to it.
 #
 # This catches mislabelling by accident only, and labels are not authenticated (#29). A process
-# escapes the check whenever none of its ancestors holds the tty of a seat's pane on the tmux server
-# say addresses (the one its tmux commands reach) when it runs: one that
-# leaves the session (setsid) and outlives its parent; any background job (`&`, nohup, disown) that
-# outlives the tool call that started it, since its parent exits and it is re-parented to launchd;
-# anything started by launchd, cron or `tmux run-shell`; a command in a new tmux session or
-# window a seat opens, whose ancestor is the tmux server and whose session does not set TEAM_ROLE;
-# and a seat of any team on another tmux server, such as a seat that runs test/live-env.sh run
-# (TMUX unset, TMUX_TMPDIR at a private server), since only the addressed server's panes are listed.
-# All of these are labelled [from owner].
+# escapes the check whenever, when it runs, none of its ancestors is a tmux server other than the
+# one say addresses and none holds the tty of a seat's pane on that one: a process that leaves the
+# session (setsid) and outlives its parent; any background job (`&`, nohup, disown) that outlives
+# the tool call that started it, since its parent exits and it is re-parented to launchd; anything
+# started by launchd or cron; and a command in a new tmux session or window, or a `tmux run-shell`,
+# that a seat starts on the server say addresses, whose ancestor is that server and whose session
+# does not set TEAM_ROLE. All of these are labelled [from owner].
 #
 # A pane belongs to a seat when its session has the seat's session name; nothing checks that up
 # started that session (#97). That is deliberate: say delivers to a seat by the same session name,
 # so a session holding that name is the seat as far as say is concerned, and a stricter test (the
 # session's TEAM_ROLE) is one anyone able to create the session can pass too.
 caller_seat() {
-  local pid=$$ ppid tty ttys="" panes line sess name n=0 r
+  local pid=$$ ppid tty comm ttys="" srvs="" panes line srv sess name n=0 r
+  local adv="set TEAM_ROLE to your role id"
   while [ "$pid" -gt 1 ] && [ $n -lt 100 ]; do
-    read -r ppid tty < <(ps -o ppid=,tty= -p "$pid" 2>/dev/null) || ppid=""
+    # comm last: a command's name may hold spaces, and read gives the last field the rest.
+    read -r ppid tty comm < <(ps -o ppid=,tty=,comm= -p "$pid" 2>/dev/null) || ppid=""
     # A walk ends at pid 1 without asking ps, so ps failing at any depth means it could not read
     # this process or an ancestor (one that exited mid-walk, say): refuse, whatever ttys were seen.
     if [ -z "$ppid" ]; then
-      [ $n -eq 0 ] && echo "ps could not read this process, so say cannot tell whether it runs inside a seat" ||
-        echo "ps could not read an ancestor of this process (pid $pid), so say cannot tell whether it runs inside a seat"
+      [ $n -eq 0 ] && echo "ps could not read this process, so say cannot tell whether it runs inside a seat; $adv" ||
+        echo "ps could not read an ancestor of this process (pid $pid), so say cannot tell whether it runs inside a seat; $adv"
       return 1
     fi
     case $tty in ""|"?"|"??") ;; *) ttys="$ttys ${tty#/dev/} " ;; esac
+    # A tmux server: macOS shows the executable's name, and Linux may show the title it sets
+    # ("tmux: server").
+    case ${comm##*/} in tmux|tmux:*|"tmux "*) srvs="$srvs $pid" ;; esac
     pid=$ppid; n=$((n + 1))
   done
-  [ -n "$ttys" ] || return 0
-  panes=$(tmux list-panes -a -F '#{pane_tty} #{session_name}' 2>/dev/null) ||
-    { echo "tmux could not list its panes, so say cannot tell whether this runs inside a seat"; return 1; }
-  # Each line is split at its first space, not with read: read drops leading blanks, so a pane
-  # with an empty tty would shift the session name into the tty field. The session name may hold
-  # spaces. A pane with no tty matches no caller: an empty tty would match any tty list that has
-  # two spaces in a row, which every list of two or more ttys has.
+  [ -n "$ttys$srvs" ] || return 0
+  # Each line is "<server pid> <pane tty> <session name>". #{pid} is the pid of the server this
+  # list comes from, the one say addresses, so no other tmux command is needed to learn it.
+  panes=$(tmux list-panes -a -F '#{pid} #{pane_tty} #{session_name}' 2>/dev/null) ||
+    { echo "tmux could not list its panes, so say cannot tell whether this runs inside a seat; $adv"; return 1; }
+  srv=${panes%%$'\n'*}; srv=${srv%% *}
+  if [ -n "$srvs" ]; then
+    case $srv in ""|*[!0-9]*) echo "tmux did not report its server's pid, so say cannot tell whether this runs inside a seat; $adv"; return 1 ;; esac
+    for r in $srvs; do
+      [ "$r" = "$srv" ] && continue
+      echo "this runs inside a pane of another tmux server (pid $r) than the one say addresses (pid $srv), whose seats say cannot see; $adv, or run say from a terminal outside tmux"
+      return 1
+    done
+  fi
+  # Each line is split at its spaces with parameter expansion, not with read: read drops leading
+  # blanks, so a pane with an empty tty would shift the session name into the tty field. The
+  # session name may hold spaces. A pane with no tty matches no caller: an empty tty would match
+  # any tty list that has two spaces in a row, which every list of two or more ttys has.
   for r in $ROLES; do
     sess=$(session "$r")
     while IFS= read -r line; do
-      tty=${line%% *}; name=${line#* }
+      line=${line#* }; tty=${line%% *}; name=${line#* }
       [ -n "$tty" ] && [ "$name" = "$sess" ] || continue
       case $ttys in *" ${tty#/dev/} "*) echo "$r"; return 0 ;; esac
     done <<<"$panes"
   done
   while IFS= read -r line; do
-    tty=${line%% *}; name=${line#* }
+    line=${line#* }; tty=${line%% *}; name=${line#* }
     [ -n "$tty" ] || continue
     case $ttys in *" ${tty#/dev/} "*) ;; *) continue ;; esac
     r=$(tmux show-environment -t "=$name" 2>/dev/null) ||
-      { echo "tmux could not read the environment of session '$(log_field "$name")', so say cannot tell whether this runs inside a seat"; return 1; }
+      { echo "tmux could not read the environment of session '$(log_field "$name")', so say cannot tell whether this runs inside a seat; $adv"; return 1; }
     case $'\n'$r in *$'\nTEAM_ROLE='*)
-      echo "this runs inside session '$(log_field "$name")', a seat of another team (its session sets TEAM_ROLE)"; return 1 ;;
+      echo "this runs inside session '$(log_field "$name")', a seat of another team (its session sets TEAM_ROLE); $adv"; return 1 ;;
     esac
   done <<<"$panes"
 }
@@ -981,11 +1001,22 @@ caller_seat() {
 # label) is refused rather than shown. owner and launcher are refused even if a team file names
 # them as roles: [from owner] is the owner's (given only when TEAM_ROLE is unset, outside every
 # seat) and [from launcher] is the kickoff's. The value is shown escaped, never as it is.
+#
+# live-test is the one sender that is not a role id (#115): test/live-env.sh run sets it, so a live
+# test driven from a seat says [from live-test] rather than being refused or labelled owner. A role
+# id cannot hold a hyphen, so no seat can have it. It is refused when say addresses the default tmux
+# server, where the real team runs, so that team never sees it. This is worked out from TMUX and
+# TMUX_TMPDIR alone (tmux_socket), before say runs any tmux command; a real team the owner runs
+# on another server is not told apart from a test team and can still receive it.
 sender_refusal() {
   local r
   case $1 in
     owner) echo "TEAM_ROLE 'owner' is reserved: [from owner] is used only when TEAM_ROLE is unset, outside every seat"; return ;;
     launcher) echo "TEAM_ROLE 'launcher' is reserved for the kickoff's [from launcher] label"; return ;;
+    live-test)
+      [ "$(tmux_socket)" != "$(default_tmux_socket)" ] ||
+        echo "TEAM_ROLE 'live-test' is for live tests on a private tmux server (test/live-env.sh run), and this say addresses the default tmux server ($(default_tmux_socket)), where the real team runs"
+      return ;;
   esac
   for r in $ROLES; do [ "$r" = "$1" ] && return; done
   echo "TEAM_ROLE '$(log_field "$1")' is not a role id of this team (roles: $ROLES); set it to your role id"
@@ -999,8 +1030,9 @@ cmd_say() {
   [ "$to" = all ] || check_role "$to"
   # Inside a seat, a message without TEAM_ROLE goes out under that seat's role, never as the owner's.
   if [ -z "$from" ]; then
-    # A refusal goes through the logged path below like any other (#97), under the sender '?'.
-    if from=$(caller_seat); then from=${from:-owner}; else why="$from; set TEAM_ROLE to your role id"; from='?'; fi
+    # A refusal goes through the logged path below like any other (#97), under the sender '?'. The
+    # reason says what to do.
+    if from=$(caller_seat); then from=${from:-owner}; else why=$from; from='?'; fi
   else
     why=$(sender_refusal "$from")
   fi
