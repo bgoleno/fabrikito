@@ -64,9 +64,10 @@ a good start.
   `(inherit)` where the seat takes them from `~/.claude/settings.json`.
 - To see what a team costs, run `/usage` in a seat. Its Session block counts that seat's own tokens
   (its dollar figure is a list-price estimate, meaningful on API billing). On a subscription it also
-  shows the plan usage bars, which every seat draws on, and a breakdown of recent usage from this
-  machine's session history, so it covers all the seats together. See
-  [Manage costs](https://code.claude.com/docs/en/costs).
+  shows the plan usage bars, which every seat draws on, and a breakdown (by skill, subagent, plugin
+  and MCP server, with recommendations) of recent usage computed from this machine's session history.
+  That covers all the seats together, but also every other Claude Code session on the machine, and it
+  is not split by seat. See [Manage costs](https://code.claude.com/docs/en/costs).
 
 ## The team file
 
