@@ -62,11 +62,14 @@ role prompt wins. The skill is read-only: it changes nothing, sends nothing and 
 5. **Mergeable.** `mergeable` is often `UNKNOWN` on the first ask, because GitHub computes it
    lazily. Ask once more with `gh pr view <n> -R <repo> --json mergeable` before you report it. If
    it is still `UNKNOWN`, say so. Do not report it as clean.
-6. **Who owes the next move,** for each PR. Name exactly one seat (or the owner) and the action:
-   - the author: for a conflict, a requested change, a missing gate run at the head, or an update
-     with the base;
-   - a reviewer: for a verdict missing or stale at the current head;
-   - the owner, or you under a standing instruction your role prompt accepts: once your role
+6. **Who owes the next move,** for each PR. Name every seat that owes an action at the current
+   head, each with its action:
+   - The author, alone, for a conflict, a requested change, a missing gate run at the head, or an
+     update with the base. Until that is done, a reviewer's verdict at this head would be wasted.
+   - Otherwise, every reviewer whose verdict is missing or stale at the current head. Reviewers
+     often owe in parallel (`sec` and `qa` at the same head). Name each one: one name would hide
+     the others.
+   - The owner, or you under a standing instruction your role prompt accepts, once your role
      prompt's ready bar is met at one head.
 
    The author of a PR is the seat its issue was assigned to. Seats share one account, so the PR's
@@ -76,7 +79,8 @@ role prompt wins. The skill is read-only: it changes nothing, sends nothing and 
 - **Seats:** one line each: role, session, state, and what it holds.
 - **PRs:** one line each, most urgent first: number, issue, head (7 characters), verdicts at that
   head (stale ones marked), gate at that head, up to date or behind, mergeable, and then
-  `next: <who> to <do what>`.
+  `next: <who> to <do what>`, with one `<who> to <do what>` for each seat that owes a move, separated
+  by `;`.
 - **For the owner:** at most five lines. Lead with what needs the owner: PRs ready to merge, and
   decisions waiting. Then what changed and what is blocked. Name each PR by its full URL.
 
