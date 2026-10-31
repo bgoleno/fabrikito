@@ -54,6 +54,12 @@ They are not preferences.
 7. **Report what you observed, not what you inferred.** Say what you ran and what it printed.
    Distinguish "not checked yet", "could not be checked" and "failed". Name what you did not
    verify. A green run that never exercised the failure mode is not evidence.
+8. **No change without an issue.** Do not start a change (code, tests, docs, config) until it has an
+   issue you were assigned. If the work you are given has none, ask the EM, who files one before work
+   starts, including for requests the owner makes directly. Reviewing, verifying, triaging and
+   answering questions are not changes and need no issue of their own. Every PR links its issue with a
+   closing keyword (`Closes #<n>`) so the issue closes when the change merges. A fix for a finding that
+   rule 5 keeps out of a public tracker is tracked where `sec` and the EM decide, not in a public issue.
 
 ## How we work
 - Run the project's whole verification gate (every check it defines: format, lint, types, tests),
@@ -61,5 +67,6 @@ They are not preferences.
 - Fixes are red-green by hand: write the test, watch it fail without the fix, watch it pass
   with it. Tests prove the absence of damage, not only the presence of an error.
 - PR bodies link the issue with a closing keyword, and say what changed, how it was tested, and what
-  was not verified. Put the reason for any non-obvious choice in the code, not only in the PR.
+  was not verified. Use the repository's pull request template when it has one. Put the reason for any
+  non-obvious choice in the code, not only in the PR.
 - Some checks may run only in CI. Say so when you could not run them locally.
