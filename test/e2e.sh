@@ -58,7 +58,9 @@ printf '#!/bin/sh\necho "$TEAM_ROLE $(pwd -P) env=$(test -f .env.local && echo y
 #   prompt  a dialog, drawn instead of the box     output  lines drawn above the box
 #   mode    swallow (input never shows), below (a list under the box), prefill (text left in the box),
 #           suggest (a dim suggested prompt in the empty box), sticky (that suggestion stays drawn after
-#           any text), mixed (typed text and the dim suggestion)
+#           any text), mixed (typed text and the dim suggestion), mention (the @-mention list drawn
+#           above the box while its last word starts with @, no row highlighted, as after a paste),
+#           mentionsel (text "sel @sr" with the list's first row highlighted: Enter completes it)
 # A submitted line that starts with ! is run by /bin/sh the way Claude Code's Bash tool runs a
 # command: in a child that leaves the pane's terminal (setsid), so the child has no tty of its own
 # and only the stand-in, its parent, holds the pane's tty.
@@ -86,6 +88,21 @@ static int has(const char *what) {
   return access(path, R_OK) == 0;
 }
 static const char *RULE = "────────────────────────────────────────────────────────────";
+/* Claude Code 2.1.316's @-mention list, captured on 2026-10-30: drawn above the box's top rule,
+   each row indented two spaces in colour 246; a row picked with the arrow keys gets a ❯ in colour
+   153, and only then does Enter complete the mention instead of submitting. */
+static int mention_open(void) {
+  size_t i = blen;
+  if (strcmp(mode, "mention") && strcmp(mode, "mentionsel")) return 0;
+  while (i > 0 && buf[i - 1] != ' ' && buf[i - 1] != '\n') i--;
+  return i < blen && buf[i] == '@';
+}
+static void mention_list(void) {
+  const char *rows[] = { "+ src/", "+ src/beta.txt", "+ src/alpha.txt", "\xe2\x97\x87 example:skill:\xe2\x80\xa6 \xe2\x80\x93 requirements.txt" };
+  for (int i = 0; i < 4; i++)
+    if (i == 0 && !strcmp(mode, "mentionsel")) printf("  \033[38;5;153m\xe2\x9d\xaf %s\033[39m\r\n", rows[i]);
+    else printf("  \033[38;5;246m  %s\033[39m\r\n", rows[i]);
+}
 /* mode tall*: the input box as Claude Code 2.1.316 draws long text. Rows wrap at word boundaries
    with a 2-space indent; the box shows at most max(3, (terminal rows - 10) / 2) rows and scrolls to
    keep the end in view, with the prompt on the first VISIBLE row and no scroll marker. tall-dim
@@ -119,6 +136,7 @@ static void draw(void) {
   fwrite(hist, 1, hlen, stdout);
   if (has("prompt")) { cat("prompt"); fflush(stdout); return; }
   cat("output");
+  if (mention_open()) mention_list();
   if (name[0]) printf("────────────────────────────────────────── %s ──\r\n\xe2\x9d\xaf\xc2\xa0", name);
   else printf("%s\r\n\xe2\x9d\xaf\xc2\xa0", RULE);
   if (!strncmp(mode, "tall", 4)) {
@@ -156,6 +174,7 @@ int main(int n, char **v) {
   if ((mf = fopen(path, "r"))) { if (fscanf(mf, "%63s", mode) != 1) mode[0] = 0; fclose(mf); }
   if (!strcmp(mode, "prefill")) blen = (size_t)snprintf(buf, sizeof buf, "leftover draft text");
   if (!strcmp(mode, "mixed")) blen = (size_t)snprintf(buf, sizeof buf, "typed text");
+  if (!strcmp(mode, "mentionsel")) blen = (size_t)snprintf(buf, sizeof buf, "sel @sr");
   size_t h = (size_t)snprintf(head, sizeof head, "FAKE-CLAUDE");
   for (int i = 1; i < n && h < sizeof head - 60; i++) h += (size_t)snprintf(head + h, sizeof head - h, " [%.50s]", v[i]);
   for (int i = 1; i + 1 < n; i++) if (!strcmp(v[i], "-n")) snprintf(name, sizeof name, "%s", v[i + 1]);
@@ -175,6 +194,10 @@ int main(int n, char **v) {
     if (!strcmp(mode, "swallow")) continue;
     if (b == '\r' || b == '\n') {
       if (paste) { if (blen < sizeof buf - 1) buf[blen++] = '\n'; }
+      else if (!strcmp(mode, "mentionsel") && mention_open()) {   /* Enter picks the highlighted row */
+        while (blen > 0 && buf[blen - 1] != '@') blen--;
+        blen += (size_t)snprintf(buf + blen, sizeof buf - blen, "src/");
+      }
       else {                                      /* submit: the transcript echoes it, the box empties */
         if (blen && buf[0] == '!' && fork() == 0) {
           int fd = open("/dev/null", O_RDWR);
@@ -196,7 +219,7 @@ int main(int n, char **v) {
 }
 C
 cc -o $T/bin/claude $T/c.c || { echo "no compiler"; exit 2; }
-printf '#!/bin/sh\necho "$TEAM_ROLE $1" >> %s/bin.log\nc=$1\nshift\necho "$TEAM_ROLE $*" >> %s/args.log\necho "$TEAM_ROLE DISABLE_AUTOUPDATER=${DISABLE_AUTOUPDATER-unset}" >> %s/env.log\nexport FAKE_KEYLOG=%s/keys-$TEAM_ROLE.log FAKE_FILES=%s/fake-$TEAM_ROLE\nexec "$c" "$@"\n' $T $T $T $T $T > $T/bin/wrap; chmod +x $T/bin/wrap
+printf '#!/bin/sh\necho "$TEAM_ROLE $1" >> %s/bin.log\nc=$1\nshift\necho "$TEAM_ROLE $*" >> %s/args.log\necho "$TEAM_ROLE DISABLE_AUTOUPDATER=${DISABLE_AUTOUPDATER-unset}" >> %s/env.log\necho "$TEAM_ROLE CLAUDE_CODE_DISABLE_AUTO_MEMORY=${CLAUDE_CODE_DISABLE_AUTO_MEMORY-unset}" >> %s/env.log\nexport FAKE_KEYLOG=%s/keys-$TEAM_ROLE.log FAKE_FILES=%s/fake-$TEAM_ROLE\nexec "$c" "$@"\n' $T $T $T $T $T $T > $T/bin/wrap; chmod +x $T/bin/wrap
 mkdir -p $T/proj
 cat > $T/team.yaml <<Y
 team: tt
@@ -216,7 +239,7 @@ roles:
   em: { title: Manager, workdir: { type: project, path: $T/proj }, prompt_text: "em prompt" }
   w1: { title: Worker One, model: sonnet, effort: low, permission_mode: default, gate_on_stop: true, workdir: { type: worktree }, prompt_text: "w1 prompt",
         permissions: { deny: ["Bash(gh pr merge *)", "Read(//**/.env)"], allow: ["Bash(make *)"] } }
-  w2: { title: Worker Two, workdir: { type: worktree }, prompt_text: "w2 prompt" }
+  w2: { title: Worker Two, auto_memory: true, workdir: { type: worktree }, prompt_text: "w2 prompt" }
 Y
 export PATH=$T/bin:$PATH
 # legacy worktree for w2, internal disk
@@ -343,6 +366,14 @@ grep -qx "em DISABLE_AUTOUPDATER=1" $T/env.log && grep -qx "w1 DISABLE_AUTOUPDAT
 noenv=""; for r in em w1; do ruby -rjson -e 'exit(JSON.parse(File.read(ARGV[0])).dig("env", "DISABLE_AUTOUPDATER") == "1" ? 0 : 1)' $T/state/settings/$r.json || noenv="$noenv $r"; done
 [ -z "$noenv" ] && ok "every seat's settings set env DISABLE_AUTOUPDATER=1" || bad "settings without env DISABLE_AUTOUPDATER=1:$noenv"
 ! tmux show-environment -g DISABLE_AUTOUPDATER >/dev/null 2>&1 && ! tmux show-environment -t '=tt-em:' DISABLE_AUTOUPDATER >/dev/null 2>&1 && ok "the variable is not in the tmux server's or the session's environment (other programs there are unaffected)" || bad "DISABLE_AUTOUPDATER leaked into tmux's environment"
+# Auto memory is shared by every worktree of the repo and loads into every session there (#71): it
+# is off in every seat unless the team file turns it on (w2 has auto_memory: true).
+grep -qx "em CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" $T/env.log && grep -qx "w1 CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" $T/env.log && ok "auto memory: em and w1 run with CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" || { bad "auto memory: seat environment"; grep AUTO_MEMORY $T/env.log; }
+am() { ruby -rjson -e 's = JSON.parse(STDIN.read); puts [s["autoMemoryEnabled"].inspect, s.dig("env", "CLAUDE_CODE_DISABLE_AUTO_MEMORY").inspect].join(" ")'; }
+[ "$(am < $T/state/settings/em.json)" = 'false "1"' ] && [ "$(am < $T/state/settings/w1.json)" = 'false "1"' ] && ok "auto memory: off by default in the generated settings (autoMemoryEnabled false, env CLAUDE_CODE_DISABLE_AUTO_MEMORY=1)" || { bad "auto memory: default settings"; am < $T/state/settings/em.json; am < $T/state/settings/w1.json; }
+$S -c $T/team.yaml check >/dev/null 2>&1 && [ "$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml settings w2 | am)" = 'nil nil' ] && ok "auto memory: auto_memory: true leaves both unset, so Claude Code's own settings decide" || { bad "auto memory: w2 settings"; TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml settings w2; }
+grep -qx "export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" $T/state/launch/em.sh && grep -qx "export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" $T/state/launch/w1.sh && ok "auto memory: the launch script exports the variable" || { bad "auto memory: launch scripts"; grep -H AUTO_MEMORY $T/state/launch/*.sh; }
+echo "$chk" | grep -qE "^em .* off +- " && echo "$chk" | grep -qE "^w1 .* off +on-stop " && echo "$chk" | grep -qE "^w2 .* \(inherit\) +- " && ok "check: MEMORY column (off for em and w1, (inherit) for w2)" || { bad "check MEMORY column"; echo "$chk" | grep -E "^(ROLE|em|w1|w2) "; }
 # Seats run the team's own copy of claude, made by up, never the shared install (#50).
 CP=$T/state/bin/claude-9.9.9/claude
 [ -x $CP ] && grep -qx "em $CP" $T/bin.log && grep -qx "w1 $CP" $T/bin.log && ok "seats run the team's copy of claude ($CP), made by up" || { bad "seats' claude copy"; cat $T/bin.log; ls -la $T/state/bin 2>&1; }
@@ -463,6 +494,43 @@ LC_ALL=C TEAM_ROLE=em $S -c $T/team-u.yaml say w2 'from a team with a non-ASCII 
 LC_ALL=C ruby $SRC/lib/team_config.rb $T/team-u.yaml render em 2>&1 | grep -qF $'em prompt, caf\xc3\xa9 \xe2\x80\xa6' \
   && LC_ALL=C ruby $SRC/lib/team_config.rb $T/team-u.yaml kickoff em 2>&1 | grep -qxF $'[from launcher] start, caf\xc3\xa9 \xe2\x80\xa6' \
   && ok "a non-ASCII prompt and kickoff come out byte for byte under LC_ALL=C" || bad "non-ASCII prompt or kickoff under LC_ALL=C"
+# Non-ASCII values from outside the team file too (#82): environment values, the home folder and the
+# team file's own folder are tagged by the locale, and under LC_ALL=C or with no locale a non-ASCII
+# byte in one stopped render (subst), settings (JSON) and check. The workdir and owner come from the
+# team file, which lives in a non-ASCII folder.
+E=$'\xc3\xa9'; mkdir -p "$T/dir$E" "$T/proj$E" "$T/home$E" "$T/state$E"; NT="$T/dir$E/team.yaml"
+E=$E P="$T/proj$E" ruby -pe '$_ = "owner: \"Zo#{ENV["E"]}\"\n" + $_ if $_.start_with?("team: ")
+  sub(/workdir: \{ type: project, path: \S+ \}, prompt_text: "em prompt"/) { %Q(workdir: { type: project, path: "#{ENV["P"]}" }, prompt_text: "em @@OWNER@@ @@WORKDIR@@ @@SCRIPT@@ @@LOG@@") }' $T/team.yaml > "$NT"
+# rn <C | none> <command> [VAR=value ...]: team_config.rb on that team under LC_ALL=C, or with no
+# locale at all (env -i: no LANG, no LC_*), with non-ASCII values for the variables it reads.
+rn() { local l=$1 c=$2; shift 2
+  set -- HOME="$T/home$E" TEAM_STATE_DIR="$T/state$E" TEAM_SCRIPT="$T/dir$E/factory.sh" TEAM_LOG="$T/state$E/messages.log" \
+    CLAUDE_CONFIG_DIR="$T/home$E/.claude" "$@"
+  # PATH is passed as one word: it can hold spaces.
+  if [ $l = C ]; then env LC_ALL=C "$@" ruby $SRC/lib/team_config.rb "$NT" $c em 2>&1
+  else env -i PATH="$PATH" "$@" ruby $SRC/lib/team_config.rb "$NT" $c em 2>&1; fi; }
+for l in C none; do
+  out=$(rn $l render); echo "$out" | grep -qxF "em Zo$E $T/proj$E $T/dir$E/factory.sh $T/state$E/messages.log" \
+    && ok "non-ASCII owner, workdir, TEAM_SCRIPT and TEAM_LOG render byte for byte ($l)" || { bad "non-ASCII render ($l)"; echo "$out" | tail -2; }
+  out=$(rn $l kickoff); echo "$out" | grep -qF "or Zo$E." && ok "the kickoff names the non-ASCII owner ($l)" || { bad "non-ASCII kickoff ($l)"; echo "$out" | tail -2; }
+  out=$(rn $l settings); echo "$out" | ruby -rjson -e 'd = JSON.parse(STDIN.read)["permissions"]["deny"]; exit(ARGV.all? { |w| d.include?(w) } ? 0 : 1)' \
+    "Edit(/$T/proj$E/.claude/settings.json)" "Edit(/$T/state$E/settings/**)" "Edit(/$T/home$E/.claude/settings.json)" "Edit(/$NT)" \
+    && ok "settings with a non-ASCII workdir, state folder, home, config folder and team file folder ($l)" || { bad "non-ASCII settings ($l)"; echo "$out" | tail -2; }
+  out=$(rn $l permissions_report); [ $? = 0 ] && echo "$out" | grep -qF "[em]" && ok "check's permission report with a non-ASCII home ($l)" || { bad "non-ASCII permissions_report ($l)"; echo "$out" | tail -2; }
+done
+# Invalid UTF-8 from outside is an error that names where it came from, not a Ruby backtrace.
+out=$(rn C render TEAM_SCRIPT=$'/x/\xff/factory.sh'); [ $? != 0 ] && echo "$out" | grep -qF "the environment variable TEAM_SCRIPT is not valid UTF-8" && ! echo "$out" | grep -q "Error)" \
+  && ok "an environment value that is not UTF-8 is refused, naming the variable" || { bad "invalid TEAM_SCRIPT"; echo "$out" | tail -2; }
+out=$(rn none settings HOME=$'/tmp/x\xff'); [ $? != 0 ] && echo "$out" | grep -qF "the home folder (HOME) is not valid UTF-8" && ! echo "$out" | grep -q "Error)" \
+  && ok "a home folder that is not UTF-8 is refused, naming HOME" || { bad "invalid HOME"; echo "$out" | tail -2; }
+# say validates and renders the whole team before it sends: from that team, under both locales.
+for l in C none; do
+  n=$(wc -l < $T/state/messages.log)
+  if [ $l = C ]; then LC_ALL=C HOME="$T/home$E" TEAM_ROLE=em $S -c "$NT" say w2 "from a non-ASCII team ($l)" >/dev/null 2>&1
+  else env -i PATH="$PATH" HOME="$T/home$E" TMUX_TMPDIR="$TMUX_TMPDIR" TEAM_STATE_DIR="$TEAM_STATE_DIR" TEAM_ROLE=em $S -c "$NT" say w2 "from a non-ASCII team ($l)" >/dev/null 2>&1; fi
+  [ "$(wc -l < $T/state/messages.log)" -eq $((n + 1)) ] && tail -1 $T/state/messages.log | grep -qF "from a non-ASCII team ($l)" \
+    && ok "say from a team with a non-ASCII workdir, owner and home ($l)" || { bad "say from a non-ASCII team ($l)"; tail -1 $T/state/messages.log; }
+done
 # The sender comes from TEAM_ROLE, which nothing validates: it is escaped like the message.
 n=$(wc -l < $T/state/messages.log)
 TEAM_ROLE=$'e\tm\nx' $S -c $T/team.yaml say w2 "from an odd sender" >/dev/null 2>&1
@@ -498,6 +566,8 @@ $S -c $T/team.yaml up --no-view w2 2>&1 | grep -E "start|error" | cut -c1-150
 case "$(git -C $T/repo worktree list)" in *"$VOL/$ROOT/team-w2"*) ok "w2 recreated on the volume";; *) bad "w2 recreated on the volume";; esac
 [ ! -d $T/repo/.claude/worktrees/team-w2 ] && ok "legacy w2 folder gone" || bad "legacy w2 folder gone"
 [ "$(grep -c '^w2 ' $T/boot.log)" = 1 ] && [ "$(grep -c '^w1 ' $T/boot.log)" = 1 ] && ok "repo.bootstrap runs once per new worktree: for w2 now, not again for w1" || { bad "repo.bootstrap runs"; cat $T/boot.log; }
+# w2 (auto_memory: true) starts only now: its launch script and environment leave auto memory alone.
+[ -f $T/state/launch/w2.sh ] && ! grep -q "export CLAUDE_CODE_DISABLE_AUTO_MEMORY" $T/state/launch/w2.sh && grep -qx "unset CLAUDE_CODE_DISABLE_AUTO_MEMORY" $T/state/launch/w2.sh && grep -qx "w2 CLAUDE_CODE_DISABLE_AUTO_MEMORY=unset" $T/env.log && ok "auto memory: w2 (auto_memory: true) runs without the variable: its launch script unsets it, whatever the tmux server holds" || { bad "auto memory: w2 launch"; grep AUTO_MEMORY $T/env.log; grep -H AUTO_MEMORY $T/state/launch/w2.sh 2>&1; }
 echo "--- status"; $S -c $T/team.yaml status | cut -c1-150
 echo "--- dirty legacy is refused"
 $S -c $T/team.yaml down --yes w1 >/dev/null; $S -c $T/team.yaml migrate w1 2>&1 | grep -c "removed 0" | grep -q 1 && true
@@ -534,7 +604,7 @@ echo "--- say delivers only to a seat showing its input box"
 # CLI that draws them differently shows up as a mismatch here. pu shows an invented select list
 # with no numbers and no key hint: any dialog say does not know must fail closed too.
 roles=""
-for r in pp pm pd ph pu pb pf ps pg px pk pq po ta tb tc td te; do roles="$roles  $r: { title: Seat $r, workdir: { type: project, path: $T/proj }, prompt_text: \"$r\" }
+for r in pp pm pd ph pu pb pf ps pg px pk pq po pn pz ta tb tc td te; do roles="$roles  $r: { title: Seat $r, workdir: { type: project, path: $T/proj }, prompt_text: \"$r\" }
 "; done
 cat > $T/tp.yaml <<Y
 team: tp
@@ -604,6 +674,7 @@ M
 echo tall > $T/fake-ta-mode.txt; echo tall > $T/fake-te-mode.txt; echo tall-dim > $T/fake-tb-mode.txt; echo tall-typed > $T/fake-tc-mode.txt; echo tall-short > $T/fake-td-mode.txt
 echo below > $T/fake-pb-mode.txt; echo prefill > $T/fake-pf-mode.txt; echo swallow > $T/fake-ps-mode.txt
 echo suggest > $T/fake-pg-mode.txt; echo mixed > $T/fake-px-mode.txt; echo sticky > $T/fake-pk-mode.txt
+echo mention > $T/fake-pn-mode.txt; echo mentionsel > $T/fake-pz-mode.txt
 { printf '%s\n' "$fake_prompt"; for i in $(seq 1 5); do echo "later output line $i"; done; } > $T/fake-pq-output.txt
 cat > $T/fake-po-output.txt <<'M'
 ⏺ The permission prompt asked "Do you want to proceed?" and the cursor sat on "❯ 1. Yes".
@@ -645,6 +716,17 @@ delivered pq "prompt text in the transcript above the box"
 delivered po "the seat's own output quoting prompt lines"
 TEAM_ROLE=em $S -c $T/tp.yaml say po "qa result: it asked 'Do you want to proceed?' with '❯ 1. Yes' and 'Esc to cancel · Tab to amend'" >/dev/null 2>&1; sleep 1
 delivered po "the message after one that quotes prompt text"
+# The @-mention list (#77). Claude Code 2.1.316 draws it above the box, and after a paste no row is
+# highlighted, so Enter submits the message as pasted; it completes the mention only when a row was
+# picked with the arrow keys, which leaves text in the box, and say refuses that before pasting.
+printf '%s' 'probe @src' | tmux load-buffer -b mn -; tmux paste-buffer -p -d -b mn -t '=tp-pn:'; sleep 1
+tmux capture-pane -p -t '=tp-pn:' | grep -qF '    + src/beta.txt' && ok "stand-in: a pasted message ending in an @ word opens the mention list above the box" || bad "stand-in: no mention list after the paste"
+tmux send-keys -t '=tp-pn:' C-u; sleep 1
+TEAM_ROLE=em $S -c $T/tp.yaml say pn "see @src" >/dev/null 2>&1; sleep 1
+mn=$(tmux capture-pane -p -t '=tp-pn:')
+echo "$mn" | grep -qF "❯ [from em] see @src" && ! echo "$mn" | grep -qF "see @src/" && tail -1 $T/state/messages.log | grep -q "	pn	delivered	see @src$" &&
+  ok "say delivers a message ending in an @ word whole (the mention list above the box is not read as footer)" || { bad "say to a seat with the mention list"; echo "$mn" | tail -8; tail -1 $T/state/messages.log; }
+refused pz "input box" "a seat whose box holds text with a highlighted @-mention row (Enter would complete it)"
 tmux copy-mode -t '=tp-pq:'; refused pq "copy mode" "a seat whose pane is in copy mode"; tmux send-keys -t '=tp-pq:' -X cancel
 # When tmux cannot read the seat's screen, say cannot tell what is up: it refuses.
 mkdir -p $T/shim && printf '#!/bin/sh\n[ "$1" = capture-pane ] && exit 1\nexec %s "$@"\n' "$(command -v tmux)" > $T/shim/tmux && chmod +x $T/shim/tmux
@@ -805,6 +887,12 @@ nx=$(TEAM_STATE_DIR=$T/state8 $S -c $T/v.yaml up --no-view w5 2>&1); rc=$?
 [ -e $T/boot-started ] && [ $rc -eq 0 ] && echo "$nx" | grep -qF "is not marked set up" && [ "$(grep -c '^w5 ' $T/boot.log)" = 2 ] && tmux has-session -t '=tv-w5' 2>/dev/null &&
   ok "after a KILL mid-bootstrap, the next up finds the worktree unmarked and sets it up before it starts the seat" || { bad "up after a KILL (rc=$rc)"; echo "$nx" | tail -4; cat $T/boot.log; }
 TEAM_STATE_DIR=$T/state8 $S -c $T/v.yaml down --yes w5 >/dev/null 2>&1; git -C $T/repo worktree remove --force $VOL/$ROOT/team-w5 2>/dev/null
+reject "a non-boolean sessions.claude.auto_memory" "sessions.claude.auto_memory must be true or false" "auto_memory: maybe"
+reject "a non-boolean roles.<id>.auto_memory" "roles.em.auto_memory must be true or false" "" "" ", auto_memory: 1"
+mk "auto_memory: true" "" ", auto_memory: false"
+[ "$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml settings em | am)" = 'false "1"' ] && ok "auto memory: a role's auto_memory: false wins over sessions.claude.auto_memory: true" || bad "auto memory: role override"
+mk "auto_memory: true"
+$S -c $T/v.yaml check >/dev/null 2>&1 && [ "$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml settings em | am)" = 'nil nil' ] && ok "auto memory: sessions.claude.auto_memory: true turns it back on for every seat" || bad "auto memory: team switch"
 REPO_EXTRA='gate: "true"' reject "a non-boolean gate_on_stop" "gate_on_stop must be true or false" "" "" ", gate_on_stop: yes please"
 REPO_EXTRA='gate: ""' reject "an empty gate" "repo.gate must be a non-empty command" ""
 REPO_EXTRA='gate: "true", gate_timeout: 0' reject "a zero gate_timeout" "repo.gate_timeout must be a positive whole number of seconds" ""
@@ -911,7 +999,11 @@ held() {
   esac
 }
 w9() { echo "  w9: { title: N, workdir: { type: project, path: $T/proj }, prompt_text: \"p\"${1:+, $1} }" >> $T/v.yaml; }
-guard='"Bash(gh pr merge *)", "Bash(gh api *pulls/*/merge*)", "Bash(gh api graphql*mergePullRequest*)"'
+# The merge spellings tl chose in #85, in MERGE_PATTERNS order: as a YAML list (guard), and as
+# check names them (all; rest is all but the first).
+guard='"Bash(gh pr merge *)", "Bash(gh pr -* merge *)", "Bash(gh pr -* merge)", "Bash(gh api *pulls/*/merge*)", "Bash(gh api *repos/*/merges*)", "Bash(gh api graphql*mergePullRequest*)", "Bash(gh api graphql*enablePullRequestAutoMerge*)", "Bash(gh api graphql*mergeBranch*)"'
+rest='Bash(gh pr -* merge *), Bash(gh pr -* merge), Bash(gh api *pulls/*/merge*), Bash(gh api *repos/*/merges*), Bash(gh api graphql*mergePullRequest*), Bash(gh api graphql*enablePullRequestAutoMerge*), Bash(gh api graphql*mergeBranch*)'
+all="Bash(gh pr merge *), $rest"
 mk "permission_mode: bypassPermissions" "$(rule ask "$guard")"; w9 "permission_mode: auto"
 held "a bypass team with one auto seat" yes "w9 (auto)" "em (bypassPermissions)"
 mk "permission_mode: bypassPermissions" "$(rule ask "$guard")"; w9 "permission_mode: plan"
@@ -933,23 +1025,42 @@ mk "permission_mode: auto" "$(rule deny "$guard")"; w9
 $S -c $T/v.yaml check 2>&1 | grep -qF "warning: " && bad "team-wide merge deny: unexpected warning" || ok "a team-wide deny on the merge patterns: no merge warning"
 mk "permission_mode: auto" "" ", permissions: { ask: [$guard] }"; w9
 mw=$($S -c $T/v.yaml check 2>&1)
-echo "$mw" | grep -qF "warning: w9 could merge a PR without being asked: no deny or ask rule matches Bash(gh pr merge *), Bash(gh api *pulls/*/merge*), Bash(gh api graphql*mergePullRequest*)." && ! echo "$mw" | grep -q "warning: em could merge" && ok "a role added without a merge deny or ask is named, with every missing pattern" || { bad "merge warning for w9"; echo "$mw" | grep warning; }
+echo "$mw" | grep -qF "warning: w9 could merge a PR without being asked: no deny or ask rule matches $all." && ! echo "$mw" | grep -q "warning: em could merge" && ok "a role added without a merge deny or ask is named, with every missing pattern" || { bad "merge warning for w9"; echo "$mw" | grep warning; }
 mk "permission_mode: auto" "" ", permissions: { ask: [$guard] }"; w9 "may_merge: true"
 $S -c $T/v.yaml check 2>&1 | grep -qF "could merge" && bad "may_merge: true still warned" || ok "a role marked may_merge: true is not warned about"
 mk "permission_mode: auto" "" ', permissions: { deny: ["Bash(gh pr merge *)"] }'
 mw=$($S -c $T/v.yaml check 2>&1)
-echo "$mw" | grep -qF "no deny or ask rule matches Bash(gh api *pulls/*/merge*), Bash(gh api graphql*mergePullRequest*). " && ok "a partial merge deny: only the patterns still open are named" || { bad "partial merge deny"; echo "$mw" | grep warning; }
+echo "$mw" | grep -qF "no deny or ask rule matches $rest. " && ok "a partial merge deny: only the patterns still open are named" || { bad "partial merge deny"; echo "$mw" | grep warning; }
 mk "permission_mode: auto" "" ', permissions: { deny: ["Bash(gh *)"] }'
 $S -c $T/v.yaml check 2>&1 | grep -qF "could merge" && bad "a broader deny (Bash(gh *)) still warned" || ok "a broader rule that covers the patterns (Bash(gh *)) counts"
 mk "permission_mode: auto" "" ', permissions: { deny: ["Bash(gh pr merge 12*)", "Bash(gh api repos/x/y/pulls/1/merge*)", "Bash(gh api graphql -f q=mergePullRequest*)"] }'
-$S -c $T/v.yaml check 2>&1 | grep -qF "warning: em could merge a PR without being asked: no deny or ask rule matches Bash(gh pr merge *), Bash(gh api *pulls/*/merge*), Bash(gh api graphql*mergePullRequest*)." && ok "narrower rules that leave other merges open do not count" || bad "narrower merge rules counted as covering"
+$S -c $T/v.yaml check 2>&1 | grep -qF "warning: em could merge a PR without being asked: no deny or ask rule matches $all." && ok "narrower rules that leave other merges open do not count" || bad "narrower merge rules counted as covering"
 # The legacy :* form keeps the space before *: Bash(ls:*) is Bash(ls *) (permissions docs), so a rule
 # that stops mid-word covers nothing here, and the whole-word ones still cover.
 mk "permission_mode: auto" "" ', permissions: { deny: ["Bash(gh pr mer:*)", "Bash(gh ap:*)", "Bash(gh api graphq:*)"] }'
-$S -c $T/v.yaml check 2>&1 | grep -qF "warning: em could merge a PR without being asked: no deny or ask rule matches Bash(gh pr merge *), Bash(gh api *pulls/*/merge*), Bash(gh api graphql*mergePullRequest*)." && ok "legacy :* rules that stop mid-word (gh pr mer:*, gh ap:*, gh api graphq:*) do not count" || bad "legacy mid-word :* rules counted as covering"
-mk "permission_mode: auto" "" ', permissions: { deny: ["Bash(gh pr merge:*)", "Bash(gh api:*)"] }'
-$S -c $T/v.yaml check 2>&1 | grep -qF "could merge" && bad "whole-word legacy rules (gh pr merge:*, gh api:*) not counted" || ok "whole-word legacy :* rules (gh pr merge:*, gh api:*) count"
+$S -c $T/v.yaml check 2>&1 | grep -qF "warning: em could merge a PR without being asked: no deny or ask rule matches $all." && ok "legacy :* rules that stop mid-word (gh pr mer:*, gh ap:*, gh api graphq:*) do not count" || bad "legacy mid-word :* rules counted as covering"
+mk "permission_mode: auto" "" ', permissions: { deny: ["Bash(gh pr merge:*)", "Bash(gh pr -* merge:*)", "Bash(gh pr -* merge)", "Bash(gh api:*)"] }'
+$S -c $T/v.yaml check 2>&1 | grep -qF "could merge" && bad "whole-word legacy rules (gh pr merge:*, gh pr -* merge:*, gh api:*) not counted" || ok "whole-word legacy :* rules (gh pr merge:*, gh pr -* merge:*, gh api:*) count"
 reject "a non-boolean may_merge" "roles.em.may_merge must be true or false" "" "" ", may_merge: yes please"
+# Which commands the example team's merge rules catch (#85), through matching_rules, which reads a
+# rule as the permissions docs describe it. tl denies; em has the team-wide ask.
+mr() { ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml matching_rules "$@"; }
+spell() { local want=$1; shift; [ "$(mr tl "$1")" = "deny $want" ] && ok "merge spelling caught: $1 (deny $want)" || { bad "merge spelling not caught as $want: $1"; mr tl "$1"; }; }
+spell 'Bash(gh pr merge *)' 'gh pr merge 5 --squash'
+spell 'Bash(gh pr merge *)' 'gh pr merge'
+spell 'Bash(gh pr -* merge *)' 'gh pr -R o/r merge 5'
+spell 'Bash(gh pr -* merge *)' 'gh pr --repo o/r merge 5'
+spell 'Bash(gh pr -* merge *)' 'gh pr --repo=o/r merge 5 --squash'
+spell 'Bash(gh pr -* merge)' 'gh pr -R o/r merge'
+spell 'Bash(gh api *pulls/*/merge*)' 'gh api -X PUT repos/o/r/pulls/5/merge'
+spell 'Bash(gh api *repos/*/merges*)' 'gh api -X POST repos/o/r/merges -f base=main -f head=x'
+spell 'Bash(gh api graphql*mergePullRequest*)' 'gh api graphql -f query="mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }"'
+spell 'Bash(gh api graphql*enablePullRequestAutoMerge*)' 'gh api graphql -f query="mutation { enablePullRequestAutoMerge(input: {pullRequestId: \"x\"}) { clientMutationId } }"'
+spell 'Bash(gh api graphql*mergeBranch*)' 'gh api graphql -f query="mutation { mergeBranch(input: {repositoryId: \"x\", base: \"main\", head: \"y\"}) { clientMutationId } }"'
+[ "$(mr em 'gh pr -R o/r merge 5')" = "ask Bash(gh pr -* merge *)" ] && ok "merge spelling: em gets the team-wide ask" || { bad "em merge ask"; mr em 'gh pr -R o/r merge 5'; }
+for c in 'gh pr comment 83 --body "ready to merge"' 'gh pr view 5 --json mergeable,mergeStateStatus' 'gh pr -R o/r view 5 --json mergeable' 'gh pr comment 83 --body "gh pr merge 5 after review"'; do
+  [ -z "$(mr tl "$c")" ] && ok "innocent command not caught: $c" || { bad "innocent command caught: $c"; mr tl "$c"; }
+done
 # A quoted "yes" is a string, not a boolean. (An unquoted yes is YAML 1.1's true, and is accepted.)
 reject "a quoted \"yes\" for may_merge" "roles.em.may_merge must be true or false" "" "" ', may_merge: "yes"'
 echo "--- stop gate hook (lib/stop_gate.sh, run directly with hook input on stdin)"
