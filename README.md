@@ -106,11 +106,13 @@ permission modes. `bypassPermissions` is one class, and every other mode (`auto`
 | Any other Claude session on the machine to a seat | The same rule. |
 | The owner typing into an attached seat, or `say` | Not a cross-session message, so it is never held. |
 
-The sender gets a notice when a message is held, refused or expires. The prompt tells a seat in that
-case not to resend the content with `say`: a refusal is the receiver's decision, and a hold waits for a
-human in that pane. The seat reports it to the EM instead, with `say em` when the EM is the receiver or
-the report itself would be held. `say` is the seats' fallback only for a running seat that `ListAgents`
-does not show.
+The sender gets a notice when a message is held, refused or expires. The prompt tells a seat never to
+resend the content with `say`: a refusal is the receiver's decision, and a hold waits for a human in
+that pane. While a message to a seat is held, the sender does not use `say` to that seat at all, because
+its pane is showing the approval dialog; it waits for the notice that the message was delivered or
+expired. A refused or expired message is reported to the EM with `SendMessage`, or with `say em` if the
+EM was the receiver or the report was refused or expired too, and never with `say em` while a hold to
+the EM is pending. `say` is the seats' fallback only for a running seat that `ListAgents` does not show.
 
 To change the default, set `crossSessionInbound` to `accept`, `hold` or `refuse`. It is read from managed
 settings, then the `--settings` file, then user settings, and the first value found applies. A project or

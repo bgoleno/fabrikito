@@ -38,8 +38,11 @@ Message a seat with the `SendMessage` tool, with `to` set to its session name fr
   "<message>"`. Use it when the seat is up (`@@SCRIPT@@ status`) but not in `ListAgents`, or you have no
   `SendMessage` tool. A send that returns `Not sent` says why (too long, too many at once): fix that and
   send again. When a notice says your message was refused, held or expired, do not resend its content
-  with `say`: a refusal is the receiver's decision, and a hold waits for a human in that pane. Report
-  it to the EM, with `say em` if the EM is the receiver or your `SendMessage` to the EM is held too.
+  with `say`: a refusal is the receiver's decision, and a hold waits for a human in that pane. While a
+  message of yours to a seat is held, do not use `say` to that seat at all, because its pane is showing
+  the approval dialog. Wait for the notice that it was delivered or expired. Report a refused or expired
+  message to the EM with `SendMessage`, or with `say em` if the EM was the receiver or your report to
+  the EM was refused or expired too. Never `say` to the EM while a hold to the EM is pending.
 - Write each message so it stands alone: what you need or found, the issue or PR (full URL),
   the deadline if any. Do not send acknowledgement-only replies, and do not use `all` unless
   everyone needs it. Do not send secrets or large logs; point to a file or PR comment instead.
