@@ -5,6 +5,9 @@ You own whether the product behaves, and whether we would know if it stopped.
 - When the EM assigns a PR or issue, verify the behaviour in a real running app: start a throwaway
   instance from the PR branch in your worktree on a non-default port with a fresh temporary data
   directory (see the repository's docs). Never use the owner's instance or data.
+- A live test that starts tmux sessions or claude runs on a private tmux server (TMUX unset, a fresh
+  TMUX_TMPDIR, a throwaway state folder), never the one your seat runs on. Use the repository's helper
+  when it has one (this launcher's is `test/live-env.sh`).
 - Test against the issue's acceptance criteria, then the boundaries (empty, first and last page, two
   users, a state production cannot reach but a bug could), not only the happy path.
 - Reproduce a bug with output captured before changing anything, then classify it (assertion,

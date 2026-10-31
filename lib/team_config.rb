@@ -40,11 +40,31 @@ def read_utf8(path)
   die "#{path} is not valid UTF-8 (line #{line})"
 end
 
+# Strings from outside the team file are tagged by the locale too: environment values, the home
+# folder, the command line and the install folder come back US-ASCII or ASCII-8BIT under LC_ALL=C or
+# with no locale. One with a non-ASCII byte then clashes with the UTF-8 team file in a substitution,
+# a join or JSON (#82), so each is read as UTF-8 where it enters, and invalid UTF-8 stops with its
+# source named. Path functions keep UTF-8 when their inputs are UTF-8, so the entry points suffice.
+def utf8(s, source)
+  u = s.to_s.dup.force_encoding('UTF-8')
+  return u if u.valid_encoding?
+
+  die "#{source} is not valid UTF-8: #{u.scrub('?')}"
+end
+
+def env_utf8(name, default = nil)
+  ENV.key?(name) ? utf8(ENV[name], "the environment variable #{name}") : default
+end
+
+def home_utf8
+  utf8(Dir.home, 'the home folder (HOME)')
+end
+
 TOP_KEYS = %w[team owner repo project storage sessions display prompts kickoff permissions roles].freeze
 DISPLAY_KEYS = %w[iterm primary window].freeze
 PROJECT_KEYS = %w[name url].freeze
 EFFORTS = %w[low medium high xhigh max].freeze
-REPO_KEYS = %w[path github base gate gate_timeout gate_max_blocks].freeze
+REPO_KEYS = %w[path github base gate gate_timeout gate_max_blocks bootstrap copy].freeze
 STORAGE_KEYS = %w[volume root].freeze
 SESSION_KEYS = %w[prefix claude].freeze
 CLAUDE_KEYS = %w[wrapper args model effort permission_mode plugin auto_memory].freeze
@@ -58,7 +78,7 @@ PREFIX_RE = /\A[a-z0-9][a-z0-9-]*\z/.freeze
 SKILL_RE = /\A[A-Za-z0-9][A-Za-z0-9._-]*(:[A-Za-z0-9][A-Za-z0-9._-]*)?\z/.freeze
 
 # The folder factory.sh and this file are installed in.
-INSTALL = File.expand_path('..', __dir__)
+INSTALL = utf8(File.expand_path('..', __dir__), 'the install folder')
 
 # The factory's own plugin (skills, later agents and hooks). Each seat loads it with --plugin-dir, so it
 # reaches exactly the sessions factory.sh starts: seats work in the target project's folders, where this
@@ -108,10 +128,11 @@ RESERVED_FLAGS = {
 }.freeze
 
 # Folders factory.sh owns under the state folder: settings, launch and prompts are rewritten for every
-# start; bin holds the copies of claude the seats run, made by up when missing (#50). Seats may not
+# start; bin holds the copies of claude the seats run, made by up when missing (#50); setup holds the
+# mark up writes once a new worktree's repo.copy and repo.bootstrap have finished (#10). Seats may not
 # edit them (see protected_paths), so a folder added here is protected without further changes.
 # Files seats are meant to write (such as progress notes) belong in a folder that is not listed.
-GENERATED_DIRS = %w[settings launch prompts bin].freeze
+GENERATED_DIRS = %w[settings launch prompts bin setup].freeze
 
 # Folders under the state folder that hooks write, and seats must not: the gate's failure counter
 # lives in gate/, so a seat that could edit it could switch its own gate off. Protected like
@@ -211,7 +232,7 @@ class TeamConfig
   attr_reader :path, :dir
 
   def initialize(path)
-    @path = File.expand_path(path)
+    @path = utf8(File.expand_path(path), 'the team file path')
     @dir = File.dirname(@path)
     die "cannot read #{@path}" unless File.file?(@path)
     begin
@@ -223,7 +244,7 @@ class TeamConfig
   end
 
   def expand(p)
-    File.expand_path(p.to_s.sub(/\A~(?=\/|\z)/, Dir.home), @dir)
+    File.expand_path(p.to_s.sub(/\A~(?=\/|\z)/, home_utf8), @dir)
   end
 
   def section(name, allowed, required: true)
@@ -294,7 +315,7 @@ class TeamConfig
 
   def volume
 
-    File.expand_path(storage['volume'].to_s.sub(/\A~(?=\/|\z)/, Dir.home))
+    File.expand_path(storage['volume'].to_s.sub(/\A~(?=\/|\z)/, home_utf8))
 
   end
   def root
@@ -357,7 +378,7 @@ class TeamConfig
   def vars(id)
     {
       'TITLE' => title(id), 'ROLE' => id, 'SESSION' => session(id), 'PREFIX' => prefix,
-      'SCRIPT' => ENV.fetch('TEAM_SCRIPT', 'factory.sh'), 'LOG' => ENV.fetch('TEAM_LOG', 'messages.log'),
+      'SCRIPT' => env_utf8('TEAM_SCRIPT', 'factory.sh'), 'LOG' => env_utf8('TEAM_LOG', 'messages.log'),
       'REPO' => repo_path, 'WORKDIR' => workdir(id), 'WORKTREE_ROOT' => worktree_root,
       'VOLUME' => volume, 'GITHUB_REPO' => github, 'GITHUB_URL' => "https://github.com/#{github}",
       'PROJECT_NAME' => project['name'].to_s, 'PROJECT_URL' => project['url'].to_s, 'TEAM' => @c['team'].to_s, 'OWNER' => owner, 'ROSTER' => roster,
@@ -365,8 +386,10 @@ class TeamConfig
     }
   end
 
+  # Every value is checked as UTF-8 before it goes in, whatever produced it, so a value from a new
+  # source cannot bring back the encoding clash in gsub (#82).
   def subst(text, id)
-    v = vars(id)
+    v = vars(id).map { |k, s| [k, utf8(s, "the value of @@#{k}@@")] }.to_h
     out = text.gsub(/@@([A-Z_]+)@@/) { v.key?(Regexp.last_match(1)) ? v[Regexp.last_match(1)] : die("unknown placeholder @@#{Regexp.last_match(1)}@@ in a prompt") }
     out
   end
@@ -491,7 +514,7 @@ class TeamConfig
 
   # Generated prompts, launchers, settings and the message log live here.
   def state_dir
-    File.expand_path(ENV['TEAM_STATE_DIR'] || File.join(INSTALL, '.state', @c['team'].to_s))
+    File.expand_path(env_utf8('TEAM_STATE_DIR') || File.join(INSTALL, '.state', @c['team'].to_s))
   end
 
   # The seat's progress note (#5). Seats write it; up only makes its folder; nothing deletes it.
@@ -607,7 +630,7 @@ class TeamConfig
           end
       next if v.nil? || v.empty?
 
-      p = File.expand_path(v.sub(/\A~(?=\/|\z)/, Dir.home), workdir(id))
+      p = File.expand_path(v.sub(/\A~(?=\/|\z)/, home_utf8), workdir(id))
       p.downcase.end_with?('.zip') ? p : File.join(p, '**')
     end.compact
   end
@@ -631,10 +654,10 @@ class TeamConfig
   # each seat's launch script pins the same value (or unsets it), so a seat uses the folder its rules
   # protect, whatever the tmux server's own environment holds.
   def claude_config_paths
-    dir = ENV['CLAUDE_CONFIG_DIR'].to_s
-    return [File.join(Dir.home, '.claude'), File.join(Dir.home, '.claude.json')] if dir.empty?
+    dir = env_utf8('CLAUDE_CONFIG_DIR').to_s
+    return [File.join(home_utf8, '.claude'), File.join(home_utf8, '.claude.json')] if dir.empty?
 
-    dir = File.expand_path(dir.sub(/\A~(?=\/|\z)/, Dir.home))
+    dir = File.expand_path(dir.sub(/\A~(?=\/|\z)/, home_utf8))
     [dir, File.join(dir, '.claude.json')]
   end
 
@@ -643,7 +666,7 @@ class TeamConfig
   # owner's own sessions started without the variable (another terminal, the desktop app) still
   # load settings, hooks and MCP servers from the default folder.
   def claude_config_locations
-    default = [File.join(Dir.home, '.claude'), File.join(Dir.home, '.claude.json')]
+    default = [File.join(home_utf8, '.claude'), File.join(home_utf8, '.claude.json')]
     [claude_config_paths, default].uniq
   end
 
@@ -701,6 +724,18 @@ class TeamConfig
   # back before its stop goes through (see lib/stop_gate.sh).
   def gate
     repo['gate']&.to_s
+  end
+
+  # Run in a worktree up has just made, before its seat starts (#10): a fresh worktree has no
+  # installed dependencies. repo.copy lists small git-ignored files (an .env, local config) copied
+  # from the main checkout first, as Claude Code's own worktrees do with .worktreeinclude
+  # (https://code.claude.com/docs/en/worktrees).
+  def bootstrap
+    repo['bootstrap']&.to_s
+  end
+
+  def copy_paths
+    (repo['copy'] || []).map(&:to_s)
   end
 
   def gate_timeout
@@ -936,6 +971,15 @@ class TeamConfig
     bad = claude.keys - CLAUDE_KEYS
     die "unknown key(s) under 'sessions.claude': #{bad.join(', ')}" unless bad.empty?
     die 'repo.gate must be a non-empty command' if repo.key?('gate') && !(repo['gate'].is_a?(String) && !repo['gate'].strip.empty?)
+    die 'repo.bootstrap must be a non-empty command' if repo.key?('bootstrap') && !(repo['bootstrap'].is_a?(String) && !repo['bootstrap'].strip.empty?)
+    if repo.key?('copy')
+      die 'repo.copy must be a list of paths (relative to the main checkout)' unless repo['copy'].is_a?(Array)
+      repo['copy'].each do |p|
+        # Inside the main checkout only, and one path per line for factory.sh.
+        ok = p.is_a?(String) && !p.empty? && !p.start_with?('/', '~') && !p.include?("\n") && !p.split('/').include?('..')
+        die "repo.copy: '#{p}' must be a relative path inside the main checkout" unless ok
+      end
+    end
     %w[gate_timeout gate_max_blocks].each do |k|
       next unless repo.key?(k)
 
@@ -1037,6 +1081,8 @@ when 'get'
   when 'state.generated_dirs' then puts GENERATED_DIRS
   when 'state.notes_dir' then puts File.join(cfg.state_dir, NOTES_DIR)
   when 'hooks.note' then puts cfg.hooks_note.to_s
+  when 'repo.bootstrap' then puts(cfg.bootstrap || '')
+  when 'repo.copy' then puts cfg.copy_paths
   when 'repo.gate_summary'
     puts(cfg.gate ? "#{cfg.gate} (timeout #{cfg.gate_timeout}s; a seat may stop after #{cfg.gate_max_blocks} failed gates in a row)" : 'none')
   else die "unknown key '#{key}'"
