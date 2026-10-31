@@ -161,10 +161,12 @@ grep -qx "name: ping" $SRC/plugin/skills/ping/SKILL.md 2>/dev/null && ok "the pl
 # Every skill in the plugin, checked here once so a PR that adds a skill adds no test code (#17). The
 # frontmatter parses; name is the folder's name; the description is one line of at most 300 characters
 # (it sits in every seat's skill list, so it costs context everywhere); no @@PLACEHOLDER@@ is left
-# (skills are not rendered); a skill only the owner may start sets disable-model-invocation. Names of
-# projects or people cannot be told apart generically: the pre-commit git grep in CLAUDE.md covers them.
+# (skills are not rendered); a skill only the owner may start sets disable-model-invocation; and no skill
+# has allowed-tools unless it is listed here, since that lets it use those tools without asking in every
+# seat. Names of projects or people cannot be told apart generically: the pre-commit git grep covers them.
 skl=$(ruby -ryaml -e '
   owner_only = %w[merge-train]
+  may_allow_tools = %w[]
   errs = []; n = 0
   Dir[File.join(ARGV[0], "skills", "*", "SKILL.md")].sort.each do |f|
     s = File.basename(File.dirname(f)); t = File.read(f); n += 1
@@ -176,6 +178,7 @@ skl=$(ruby -ryaml -e '
     errs << "#{s}: description must be one line of 1 to 300 characters" unless d.is_a?(String) && !d.strip.empty? && !d.include?("\n") && d.length <= 300
     errs << "#{s}: an @@PLACEHOLDER@@ is left" if t =~ /@@[A-Z_]+@@/
     errs << "#{s}: owner-only, needs disable-model-invocation: true" if owner_only.include?(s) && fm["disable-model-invocation"] != true
+    errs << "#{s}: allowed-tools needs review (add the skill to may_allow_tools in test/e2e.sh)" if fm.key?("allowed-tools") && !may_allow_tools.include?(s)
   end
   errs << "no skills found" if n.zero?
   puts errs.empty? ? "ok #{n}" : errs' $SRC/plugin 2>&1)
