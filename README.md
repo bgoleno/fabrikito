@@ -236,7 +236,8 @@ in one folder per repository (`<config>/projects/<repo>/memory/`), shared by all
 `MEMORY.md` loads into every session there, the owner's own in the main checkout included
 ([docs](https://code.claude.com/docs/en/memory#storage-location)). A seat's note there would reach every
 other seat and the owner without review, outside the PR process. Set `auto_memory: true` under
-`sessions.claude`, or on a role, to leave it to Claude Code's own settings. `check` shows it per seat
+`sessions.claude`, or on a role, to leave it to Claude Code's own settings (that seat's launch script
+unsets the variable, so it is not inherited from a tmux server started inside a seat). `check` shows it per seat
 in the MEMORY column.
 
 These rules are an accident guard, not a security boundary: every seat runs as the owner's OS user,

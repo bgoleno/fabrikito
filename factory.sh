@@ -239,6 +239,10 @@ cmd_up() {
         echo '# Auto memory is one folder for every worktree of the repo, loaded into every session there,'
         echo '# so a seat would write unreviewed notes for all of them (#71). On with auto_memory: true.'
         echo 'export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1'
+      else
+        # On: the seat must not inherit the variable from the tmux server's environment (a team
+        # started from inside a seat, where it is set), or check's (inherit) would not be true.
+        echo 'unset CLAUDE_CODE_DISABLE_AUTO_MEMORY'
       fi
       printf 'claude_bin=%q\n' "$CLAUDE_COPY"
       echo 'if [ -n "$wrapper" ] && [ -x "$wrapper" ]; then run=("$wrapper" "$claude_bin"); else run=("$claude_bin"); fi'

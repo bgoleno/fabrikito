@@ -350,7 +350,7 @@ $S -c $T/team.yaml up --no-view w2 2>&1 | grep -E "start|error" | cut -c1-150
 case "$(git -C $T/repo worktree list)" in *"$VOL/$ROOT/team-w2"*) ok "w2 recreated on the volume";; *) bad "w2 recreated on the volume";; esac
 [ ! -d $T/repo/.claude/worktrees/team-w2 ] && ok "legacy w2 folder gone" || bad "legacy w2 folder gone"
 # w2 (auto_memory: true) starts only now: its launch script and environment leave auto memory alone.
-[ -f $T/state/launch/w2.sh ] && ! grep -q "CLAUDE_CODE_DISABLE_AUTO_MEMORY" $T/state/launch/w2.sh && grep -qx "w2 CLAUDE_CODE_DISABLE_AUTO_MEMORY=unset" $T/env.log && ok "auto memory: w2 (auto_memory: true) runs without the variable, and its launch script does not export it" || { bad "auto memory: w2 launch"; grep AUTO_MEMORY $T/env.log; grep -H AUTO_MEMORY $T/state/launch/w2.sh 2>&1; }
+[ -f $T/state/launch/w2.sh ] && ! grep -q "export CLAUDE_CODE_DISABLE_AUTO_MEMORY" $T/state/launch/w2.sh && grep -qx "unset CLAUDE_CODE_DISABLE_AUTO_MEMORY" $T/state/launch/w2.sh && grep -qx "w2 CLAUDE_CODE_DISABLE_AUTO_MEMORY=unset" $T/env.log && ok "auto memory: w2 (auto_memory: true) runs without the variable: its launch script unsets it, whatever the tmux server holds" || { bad "auto memory: w2 launch"; grep AUTO_MEMORY $T/env.log; grep -H AUTO_MEMORY $T/state/launch/w2.sh 2>&1; }
 echo "--- status"; $S -c $T/team.yaml status | cut -c1-150
 echo "--- dirty legacy is refused"
 $S -c $T/team.yaml down --yes w1 >/dev/null; $S -c $T/team.yaml migrate w1 2>&1 | grep -c "removed 0" | grep -q 1 && true
