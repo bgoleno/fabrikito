@@ -63,6 +63,14 @@ iTerm.
 Unknown keys, missing prompt files, duplicate session names and unknown placeholders are errors at load
 time, before anything starts.
 
+## Issues first
+
+Every change starts as an issue. The shared prompt (`roles/common.md`) makes this a hard rule for every
+seat: no change starts without an issue, and the engineering manager files one when it is missing. A
+pull request that completes its issue says `Closes #<n>`, and one that does not says `Refs #<n>` (see
+`.github/pull_request_template.md`), so the issue closes exactly when its change lands and the board
+stays honest.
+
 ## How seats talk
 
 `say` types a message into another seat's tmux pane by bracketed paste. It refuses to deliver to a seat

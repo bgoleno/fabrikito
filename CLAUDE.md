@@ -16,6 +16,9 @@ together in one iTerm tab. Read `README.md` for use and `teams/example.yaml` for
 - Nothing tracked may name a specific project, person, drive or path of the user's. A project's own team
   file and prompts live in the git-ignored `teams/` and `projects/`. Scan before committing:
   `git grep -n -i -E "<project name>|<owner name>"` must print nothing.
+- Issues first: every change to this repository starts as a GitHub issue, filed before work begins. Its PR
+  links it with `Closes #<n>` when the PR completes the issue (`Refs #<n>` when it does not) and fills in
+  `.github/pull_request_template.md`.
 - Gates: `bash -n factory.sh test/e2e.sh`, `ruby -c lib/team_config.rb`, and
   `TEST_VOLUME=/Volumes/<a mounted, writable volume> test/e2e.sh` (all assertions must pass).
 - Do not run the e2e test, or any experiment, against the user's real tmux server: unset `TMUX` and use
