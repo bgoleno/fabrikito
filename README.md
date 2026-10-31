@@ -330,7 +330,8 @@ the original text.
 delivered (#128). A write to a terminal or a pipe can fail (with EINTR under heavy load, into a closed
 stderr, or into a pipe whose reader has gone), and the failure ends `say`; written first, the record is
 kept all the same. If the line itself cannot be appended, `say` still prints its reason, then says the
-record could not be written, and exits with status 1.
+record could not be written and whether the message was delivered (so that a delivered message is not
+sent again), and exits with status 1.
 
 Each `SendMessage` from a seat appends one line in the same format, written by `lib/log_message.sh`, a
 `PostToolUse` and `PostToolUseFailure` hook on `SendMessage` in every seat's settings:

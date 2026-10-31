@@ -1048,10 +1048,14 @@ cmd_say() {
   # log (a regular file) is not exposed to any of that. So what send_one prints, its "not delivered"
   # reasons, is held in a file and shown after the log line. The file is unlinked as soon as it is
   # open, so nothing is left behind however say ends. send_one runs in this shell, not in $(...),
-  # so that its signal traps and seat lock (#84) belong to say itself. If the file cannot be
-  # opened, send_one prints straight to stderr, as before.
-  held=$STATE/say-$$.held
-  if exec 7>"$held" 8<"$held"; then rm -f "$held"; else rm -f "$held"; held=""; fi
+  # so that its signal traps and seat lock (#84) belong to say itself. If the file cannot be made
+  # or opened, send_one prints straight to stderr, as before. mktemp, not a fixed name: it creates
+  # the file with O_EXCL, so a symlink or FIFO put at the name beforehand is refused rather than
+  # followed (truncating its target) or blocked on (sec on #137).
+  held=$(mktemp "$STATE/say.XXXXXXXX" 2>/dev/null) || held=""
+  if [ -n "$held" ]; then
+    if exec 7>"$held" 8<"$held"; then rm -f "$held"; else rm -f "$held"; held=""; fi
+  fi
   if [ -n "$why" ]; then
     rc=1
   elif [ "$to" = all ]; then
@@ -1073,7 +1077,13 @@ cmd_say() {
   [ -z "$held" ] || { out=$(cat <&8); exec 7>&- 8<&-; }
   if [ -n "$why" ]; then echo "not delivered: $why" >&2; fi
   if [ -n "$out" ]; then printf '%s\n' "$out" >&2; fi
-  if [ "$lrc" != 0 ]; then echo "say: this say's record could not be written to $LOG" >&2; return 1; fi
+  # The note says whether the message went out, so that a caller seeing exit 1 does not send a
+  # delivered message again (sec on #137).
+  if [ "$lrc" != 0 ]; then
+    if [ "$rc" = 0 ]; then out=delivered; elif [ "$to" = all ]; then out="not delivered to every seat"; else out="not delivered"; fi
+    echo "say: this say's record could not be written to $LOG (the message was $out)" >&2
+    return 1
+  fi
   return "$rc"
 }
 

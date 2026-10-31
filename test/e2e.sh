@@ -669,13 +669,17 @@ done
 # send_one's reasons, held until the log line is written, are still shown, and the file that held
 # them is never left behind.
 out=$(TEAM_ROLE=w1 $S -c $T/team.yaml say w2 "held reason" 2>&1 >/dev/null); rc=$?
-[ $rc -ne 0 ] && [ "$out" = "not delivered: w2 is down (tt-w2)" ] && lastlog w1 w2 "held reason" && [ -z "$(ls -A $T/state | grep '\.held$')" ] &&
+[ $rc -ne 0 ] && [ "$out" = "not delivered: w2 is down (tt-w2)" ] && lastlog w1 w2 "held reason" && [ -z "$(ls -A $T/state | grep '^say\.')" ] &&
   ok "say shows send_one's reason once it has logged, and leaves no held file" || { bad "say's held reason (rc=$rc)"; echo "$out"; ls -A $T/state; }
 # The other way round: a log that cannot be appended to does not lose the terminal message.
 mkdir -p $T/unlogstate/messages.log
 out=$(TEAM_STATE_DIR=$T/unlogstate TEAM_ROLE=w1 $S -c $T/team.yaml say w2 "log cannot be written" 2>&1); rc=$?
-[ $rc -ne 0 ] && echo "$out" | grep -qF "not delivered: w2 is down" && echo "$out" | grep -qF "record could not be written" &&
+[ $rc -ne 0 ] && echo "$out" | grep -qF "not delivered: w2 is down" && echo "$out" | grep -qF "record could not be written to $T/unlogstate/messages.log (the message was not delivered)" &&
   ok "say whose log cannot be written still shows why it did not deliver, and fails" || { bad "say with an unwritable log (rc=$rc)"; echo "$out"; }
+# Delivered, with the log unwritable: the note says it went out, so the caller does not send it again.
+out=$(TEAM_STATE_DIR=$T/unlogstate TEAM_ROLE=w1 $S -c $T/team.yaml say em "delivered, log cannot be written" 2>&1); rc=$?; sleep 1
+[ $rc -ne 0 ] && echo "$out" | grep -qF "(the message was delivered)" && tmux capture-pane -p -t "=tt-em:" | grep -qF "[from w1] delivered, log cannot be written" &&
+  ok "say whose log cannot be written after delivering says the message was delivered" || { bad "say delivered with an unwritable log (rc=$rc)"; echo "$out"; }
 echo "--- say across tmux servers (#115): never [from owner] from a pane of another server"
 # Server 2 is a live-env environment (test/live-env.sh) with one stand-in seat on it, tx-em, of a
 # copy of the team with prefix tx. Its log is the environment's own.
