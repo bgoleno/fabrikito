@@ -417,8 +417,7 @@ class TeamConfig
   # gets an Edit deny on each (Edit also covers Write, NotebookEdit and shell redirects). This is not
   # a boundary: a script can still write them (see README, Safety, and #29).
   def protected_paths(id)
-    home = Dir.home
-    claude_home = File.join(home, '.claude')
+    claude_home, claude_json = claude_config_paths
     [
       # what factory.sh regenerates for each start (settings, launchers, prompts) and the message log
       *(GENERATED_DIRS + HOOK_DIRS).map { |d| File.join(state_dir, d, '**') },
@@ -444,7 +443,7 @@ class TeamConfig
       File.join(workdir(id), '.claude', 'settings.json'), File.join(workdir(id), '.claude', 'settings.local.json'),
       # the user's own settings, MCP servers, instructions and extensions (not all of ~/.claude,
       # where Claude Code's tools write legitimately)
-      File.join(claude_home, 'settings.json'), File.join(home, '.claude.json'), File.join(claude_home, 'CLAUDE.md'),
+      File.join(claude_home, 'settings.json'), claude_json, File.join(claude_home, 'CLAUDE.md'),
       *%w[plugins skills agents commands hooks].map { |d| File.join(claude_home, d, '**') }
     ].flat_map do |p|
       glob = p.end_with?('/**')
@@ -463,6 +462,20 @@ class TeamConfig
     w = expand(w)
     app = w[%r{\A(.*?\.app)/}, 1]
     [app ? File.join(app, '**') : w]
+  end
+
+  # Where Claude Code keeps the user's config: ~/.claude and ~/.claude.json, or, with
+  # CLAUDE_CONFIG_DIR set, that folder and the .claude.json inside it ("every ~/.claude path lives
+  # under that directory instead. The same applies to .claude.json":
+  # https://code.claude.com/docs/en/claude-directory). Read from the environment factory.sh runs in;
+  # each seat's launch script pins the same value (or unsets it), so a seat uses the folder its rules
+  # protect, whatever the tmux server's own environment holds.
+  def claude_config_paths
+    dir = ENV['CLAUDE_CONFIG_DIR'].to_s
+    return [File.join(Dir.home, '.claude'), File.join(Dir.home, '.claude.json')] if dir.empty?
+
+    dir = File.expand_path(dir.sub(/\A~(?=\/|\z)/, Dir.home))
+    [dir, File.join(dir, '.claude.json')]
   end
 
   def prompts_common_path
@@ -679,6 +692,7 @@ when 'get'
   when 'display.window' then puts cfg.view_window
   when 'sessions.wrapper' then puts(cfg.claude['wrapper'] ? cfg.expand(cfg.claude['wrapper']) : '')
   when 'state.dir' then puts cfg.state_dir
+  when 'claude.config_dir' then puts cfg.claude_config_paths.first
   when 'state.generated_dirs' then puts GENERATED_DIRS
   when 'repo.gate_summary'
     puts(cfg.gate ? "#{cfg.gate} (timeout #{cfg.gate_timeout}s; a seat may stop after #{cfg.gate_max_blocks} failed gates in a row)" : 'none')

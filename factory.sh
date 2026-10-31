@@ -202,6 +202,12 @@ cmd_up() {
       echo '# started from tmux has no responsible app for; it passes them to its child. If it is'
       echo '# configured but missing, claude runs directly.'
       printf 'wrapper=%q\n' "$WRAPPER"
+      echo '# The user config folder the seat uses is the one its protected-path rules were built for.'
+      if [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then
+        printf 'export CLAUDE_CONFIG_DIR=%q\n' "$(cfg get claude.config_dir)"
+      else
+        echo 'unset CLAUDE_CONFIG_DIR'
+      fi
       echo 'claude_bin="$(command -v claude)"'
       echo 'if [ -n "$wrapper" ] && [ -x "$wrapper" ]; then run=("$wrapper" "$claude_bin"); else run=("$claude_bin"); fi'
       printf '"${run[@]}"%s --settings %q -n %q \\\n' "$args_q" "$settings" "$sess"
