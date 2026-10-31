@@ -696,25 +696,46 @@ caller_seat() {
   done
 }
 
+# Why a sender set in TEAM_ROLE may not send, or nothing when it may (#89). The value becomes the
+# message's [from <role>] label, so only a role id of this team is taken: anything else (a typo, a
+# role of another team, a value with control characters or brackets that would draw a different
+# label) is refused rather than shown. owner and launcher are refused even if a team file names
+# them as roles: [from owner] is the owner's (given only when TEAM_ROLE is unset, outside every
+# seat) and [from launcher] is the kickoff's. The value is shown escaped, never as it is.
+sender_refusal() {
+  local r
+  case $1 in
+    owner) echo "TEAM_ROLE 'owner' is reserved: [from owner] is used only when TEAM_ROLE is unset, outside every seat"; return ;;
+    launcher) echo "TEAM_ROLE 'launcher' is reserved for the kickoff's [from launcher] label"; return ;;
+  esac
+  for r in $ROLES; do [ "$r" = "$1" ] && return; done
+  echo "TEAM_ROLE '$(log_field "$1")' is not a role id of this team (roles: $ROLES); set it to your role id"
+}
+
 cmd_say() {
-  local to=${1:-} from=${TEAM_ROLE:-} text r rc=0
+  local to=${1:-} from=${TEAM_ROLE:-} why="" text r rc=0
   [ -n "$to" ] && [ $# -ge 2 ] || die "usage: say <role|all> <message...>"
+  [ "$to" = all ] || check_role "$to"
   # Inside a seat, a message without TEAM_ROLE goes out under that seat's role, never as the owner's.
   if [ -z "$from" ]; then
     from=$(caller_seat) || die "say: cannot tell whether this runs inside a seat (ps failed); set TEAM_ROLE"
     from=${from:-owner}
+  else
+    why=$(sender_refusal "$from")
   fi
   shift
   text="[from $from] $*"
   mkdir -p "$STATE"
-  if [ "$to" = all ]; then
+  if [ -n "$why" ]; then
+    echo "not delivered: $why" >&2
+    rc=1
+  elif [ "$to" = all ]; then
     for r in $ROLES; do
       [ "$r" = "$from" ] && continue
       alive "$r" || continue
       send_one "$r" "$text" || rc=1
     done
   else
-    check_role "$to"
     [ "$to" = "$from" ] && die "a seat cannot message itself"
     send_one "$to" "$text" || rc=1
   fi

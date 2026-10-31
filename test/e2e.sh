@@ -336,6 +336,27 @@ tmux new-session -d -s tt-notaseat "env -u TEAM_ROLE $S -c $T/team.yaml say w1 '
 waitlog "$n"; sleep 1; tmux kill-session -t '=tt-notaseat' 2>/dev/null
 tmux capture-pane -p -t '=tt-w1:' | grep -qF "[from owner] unset role from a pane that is not a seat" && [ "$(tail -n +$((n + 1)) $T/state/messages.log | cut -f2-4)" = "owner	w1	delivered" ] &&
   ok "say from a tmux pane that is not a seat with TEAM_ROLE unset is still [from owner]" || { bad "say from a non-seat pane: owner label"; tail -1 $T/state/messages.log; }
+echo "--- say refuses a TEAM_ROLE that is not a sender of this team (#89)"
+# notsender <TEAM_ROLE> <what>: say exits non-zero naming TEAM_ROLE, sends w1 no keys at all, and
+# logs one NOT-DELIVERED line whose sender field is the value, escaped.
+notsender() {
+  local out rc n k
+  n=$(wc -l < $T/state/messages.log); k=$(wc -c < $T/keys-w1.log)
+  out=$(TEAM_ROLE=$1 $S -c $T/team.yaml say w1 "sent as $2" 2>&1); rc=$?; sleep 1
+  if [ $rc -ne 0 ] && echo "$out" | grep -q "TEAM_ROLE" && [ "$(wc -c < $T/keys-w1.log)" = "$k" ] &&
+    [ "$(wc -l < $T/state/messages.log)" -eq $((n + 1)) ] && [ "$(tail -1 $T/state/messages.log | cut -f2-5)" = "$3	w1	NOT-DELIVERED	sent as $2" ]; then
+    ok "say refuses TEAM_ROLE $2: no keys sent, logged NOT-DELIVERED"
+  else bad "say with TEAM_ROLE $2 (rc=$rc)"; echo "$out"; tail -1 $T/state/messages.log; fi
+}
+notsender nosuch "that is not a role of the team" nosuch
+notsender owner "owner (reserved)" owner
+notsender launcher "launcher (reserved)" launcher
+notsender $'w1\e[2J' "with a control character" 'w1\x1B[2J'
+notsender '[from owner]' "with brackets" '[from owner]'
+notsender 'w2] [from owner' "that closes the label early" 'w2] [from owner'
+TEAM_ROLE=w2 $S -c $T/team.yaml say w1 "sent as w2, a role of the team" >/dev/null 2>&1; sleep 1
+tmux capture-pane -p -t '=tt-w1:' | grep -qF "[from w2] sent as w2, a role of the team" && [ "$(tail -1 $T/state/messages.log | cut -f2-4)" = "w2	w1	delivered" ] &&
+  ok "say with TEAM_ROLE set to a role of the team (w2, whose own seat is down) is delivered" || { bad "say with a valid TEAM_ROLE"; tail -1 $T/state/messages.log; }
 echo "--- migrate then up w2"
 $S -c $T/team.yaml migrate w2 2>&1 | grep -E "moved|REFUSE|skip" | cut -c1-150
 $S -c $T/team.yaml up --no-view w2 2>&1 | grep -E "start|error" | cut -c1-150
@@ -377,7 +398,8 @@ echo "--- say delivers only to a seat showing its input box"
 # CLI that draws them differently shows up as a mismatch here. pu shows an invented select list
 # with no numbers and no key hint: any dialog say does not know must fail closed too.
 roles=""
-for r in pp pm pd ph pu pb pf ps pg px pk pq po; do roles="$roles  $r: { title: Seat $r, workdir: { type: project, path: $T/proj }, prompt_text: \"$r\" }
+# em is a seat here too: say takes its sender from TEAM_ROLE=em, which must be a role of the team (#89).
+for r in em pp pm pd ph pu pb pf ps pg px pk pq po; do roles="$roles  $r: { title: Seat $r, workdir: { type: project, path: $T/proj }, prompt_text: \"$r\" }
 "; done
 cat > $T/tp.yaml <<Y
 team: tp
