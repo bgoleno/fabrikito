@@ -204,7 +204,10 @@ role's (team first; a role can add or tighten a rule, never loosen one), plus tw
   `.claude/settings.local.json`, `.claude/CLAUDE.md`, and `.claude/hooks/`, `rules/`, `skills/`,
   `agents/` and `commands/` (not the root `CLAUDE.md`, which is project work), the
   seat's own `.claude/settings.json` and `settings.local.json`, and Claude Code's user settings, MCP
-  config, instructions and extensions under `~/.claude`. `.claude/worktrees/` stays editable: Claude
+  config, instructions, user-level rules (`rules/`) and extensions under `~/.claude` and in `~/.claude.json` (and, when
+  `CLAUDE_CONFIG_DIR` is set where `up` runs, under that folder too, with the `.claude.json` inside
+  it; each seat's launch script pins the same value, so a seat uses a folder its rules protect, and
+  the default folder stays protected for sessions started without the variable). `.claude/worktrees/` stays editable: Claude
   Code puts the worktrees it makes there, including those of a worktree seat's subagents, which land
   under the main checkout. A path that runs through a symlink is denied both as configured and as its
   real path, which stops `rm` and `mv` of a protected link; repointing a link with `ln -sf` is not a
