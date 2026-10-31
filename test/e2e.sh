@@ -168,7 +168,7 @@ for p in "$RT/state/settings/**" "$RT/state/launch/**" "$RT/state/prompts/**" "$
   "$RT/repo/.claude/settings.json" "$RT/repo/.claude/settings.local.json" "$RT/repo/.claude/skills/**" "$RT/repo/.claude/agents/**" "$RT/repo/.claude/commands/**" \
   "$RT/repo/.mcp.json" "$RT/repo/.claude/hooks/**" "$RT/repo/.claude/CLAUDE.md" "$RT/repo/.claude/rules/**" \
   "$RW1/.claude/settings.json" "$RW1/.claude/settings.local.json" "$RHC/settings.json" "$RH/.claude.json" "$RHC/CLAUDE.md" \
-  "$RHC/plugins/**" "$RHC/skills/**" "$RHC/agents/**" "$RHC/commands/**" "$RHC/hooks/**"; do
+  "$RHC/plugins/**" "$RHC/skills/**" "$RHC/agents/**" "$RHC/commands/**" "$RHC/hooks/**" "$RHC/rules/**"; do
   rules $T/state/settings/w1.json deny | grep -qxF "Edit(/$p)" || missing="$missing $p"
 done
 [ -z "$missing" ] && ok "w1.json: Edit deny on every protected path" || { bad "protected paths missing:$missing"; rules $T/state/settings/w1.json deny; }
@@ -508,10 +508,10 @@ echo "$ws" | grep -q "wrap\|\.app" && bad "no wrapper configured, but a wrapper 
 # ~/.claude.json stay protected: the owner's sessions started without the variable still load them.
 mk; cc=$(CLAUDE_CONFIG_DIR=$T/cfg TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml settings em | ruby -rjson -e 'puts JSON.parse(STDIN.read)["permissions"]["deny"]')
 missing=""
-for p in settings.json .claude.json CLAUDE.md plugins/** skills/** agents/** commands/** hooks/**; do echo "$cc" | grep -qxF "Edit(/$RT/cfg/$p)" || missing="$missing $p"; done
+for p in settings.json .claude.json CLAUDE.md plugins/** skills/** agents/** commands/** hooks/** rules/**; do echo "$cc" | grep -qxF "Edit(/$RT/cfg/$p)" || missing="$missing $p"; done
 [ -z "$missing" ] && ok "CLAUDE_CONFIG_DIR set: the user's config paths, .claude.json included, are built from it" || { bad "CLAUDE_CONFIG_DIR paths missing:$missing"; echo "$cc" | grep cfg; }
 missing=""
-for p in $RHC/settings.json $RH/.claude.json $RHC/CLAUDE.md "$RHC/plugins/**" "$RHC/skills/**" "$RHC/agents/**" "$RHC/commands/**" "$RHC/hooks/**"; do echo "$cc" | grep -qxF "Edit(/$p)" || missing="$missing $p"; done
+for p in $RHC/settings.json $RH/.claude.json $RHC/CLAUDE.md "$RHC/plugins/**" "$RHC/skills/**" "$RHC/agents/**" "$RHC/commands/**" "$RHC/hooks/**" "$RHC/rules/**"; do echo "$cc" | grep -qxF "Edit(/$p)" || missing="$missing $p"; done
 [ -z "$missing" ] && ok "CLAUDE_CONFIG_DIR set: ~/.claude and ~/.claude.json stay protected too" || bad "CLAUDE_CONFIG_DIR set, default config paths no longer denied:$missing"
 # The seat uses the folder its rules protect: the launch script pins CLAUDE_CONFIG_DIR, or unsets it.
 grep -qx "unset CLAUDE_CONFIG_DIR" $T/state/launch/em.sh && ok "unset when up ran: the launch script unsets CLAUDE_CONFIG_DIR" || { bad "launch script without CLAUDE_CONFIG_DIR"; grep CLAUDE_CONFIG_DIR $T/state/launch/em.sh; }

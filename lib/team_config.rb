@@ -441,11 +441,14 @@ class TeamConfig
       # project settings load from the seat's own folder without a trust prompt, hooks included;
       # the rest of its .claude/ (commands, agents, skills) is ordinary project work
       File.join(workdir(id), '.claude', 'settings.json'), File.join(workdir(id), '.claude', 'settings.local.json'),
-      # the user's own settings, MCP servers, instructions and extensions (not all of ~/.claude,
-      # where Claude Code's tools write legitimately), in every folder a session may load them from
+      # the user's own settings, MCP servers, instructions, rules and extensions (not all of ~/.claude,
+      # where Claude Code's tools write legitimately), in every folder a session may load them from.
+      # rules/: "Personal rules in ~/.claude/rules/ apply to every project on your machine"
+      # (https://code.claude.com/docs/en/memory#user-level-rules); a live check on 2.1.316 showed them
+      # loaded at session start from <CLAUDE_CONFIG_DIR>/rules/ too (#68).
       *claude_config_locations.flat_map do |claude_home, claude_json|
         [File.join(claude_home, 'settings.json'), claude_json, File.join(claude_home, 'CLAUDE.md'),
-         *%w[plugins skills agents commands hooks].map { |d| File.join(claude_home, d, '**') }]
+         *%w[plugins skills agents commands hooks rules].map { |d| File.join(claude_home, d, '**') }]
       end
     ].flat_map do |p|
       glob = p.end_with?('/**')
