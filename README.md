@@ -227,6 +227,15 @@ someone answers. `say` will not deliver to a seat at a permission prompt or any 
 and the repo's `.claude/` settings, which still apply. `check` shows each seat's mode and rules, and is
 where load-time errors (unknown modes, malformed rules, a permission flag in `args`) are reported.
 
+Claude Code's auto memory is off in every seat: the generated settings set `autoMemoryEnabled: false`
+and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, and the launch script exports the variable. Auto memory lives
+in one folder per repository (`<config>/projects/<repo>/memory/`), shared by all its worktrees, and its
+`MEMORY.md` loads into every session there, the owner's own in the main checkout included
+([docs](https://code.claude.com/docs/en/memory#storage-location)). A seat's note there would reach every
+other seat and the owner without review, outside the PR process. Set `auto_memory: true` under
+`sessions.claude`, or on a role, to leave it to Claude Code's own settings. `check` shows it per seat
+in the MEMORY column.
+
 These rules are an accident guard, not a security boundary: every seat runs as the owner's OS user,
 with the owner's GitHub credential, and can change what loads. [#29](../../issues/29) tracks making
 them a boundary.

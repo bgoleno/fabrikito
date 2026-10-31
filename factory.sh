@@ -171,12 +171,13 @@ cmd_check() {
     echo "            $d ($(cat "$d/.how" 2>/dev/null || echo '?')):${users:- no running seat}"
   done
   echo "state     : $STATE"
-  printf '%-5s %-36s %-18s %-12s %-9s %-24s %-7s %s\n' ROLE SEAT SESSION MODEL EFFORT MODE GATE WORKDIR
+  printf '%-5s %-36s %-18s %-12s %-9s %-24s %-9s %-7s %s\n' ROLE SEAT SESSION MODEL EFFORT MODE MEMORY GATE WORKDIR
   for r in $ROLES; do
-    printf '%-5s %-36s %-18s %-12s %-9s %-24s %-7s %s\n' "$r" "$(title "$r")" "$(session "$r")" "$(cfg role "$r" model)" \
-      "$(cfg role "$r" effort)" "$(cfg role "$r" permission_mode)" "$(cfg role "$r" gate)" "$(workdir "$r")"
+    printf '%-5s %-36s %-18s %-12s %-9s %-24s %-9s %-7s %s\n' "$r" "$(title "$r")" "$(session "$r")" "$(cfg role "$r" model)" \
+      "$(cfg role "$r" effort)" "$(cfg role "$r" permission_mode)" "$(cfg role "$r" auto_memory)" "$(cfg role "$r" gate)" "$(workdir "$r")"
   done
   echo "(inherit = flag omitted; the seat uses model, effortLevel and permissions.defaultMode from ~/.claude/settings.json)"
+  echo "(MEMORY off = Claude Code's auto memory is off in that seat; (inherit) = auto_memory: true, Claude Code's own settings decide)"
   echo
   cfg permissions_report
   echo "valid."
@@ -233,7 +234,12 @@ cmd_up() {
       fi
       echo '# The auto-updater would reinstall claude under this running seat, after which macOS can no'
       echo '# longer tell which process it is and its privacy grants stop working (#50). Update by hand.'
-      echo 'export DISABLE_AUTOUPDATER=1'
+echo 'export DISABLE_AUTOUPDATER=1'
+if [ "$(cfg role "$r" auto_memory)" = off ]; then
+  echo '# Auto memory is one folder for every worktree of the repo, loaded into every session there,'
+  echo '# so a seat would write unreviewed notes for all of them (#71). On with auto_memory: true.'
+  echo 'export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1'
+fi
       printf 'claude_bin=%q\n' "$CLAUDE_COPY"
       echo 'if [ -n "$wrapper" ] && [ -x "$wrapper" ]; then run=("$wrapper" "$claude_bin"); else run=("$claude_bin"); fi'
       printf '"${run[@]}"%s --settings %q -n %q \\\n' "$args_q" "$settings" "$sess"

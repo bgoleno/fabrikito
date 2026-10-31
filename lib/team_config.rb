@@ -33,10 +33,10 @@ EFFORTS = %w[low medium high xhigh max].freeze
 REPO_KEYS = %w[path github base gate gate_timeout gate_max_blocks].freeze
 STORAGE_KEYS = %w[volume root].freeze
 SESSION_KEYS = %w[prefix claude].freeze
-CLAUDE_KEYS = %w[wrapper args model effort permission_mode plugin].freeze
+CLAUDE_KEYS = %w[wrapper args model effort permission_mode plugin auto_memory].freeze
 PROMPT_KEYS = %w[common].freeze
 ROLE_KEYS = %w[title summary workdir prompt prompt_text kickoff session model effort permission_mode permissions
-               gate_on_stop skills].freeze
+               gate_on_stop skills auto_memory].freeze
 WORKDIR_KEYS = %w[type path name].freeze
 ID_RE = /\A[a-z][a-z0-9]*\z/.freeze
 PREFIX_RE = /\A[a-z0-9][a-z0-9-]*\z/.freeze
@@ -395,7 +395,19 @@ class TeamConfig
     (role(id)['permission_mode'] || claude['permission_mode'])&.to_s
   end
 
-  def args
+# Claude Code's auto memory lives in <config>/projects/<repo>/memory/, one folder for the whole
+# repository: "all worktrees and subdirectories within the same repo share one auto memory
+# directory", and its MEMORY.md loads into every session there
+# (https://code.claude.com/docs/en/memory#storage-location). A seat's note would reach every other
+# seat and the owner's own sessions in the main checkout, unreviewed (#71), so it is off unless the
+# team file turns it on (a role's value wins over sessions.claude). On means the factory sets
+# nothing and Claude Code's own settings decide.
+def auto_memory?(id)
+  v = role(id).key?('auto_memory') ? role(id)['auto_memory'] : claude['auto_memory']
+  v == true
+end
+
+def args
     a = claude['args'] || []
     die "'sessions.claude.args' must be a list" unless a.is_a?(Array)
     a.map(&:to_s)
@@ -642,7 +654,14 @@ class TeamConfig
     # tell which process the seat's claude is, so its privacy grants (the worktree volume) stop
     # working until a restart (#50). The launch script exports this too; a value here also outranks
     # one in a project's .claude/settings.json. Update deliberately instead (README).
-    out['env'] = { 'DISABLE_AUTOUPDATER' => '1' }
+out['env'] = { 'DISABLE_AUTOUPDATER' => '1' }
+unless auto_memory?(id)
+  # Both documented switches (same page as #auto_memory?): --settings outranks user, project and
+  # local settings, so a seat's /memory toggle or its .claude/settings.local.json cannot turn
+  # it back on. The launch script exports the variable too.
+  out['autoMemoryEnabled'] = false
+  out['env']['CLAUDE_CODE_DISABLE_AUTO_MEMORY'] = '1'
+end
     if gate_on_stop?(id)
       out['hooks'] = { 'Stop' => [{ 'hooks' => [stop_gate_hook(id)] }] }
       # --settings outranks project and local settings, so a disableAllHooks: true written in the
@@ -705,6 +724,7 @@ class TeamConfig
     if plugin? && !File.file?(File.join(PLUGIN_DIR, '.claude-plugin', 'plugin.json'))
       die "sessions.claude.plugin is on, but #{PLUGIN_DIR}/.claude-plugin/plugin.json is missing"
     end
+    die 'sessions.claude.auto_memory must be true or false' if claude.key?('auto_memory') && ![true, false].include?(claude['auto_memory'])
     die "sessions.claude.effort must be one of #{EFFORTS.join(', ')}" if claude['effort'] && !EFFORTS.include?(claude['effort'].to_s)
     if claude.key?('permission_mode') && !PERMISSION_MODES.include?(claude['permission_mode'].to_s)
       die "sessions.claude.permission_mode must be one of #{PERMISSION_MODES.join(', ')}"
@@ -736,6 +756,7 @@ class TeamConfig
       die "roles.#{id}.gate_on_stop must be true or false" if r.key?('gate_on_stop') && ![true, false].include?(r['gate_on_stop'])
       die "roles.#{id}.gate_on_stop needs repo.gate (the command to run)" if r['gate_on_stop'] == true && gate.nil?
       validate_skills(id, r['skills']) if r.key?('skills')
+      die "roles.#{id}.auto_memory must be true or false" if r.key?('auto_memory') && ![true, false].include?(r['auto_memory'])
       if r.key?('permission_mode') && !PERMISSION_MODES.include?(r['permission_mode'].to_s)
         die "roles.#{id}.permission_mode must be one of #{PERMISSION_MODES.join(', ')}"
       end
@@ -803,6 +824,7 @@ when 'role'
   when 'effort' then puts(cfg.effort(id) || '(inherit)')
   when 'permission_mode' then puts cfg.mode_label(id)
   when 'gate' then puts(cfg.gate_on_stop?(id) ? 'on-stop' : '-')
+  when 'auto_memory' then puts(cfg.auto_memory?(id) ? '(inherit)' : 'off')
   else die "unknown role key '#{key}'"
   end
 when 'workdir' then puts cfg.workdir(args.fetch(0) { die 'workdir needs a role id' })

@@ -68,8 +68,13 @@ sessions:
     # Model and effort for every seat (a role can override either). Left unset, the flag is
     # omitted and each seat inherits `model` and `effortLevel` from ~/.claude/settings.json.
     # model takes an alias or a full id; effort is low | medium | high | xhigh | max.
-    # model: opus
-    # effort: xhigh
+# model: opus
+# effort: xhigh
+# Claude Code's auto memory is off in every seat unless this is true (a role can override it).
+# Its folder is shared by every worktree of the repo and loads into every session there, the
+# owner's own included, so a seat's note would reach all of them without review. true: the
+# factory sets nothing and Claude Code's own settings decide.
+# auto_memory: false
 
 # What `up` shows once the seats are running, and what `./factory.sh view` shows any time: a new
 # iTerm tab with every running seat in a pane. The primary seat is on the left at the full height
