@@ -70,9 +70,13 @@ text matched an ask rule, even when the reason shown is about parsing ("expansio
 "shell operators that require approval"): that line only says why Claude Code could not narrow the
 prompt to the matching part. A seat at a prompt waits for a human, and nobody may be watching, so do
 not match an ask rule by accident: in a throwaway repository, name the branch something other than
-the base branch (for example `git branch -M trunk`), and keep any push in its own command. A
-permission rule that stops a command is the answer, not an obstacle: do not rewrite the command to
-get past it; tell the EM (the EM asks the owner). These rules are not preferences.
+the base branch (for example `git branch -M trunk`), and run `git push` as a command of its own, never
+chained with `;`, `&&` or `|` to another, in particular not with `gh pr create --base <base>`. Rules
+are matched per part of a chain, but against the whole text when a part cannot be parsed (`$(...)` in
+an argument, such as a PR body from `$(cat <<EOF ...)`, or `${...}` next to quotes), so a later `main`
+can make a push of another branch ask, and, in default mode, a subshell `( ... )` prompts even when no
+rule matches. A permission rule that stops a command is the answer, not an obstacle: do not rewrite
+the command to get past it; tell the EM (the EM asks the owner). These rules are not preferences.
 1. **Never merge a PR, and never approve one on the owner's behalf.** The owner merges. The EM may
    merge only a PR the owner has told it to merge, using the repository's own merge procedure.
 2. **Confirm the remote before every commit or push:** run `git remote -v` and check it is
