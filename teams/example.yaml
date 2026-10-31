@@ -51,6 +51,12 @@ sessions:
     # --setting-sources, --permission-prompt-tool) are refused here, and so are permission flags
     # when permission_mode is set.
     # args: []
+    # Load the factory's own plugin (plugin/ next to factory.sh) into every seat with --plugin-dir.
+    # Its skills show as /factory:<skill>, and only sessions factory.sh starts get them. Default true,
+    # so a team file without this key gets the plugin at its next `up`, and gets every skill (and,
+    # later, every hook) added to plugin/ after that. false: the flag is omitted. A --plugin-dir of
+    # your own in args still loads; the flag repeats.
+    # plugin: true
     # Permission mode for every seat (a role can override it): default (alias manual) |
     # acceptEdits | plan | auto | dontAsk | bypassPermissions. auto runs without routine prompts
     # and has a classifier check risky actions. bypassPermissions skips every prompt and is meant

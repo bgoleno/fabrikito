@@ -139,9 +139,18 @@ echo "$out" | grep -q "migrate w2" && ok "w2 refused with migrate hint" || bad "
 case "$(git -C $T/repo worktree list)" in *"$VOL/$ROOT/team-w1"*) ok "w1 worktree is on the volume";; *) bad "w1 worktree is on the volume";; esac
 sleep 3
 grep -q "^w1 .*--model sonnet --effort low" $T/args.log && ok "w1 launched with --model sonnet --effort low" || { bad "w1 args"; cat $T/args.log; }
-grep -qF "em --permission-mode bypassPermissions --settings $T/state/settings/em.json -n tt-em" $T/args.log && ok "em launched with the team mode, its settings file, no --model/--effort (inherit)" || { bad "em args"; cat $T/args.log; }
-grep -qF "w1 --model sonnet --effort low --permission-mode default --settings $T/state/settings/w1.json -n tt-w1" $T/args.log && ok "w1 launched with its own mode (default) and its settings file" || { bad "w1 mode/settings args"; cat $T/args.log; }
+PLUG=$(cd $SRC/plugin && pwd -P)
+grep -qF "em --permission-mode bypassPermissions --plugin-dir $PLUG --settings $T/state/settings/em.json -n tt-em" $T/args.log && ok "em launched with the team mode, the factory plugin, its settings file, no --model/--effort (inherit)" || { bad "em args"; cat $T/args.log; }
+grep -qF "w1 --model sonnet --effort low --permission-mode default --plugin-dir $PLUG --settings $T/state/settings/w1.json -n tt-w1" $T/args.log && ok "w1 launched with its own mode (default) and its settings file" || { bad "w1 mode/settings args"; cat $T/args.log; }
 grep -E "^(em|w1) " $T/args.log | grep -c -- "--effort" | grep -q '^1$' && ok "only w1 got --effort" || bad "only w1 got --effort"
+echo "--- factory plugin"
+# The plugin each seat loads: a manifest named factory and the placeholder skill that proves loading.
+ruby -rjson -e 'exit(JSON.parse(File.read(ARGV[0]))["name"] == "factory" ? 0 : 1)' $SRC/plugin/.claude-plugin/plugin.json 2>/dev/null && ok "plugin.json parses and names the plugin factory (skills are /factory:<skill>)" || bad "plugin.json"
+grep -qx "name: ping" $SRC/plugin/skills/ping/SKILL.md 2>/dev/null && ok "the placeholder skill skills/ping exists" || bad "skills/ping/SKILL.md"
+# args.log holds each launch line followed by the multi-line prompt, so each seat's line is found by its role.
+pd() { grep -E "^$1 " $T/args.log | grep -o -- "--plugin-dir [^ ]*"; }
+[ "$PLUG" = "$(cd $SRC && pwd -P)/plugin" ] && [ "$(pd em)" = "--plugin-dir $PLUG" ] && [ "$(pd w1)" = "--plugin-dir $PLUG" ] && ok "every seat got --plugin-dir once, with the real path of <install>/plugin" || { bad "--plugin-dir per seat"; cat $T/args.log; }
+$S -c $T/team.yaml check 2>&1 | grep -qxF "plugin    : $PLUG (skills as /factory:<skill>)" && ok "check: plugin header shows the loaded plugin" || { bad "check: plugin header"; $S -c $T/team.yaml check 2>&1 | head -10; }
 echo "--- generated settings"
 # The user's rules, in team-then-role order, without duplicates. Rules the launcher adds itself
 # (Edit denies on its own files) are checked separately, so they are left out of these lists.
@@ -164,7 +173,7 @@ disable=disable'
 RT=$(cd $T && pwd -P); RSRC=$(cd $SRC && pwd -P); RW1=$(cd $VOL/$ROOT/team-w1 && pwd -P); RHC=$(cd ~/.claude && pwd -P); RH=$(cd ~ && pwd -P)
 missing=""
 for p in "$RT/state/settings/**" "$RT/state/launch/**" "$RT/state/prompts/**" "$RT/state/messages.log" "$RT/team.yaml" \
-  "$RSRC/roles/common.md" "$RSRC/factory.sh" "$RSRC/lib/**" "$RSRC/roles/**" "$RT/bin/wrap" \
+  "$RSRC/roles/common.md" "$RSRC/factory.sh" "$RSRC/lib/**" "$RSRC/roles/**" "$RSRC/plugin/**" "$RT/bin/wrap" \
   "$RT/repo/.claude/settings.json" "$RT/repo/.claude/settings.local.json" "$RT/repo/.claude/skills/**" "$RT/repo/.claude/agents/**" "$RT/repo/.claude/commands/**" \
   "$RT/repo/.mcp.json" "$RT/repo/.claude/hooks/**" "$RT/repo/.claude/CLAUDE.md" "$RT/repo/.claude/rules/**" \
   "$RW1/.claude/settings.json" "$RW1/.claude/settings.local.json" "$RHC/settings.json" "$RH/.claude.json" "$RHC/CLAUDE.md" \
@@ -500,6 +509,22 @@ REPO_EXTRA='gate: ""' reject "an empty gate" "repo.gate must be a non-empty comm
 REPO_EXTRA='gate: "true", gate_timeout: 0' reject "a zero gate_timeout" "repo.gate_timeout must be a positive whole number of seconds" ""
 REPO_EXTRA='gate: "true", gate_max_blocks: two' reject "a non-integer gate_max_blocks" "repo.gate_max_blocks must be a positive whole number" ""
 REPO_EXTRA='gate: "true"' accept "a gate that no role runs" ""
+reject "a non-boolean sessions.claude.plugin" "sessions.claude.plugin must be true or false" "plugin: yes please"
+mk "plugin: false"; pa=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml claude_args em)
+[ $? = 0 ] && ! echo "$pa" | grep -q -- "--plugin-dir" && $S -c $T/v.yaml check 2>&1 | grep -qxF "plugin    : off (sessions.claude.plugin: false)" && ok "plugin: false omits --plugin-dir, and check says off" || { bad "plugin: false"; echo "$pa"; }
+# A team's own --plugin-dir in args is allowed and kept: the flag repeats, so both plugins load.
+mk "args: [--plugin-dir, $T/other-plugin]"; pa=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml claude_args em | tr '\n' ' ')
+[ "$pa" = "--plugin-dir $T/other-plugin --plugin-dir $PLUG " ] && ok "a team's own --plugin-dir in args is kept next to the factory plugin" || { bad "own --plugin-dir in args"; echo "$pa"; }
+# Seats get an Edit deny on a plugin the team loads itself, in both spellings: a folder (existing or
+# not) with everything under it, a .zip as the file, a relative path taken from the seat's folder.
+mk "args: [--plugin-dir, $T/other-plugin, --plugin-dir=rel/plug.zip]"
+pdeny=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml settings em | ruby -rjson -e 'puts JSON.parse(STDIN.read)["permissions"]["deny"]')
+echo "$pdeny" | grep -qxF "Edit(/$RT/other-plugin/**)" && echo "$pdeny" | grep -qxF "Edit(/$RT/proj/rel/plug.zip)" && ok "a team's own --plugin-dir (folder, or .zip relative to the seat) is Edit-protected" || { bad "own plugin dir deny"; echo "$pdeny" | grep -i plug; }
+# An install with no plugin/ folder: refused at load time while the plugin is on, fine when off.
+mkdir -p $T/inst/lib && cp $SRC/lib/team_config.rb $T/inst/lib/
+mk; out=$(TEAM_STATE_DIR=$T/state ruby $T/inst/lib/team_config.rb $T/v.yaml validate 2>&1); rc=$?
+[ $rc != 0 ] && echo "$out" | grep -qF "plugin.json is missing" && ok "rejects plugin on with no plugin manifest in the install" || { bad "missing plugin manifest (rc=$rc)"; echo "$out"; }
+mk "plugin: false"; TEAM_STATE_DIR=$T/state ruby $T/inst/lib/team_config.rb $T/v.yaml validate >/dev/null 2>&1 && ok "accepts plugin: false with no plugin manifest in the install" || bad "plugin: false with no manifest"
 echo "--- skills named in a role's prompt"
 render_em() { ruby $SRC/lib/team_config.rb $T/v.yaml render em 2>&1; }
 accept "skills by name and with a note" "" "" ', skills: [code-review, { "superpowers:test-driven-development": "before writing implementation code" }]'

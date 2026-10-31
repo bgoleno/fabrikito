@@ -33,7 +33,7 @@ EFFORTS = %w[low medium high xhigh max].freeze
 REPO_KEYS = %w[path github base gate gate_timeout gate_max_blocks].freeze
 STORAGE_KEYS = %w[volume root].freeze
 SESSION_KEYS = %w[prefix claude].freeze
-CLAUDE_KEYS = %w[wrapper args model effort permission_mode].freeze
+CLAUDE_KEYS = %w[wrapper args model effort permission_mode plugin].freeze
 PROMPT_KEYS = %w[common].freeze
 ROLE_KEYS = %w[title summary workdir prompt prompt_text kickoff session model effort permission_mode permissions
                gate_on_stop skills].freeze
@@ -45,6 +45,11 @@ SKILL_RE = /\A[A-Za-z0-9][A-Za-z0-9._-]*(:[A-Za-z0-9][A-Za-z0-9._-]*)?\z/.freeze
 
 # The folder factory.sh and this file are installed in.
 INSTALL = File.expand_path('..', __dir__)
+
+# The factory's own plugin (skills, later agents and hooks). Each seat loads it with --plugin-dir, so it
+# reaches exactly the sessions factory.sh starts: seats work in the target project's folders, where this
+# repository's .claude/ is never read, and nothing is installed into the user's settings.
+PLUGIN_DIR = File.join(INSTALL, 'plugin')
 
 # The documented permission modes (https://code.claude.com/docs/en/permission-modes). `default`
 # is the config value and `manual` its CLI alias. Both are passed through as written: the 2.1.316
@@ -210,6 +215,11 @@ class TeamConfig
   end
   def display
     section('display', DISPLAY_KEYS, required: false)
+  end
+
+  # sessions.claude.plugin: load the factory's plugin into every seat (default true).
+  def plugin?
+    claude.key?('plugin') ? claude['plugin'] : true
   end
 
   def view_iterm
@@ -407,6 +417,7 @@ class TeamConfig
     out += ['--model', model(id)] if model(id)
     out += ['--effort', effort(id)] if effort(id)
     out += ['--permission-mode', permission_mode(id)] if permission_mode(id)
+    out += ['--plugin-dir', real_path(PLUGIN_DIR)] if plugin?
     out
   end
 
@@ -467,6 +478,10 @@ class TeamConfig
       *([prompts_common_path] + roles.values.map { |r| r['prompt'] && expand(r['prompt']) }).compact,
       # the launcher itself, and the wrapper it runs claude through
       File.join(INSTALL, 'factory.sh'), File.join(INSTALL, 'lib', '**'), File.join(INSTALL, 'roles', '**'),
+      # the factory's plugin, which every seat loads at its next start
+      File.join(PLUGIN_DIR, '**'),
+      # and any plugin the team loads itself with --plugin-dir in args
+      *args_plugin_paths(id),
       *wrapper_path,
       # settings a worktree session reads from the main checkout's root, and the skills, agents and
       # commands it reads from there when its own checkout lacks them. Not all of .claude/: Claude
@@ -490,6 +505,22 @@ class TeamConfig
       base = glob ? p[0...-3] : p
       [File.expand_path(base), real_path(base)].uniq.map { |b| glob ? "#{glob_escape(b)}/**" : glob_escape(b) }
     end.uniq
+  end
+
+  # Each --plugin-dir in sessions.claude.args (`--plugin-dir X` or `--plugin-dir=X`): the .zip file, or
+  # the folder with everything under it (whether or not it exists yet). claude runs in the seat's
+  # folder, so a relative path is taken from there; a leading ~ is the home folder.
+  def args_plugin_paths(id)
+    a = args
+    a.each_with_index.map do |x, i|
+      v = if x == '--plugin-dir' then a[i + 1]
+          elsif x.start_with?('--plugin-dir=') then x.split('=', 2)[1]
+          end
+      next if v.nil? || v.empty?
+
+      p = File.expand_path(v.sub(/\A~(?=\/|\z)/, Dir.home), workdir(id))
+      p.downcase.end_with?('.zip') ? p : File.join(p, '**')
+    end.compact
   end
 
   # The wrapper claude runs through, if one is set. Inside an .app bundle the whole bundle is
@@ -644,6 +675,10 @@ class TeamConfig
       what = k == 'gate_timeout' ? 'a positive whole number of seconds' : 'a positive whole number'
       die "repo.#{k} must be #{what}" unless repo[k].is_a?(Integer) && repo[k].positive?
     end
+    die 'sessions.claude.plugin must be true or false' unless [true, false].include?(plugin?)
+    if plugin? && !File.file?(File.join(PLUGIN_DIR, '.claude-plugin', 'plugin.json'))
+      die "sessions.claude.plugin is on, but #{PLUGIN_DIR}/.claude-plugin/plugin.json is missing"
+    end
     die "sessions.claude.effort must be one of #{EFFORTS.join(', ')}" if claude['effort'] && !EFFORTS.include?(claude['effort'].to_s)
     if claude.key?('permission_mode') && !PERMISSION_MODES.include?(claude['permission_mode'].to_s)
       die "sessions.claude.permission_mode must be one of #{PERMISSION_MODES.join(', ')}"
@@ -722,6 +757,7 @@ when 'get'
   when 'display.iterm' then puts cfg.view_iterm
   when 'display.primary' then puts cfg.view_primary
   when 'display.window' then puts cfg.view_window
+  when 'sessions.plugin' then puts(cfg.plugin? ? real_path(PLUGIN_DIR) : '')
   when 'sessions.wrapper' then puts(cfg.claude['wrapper'] ? cfg.expand(cfg.claude['wrapper']) : '')
   when 'state.dir' then puts cfg.state_dir
   when 'state.generated_dirs' then puts GENERATED_DIRS
