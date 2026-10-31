@@ -1079,7 +1079,8 @@ cmd_attach() {
 cwd_users() {
   local p out
   p=$(CDPATH= cd -- "$1" 2>/dev/null && pwd -P) || return 2
-  case $p in *\\*) return 3 ;; esac
+  # A newline too: grep reads lines, so it would never see one (lsof prints it as backslash-n).
+  case $p in *\\* | *$'\n'*) return 3 ;; esac
   # A here-string, not a pipe: under pipefail, grep -q stopping early could fail the printf.
   LC_ALL=C grep -q '[^ -~]' <<<"$p" && return 3
   out=$(lsof -w -d cwd -F pn 2>/dev/null) || true
