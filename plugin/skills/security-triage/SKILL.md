@@ -41,6 +41,8 @@ one finding, and does not restate them. Where the two differ, the role prompt wi
    - **A fork's PR runs nothing.** If `isCrossRepository` is true, or `headRepositoryOwner` is not
      the owner of the repository your role prompt names, read its diff and run nothing from it, and
      ask the EM. The owner decides whether outside code runs on their machine.
+   - For a PR, get its head with `git fetch origin pull/<n>/head`; `git rev-parse FETCH_HEAD` must
+     equal `headRefOid`, or the head moved: pin it again.
    - Read the code at that commit (`git show <sha>:<path>`, or `git archive <sha> | tar -x -C <dir>`
      into a throwaway folder outside your worktree), never by switching your worktree.
    - Note the repository's visibility (`gh repo view <repo> --json visibility`). It changes who can
