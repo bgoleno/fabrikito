@@ -438,7 +438,10 @@ command, the last 60 lines of its output and the path of the full log (`.state/<
 Roles without the switch never run it. The example gives it to the engineers and qa.
 
 - Only uncommitted work is gated at a stop: a clean tree, including committed but unpushed work, ends
-  the turn normally. Committed work is gated again when the reviewer runs the gate on the PR.
+  the turn normally. Committed work is gated again when the reviewer runs the gate on the PR. A
+  `git status` that fails (a corrupt index, say) counts as uncommitted work: the gate runs, and a
+  send-back says status failed. The hook's git calls do not run a repository's fsmonitor program;
+  clean filters stay on, because status needs them for a correct answer ([#104](../../issues/104)).
 - Only the seat's configured working tree is checked. Work left in another tree, such as a worktree
   Claude Code made for a subagent or for `EnterWorktree` under `<repo>/.claude/worktrees/`, is not
   gated.

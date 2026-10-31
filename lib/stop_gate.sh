@@ -28,12 +28,24 @@ dir="$state/gate"
 log="$dir/$role.log"
 count="$dir/$role.count"
 
+# Every git call here runs with core.fsmonitor=false (#104). A repository's fsmonitor is a program
+# named in its git config, which git runs whenever it looks at the work tree, and this hook runs
+# unattended in every gated seat. fsmonitor is only a speed-up: status gives the same answer
+# without it. The setting reaches submodules too. Clean filters stay on, as decided with sec on #104:
+# turning them off changes what status reports (a touched LFS file would show as modified), and
+# their command, like fsmonitor's, can only come from git config.
+g() { git -c core.fsmonitor=false "$@"; }
+
 cd "$workdir" 2>/dev/null || exit 0
-git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
+g rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
 mkdir -p "$dir"
 # Only uncommitted work is gated (untracked files count; ignored ones do not). Committed work is
-# gated again when the reviewer runs the gate on the PR.
-if [ -z "$(git status --porcelain 2>/dev/null)" ]; then
+# gated again when the reviewer runs the gate on the PR. A status that fails (a corrupt index, a
+# required clean filter that fails) is not read as a clean tree: the gate runs, so the hook fails
+# closed (#104).
+changes=$(g status --porcelain 2>/dev/null)
+status_rc=$?
+if [ "$status_rc" = 0 ] && [ -z "$changes" ]; then
   [ -n "$session" ] && rm -f "$count"
   exit 0
 fi
@@ -94,6 +106,7 @@ n=$((n + 1))
   else
     echo "gate failed (exit $rc): $gate"
   fi
+  [ "$status_rc" = 0 ] || echo "(git status failed in $workdir (exit $status_rc), so the tree was gated as if it had uncommitted changes.)"
   echo "Last lines of its output (all of it is in $log):"
   tail -n 60 "$log"
   echo
