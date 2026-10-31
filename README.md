@@ -94,6 +94,31 @@ a good start.
 Unknown keys, missing prompt files, duplicate session names and unknown placeholders are errors at load
 time, before anything starts.
 
+## New worktrees
+
+A worktree `up` creates is a fresh checkout of `repo.base`: none of the main checkout's git-ignored
+files are there (an `.env`, local config), and nothing is installed. Two optional `repo` keys set it up
+before its seat starts, the way Claude Code's own worktrees use `.worktreeinclude` and an install
+command ([docs](https://code.claude.com/docs/en/worktrees)):
+
+- `repo.copy`: paths relative to the main checkout, copied into the new worktree (files or folders;
+  meant for small files). A path that does not exist is a warning; a file the worktree already has is
+  left as it is. Paths must stay inside the checkout.
+- `repo.bootstrap`: a command run with bash in the new worktree after the copy, with no terminal input
+  and with `TEAM_ROLE` and `TEAM_REPO` (the main checkout) set, for example `npm ci` or `uv sync`. If it
+  fails, `up` prints its output, removes that worktree (it was just made, by that exact path) so the
+  next `up` starts over, and stops before starting the seat.
+
+Both run only when `up` creates a worktree, not for a worktree that exists, and not for a `project`
+workdir. `check` shows them. A copied secret is a second copy on the worktree volume; the team's
+`Read` deny on `.env` files covers it like the original.
+
+Package stores when worktrees are on another volume: tools that hard-link from a shared store
+(pnpm, uv) can only link within one volume, so with the store on the internal disk and the worktrees
+elsewhere each worktree gets full copies instead. Point the store at the worktree volume from the
+bootstrap, for example `pnpm install --store-dir /Volumes/<drive>/.pnpm-store` or
+`UV_CACHE_DIR=/Volumes/<drive>/.uv-cache uv sync`. A plain download cache (npm's) works from either disk.
+
 ## The factory plugin
 
 `plugin/` is a Claude Code [plugin](https://code.claude.com/docs/en/plugins) (`.claude-plugin/plugin.json`

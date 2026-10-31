@@ -71,6 +71,7 @@ GITHUB=$(cfg get repo.github)
 PROJECT_NAME=$(cfg get project.name)
 PROJECT_URL=$(cfg get project.url)
 BASE=$(cfg get repo.base)
+BOOTSTRAP=$(cfg get repo.bootstrap)
 VOLUME=$(cfg get storage.volume)
 WT_ROOT=$(cfg get storage.worktree_root)
 PREFIX=$(cfg get sessions.prefix)
@@ -139,6 +140,40 @@ ensure_worktree() {
   git -C "$REPO" fetch --quiet origin "${BASE#origin/}" || echo "warning: fetch failed; using the local $BASE" >&2
   git -C "$REPO" worktree add --detach "$dir" "$BASE" >/dev/null
   echo "  created worktree $dir"
+  bootstrap_worktree "$id" "$dir"
+}
+
+# A worktree up has just made has none of the main checkout's git-ignored files and no installed
+# dependencies (#10). Copy repo.copy's paths from the main checkout (never over a file the worktree
+# already has), then run repo.bootstrap there with no terminal input. If either fails, print why,
+# remove that new worktree by its exact path so the next up starts over, and stop: the seat would
+# otherwise start in a worktree that is set up halfway and never gets the bootstrap again.
+bootstrap_worktree() {
+  local id=$1 dir=$2 p out rc
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    if [ ! -e "$REPO/$p" ]; then
+      echo "  warning: repo.copy: $REPO/$p does not exist; not copied" >&2
+    elif [ -e "$dir/$p" ]; then
+      echo "  repo.copy: $p is already in the worktree; left as it is"
+    elif mkdir -p "$(dirname "$dir/$p")" && cp -pR "$REPO/$p" "$dir/$p"; then
+      echo "  copied $p"
+    else
+      abandon_worktree "$dir" "repo.copy could not copy $REPO/$p"
+    fi
+  done < <(cfg get repo.copy)
+  [ -n "$BOOTSTRAP" ] || return 0
+  echo "  bootstrap: $BOOTSTRAP"
+  # set -e: a failing assignment would exit here, before the output is shown and the worktree removed.
+  out=$(cd "$dir" && TEAM_ROLE=$id TEAM_REPO=$REPO bash -c "$BOOTSTRAP" </dev/null 2>&1) && rc=0 || rc=$?
+  [ "$rc" -eq 0 ] && return 0
+  printf '%s\n' "$out" | sed 's/^/    | /' >&2
+  abandon_worktree "$dir" "repo.bootstrap failed (exit $rc) in $dir"
+}
+
+abandon_worktree() {
+  git -C "$REPO" worktree remove --force "$1" >/dev/null 2>&1 || echo "  warning: could not remove $1; remove it before the next up" >&2
+  die "$2; the new worktree was removed, so the next up sets it up again"
 }
 
 cmd_check() {
@@ -156,6 +191,10 @@ cmd_check() {
   echo "gate      : $(cfg get repo.gate_summary)"
   hooks_note=$(cfg get hooks.note)
   [ -z "$hooks_note" ] || echo "hooks     : $hooks_note"
+  echo "bootstrap : ${BOOTSTRAP:-none}$([ -n "$BOOTSTRAP" ] && echo ' (run in each new worktree before its seat starts)')"
+  local copy
+  copy=$(cfg get repo.copy | paste -sd ',' - | sed 's/,/, /g')
+  echo "copy      : ${copy:-none}$([ -n "$copy" ] && echo ' (from the main checkout into each new worktree)')"
   echo "updates   : Claude Code's auto-updater is off in every seat (DISABLE_AUTOUPDATER=1); update by hand, then down and up"
   if resolve_claude; then
     echo "claude    : $CLAUDE_SRC, version $CLAUDE_VERSION; seats run the team's copy $CLAUDE_COPY$([ -x "$CLAUDE_COPY" ] || echo ' (made at the next up)')"

@@ -42,7 +42,7 @@ TOP_KEYS = %w[team owner repo project storage sessions display prompts kickoff p
 DISPLAY_KEYS = %w[iterm primary window].freeze
 PROJECT_KEYS = %w[name url].freeze
 EFFORTS = %w[low medium high xhigh max].freeze
-REPO_KEYS = %w[path github base gate gate_timeout gate_max_blocks].freeze
+REPO_KEYS = %w[path github base gate gate_timeout gate_max_blocks bootstrap copy].freeze
 STORAGE_KEYS = %w[volume root].freeze
 SESSION_KEYS = %w[prefix claude].freeze
 CLAUDE_KEYS = %w[wrapper args model effort permission_mode plugin].freeze
@@ -661,6 +661,18 @@ class TeamConfig
     repo['gate']&.to_s
   end
 
+  # Run in a worktree up has just made, before its seat starts (#10): a fresh worktree has no
+  # installed dependencies. repo.copy lists small git-ignored files (an .env, local config) copied
+  # from the main checkout first, as Claude Code's own worktrees do with .worktreeinclude
+  # (https://code.claude.com/docs/en/worktrees).
+  def bootstrap
+    repo['bootstrap']&.to_s
+  end
+
+  def copy_paths
+    (repo['copy'] || []).map(&:to_s)
+  end
+
   def gate_timeout
     (repo['gate_timeout'] || 600).to_i
   end
@@ -857,6 +869,15 @@ class TeamConfig
     bad = claude.keys - CLAUDE_KEYS
     die "unknown key(s) under 'sessions.claude': #{bad.join(', ')}" unless bad.empty?
     die 'repo.gate must be a non-empty command' if repo.key?('gate') && !(repo['gate'].is_a?(String) && !repo['gate'].strip.empty?)
+    die 'repo.bootstrap must be a non-empty command' if repo.key?('bootstrap') && !(repo['bootstrap'].is_a?(String) && !repo['bootstrap'].strip.empty?)
+    if repo.key?('copy')
+      die 'repo.copy must be a list of paths (relative to the main checkout)' unless repo['copy'].is_a?(Array)
+      repo['copy'].each do |p|
+        # Inside the main checkout only, and one path per line for factory.sh.
+        ok = p.is_a?(String) && !p.empty? && !p.start_with?('/', '~') && !p.include?("\n") && !p.split('/').include?('..')
+        die "repo.copy: '#{p}' must be a relative path inside the main checkout" unless ok
+      end
+    end
     %w[gate_timeout gate_max_blocks].each do |k|
       next unless repo.key?(k)
 
@@ -956,6 +977,8 @@ when 'get'
   when 'state.generated_dirs' then puts GENERATED_DIRS
   when 'state.notes_dir' then puts File.join(cfg.state_dir, NOTES_DIR)
   when 'hooks.note' then puts cfg.hooks_note.to_s
+  when 'repo.bootstrap' then puts(cfg.bootstrap || '')
+  when 'repo.copy' then puts cfg.copy_paths
   when 'repo.gate_summary'
     puts(cfg.gate ? "#{cfg.gate} (timeout #{cfg.gate_timeout}s; a seat may stop after #{cfg.gate_max_blocks} failed gates in a row)" : 'none')
   else die "unknown key '#{key}'"

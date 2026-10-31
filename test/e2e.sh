@@ -45,6 +45,10 @@ pass=0; fail=0; ok(){ echo "PASS $1"; pass=$((pass+1)); }; bad(){ echo "FAIL $1"
 # throwaway repo with a "github" slug the origin URL contains
 git init -q --bare $T/local/origin.git; git clone -q $T/local/origin.git $T/repo 2>/dev/null
 (cd $T/repo && git commit -q --allow-empty -m init && git branch -M main && git push -q origin main)
+# Git-ignored files a new worktree needs (#10): repo.copy brings them over from the main checkout,
+# then repo.bootstrap (a stand-in that logs where it ran and whether the copy came first) runs there.
+mkdir -p $T/repo/conf && echo "SECRET=1" > $T/repo/.env.local && echo '{"dev":true}' > $T/repo/conf/dev.json && printf '.env.local\nconf/\n' >> $T/repo/.git/info/exclude
+printf '#!/bin/sh\necho "$TEAM_ROLE $(pwd -P) env=$(test -f .env.local && echo yes || echo no) repo=$TEAM_REPO" >> %s/boot.log\n' $T > $T/bin/boot; chmod +x $T/bin/boot
 # fake claude: a real binary named claude (the process check looks at the process name). It
 # draws Claude Code 2.1.316's input box as captured on 2026-10-30 (a rule naming the session from
 # -n, cursor and no-break space, a plain rule, then a status line and the mode line; an empty box
@@ -196,7 +200,8 @@ printf '#!/bin/sh\necho "$TEAM_ROLE $1" >> %s/bin.log\nc=$1\nshift\necho "$TEAM_
 mkdir -p $T/proj
 cat > $T/team.yaml <<Y
 team: tt
-repo: { path: $T/repo, github: local/origin.git, base: origin/main, gate: "make check", gate_timeout: 120, gate_max_blocks: 2 }
+repo: { path: $T/repo, github: local/origin.git, base: origin/main, gate: "make check", gate_timeout: 120, gate_max_blocks: 2,
+        bootstrap: "$T/bin/boot", copy: [.env.local, conf/dev.json, missing.txt] }
 project: { name: TestBoard, url: "https://github.com/users/x/projects/9" }
 storage: { volume: $VOL, root: $ROOT }
 sessions:
@@ -221,6 +226,11 @@ out=$($S -c $T/team.yaml up --no-view 2>&1); echo "$out" | grep -E "start|error|
 echo "$out" | grep -q "start  w1" && ok "w1 started" || bad "w1 started"
 echo "$out" | grep -q "migrate w2" && ok "w2 refused with migrate hint" || bad "w2 refused with migrate hint"
 case "$(git -C $T/repo worktree list)" in *"$VOL/$ROOT/team-w1"*) ok "w1 worktree is on the volume";; *) bad "w1 worktree is on the volume";; esac
+RWT1=$(cd $VOL/$ROOT/team-w1 2>/dev/null && pwd -P)
+[ "$(cat $VOL/$ROOT/team-w1/.env.local 2>/dev/null)" = "SECRET=1" ] && [ "$(cat $VOL/$ROOT/team-w1/conf/dev.json 2>/dev/null)" = '{"dev":true}' ] && ok "repo.copy: w1's new worktree has .env.local and conf/dev.json from the main checkout" || { bad "repo.copy into w1"; ls -la $VOL/$ROOT/team-w1 2>&1 | head; }
+grep -qE "^w1 $RWT1 env=yes repo=.*/repo$" $T/boot.log && ok "repo.bootstrap ran in w1's new worktree, after the copy, with TEAM_ROLE and TEAM_REPO" || { bad "repo.bootstrap in w1"; cat $T/boot.log 2>&1; }
+echo "$out" | grep -qF "repo.copy: $T/repo/missing.txt does not exist" && ok "repo.copy warns about a missing file and goes on" || { bad "repo.copy missing-file warning"; echo "$out" | grep -i copy; }
+! grep -q "^em " $T/boot.log && ok "repo.bootstrap does not run for a project workdir (em)" || bad "repo.bootstrap ran for em"
 sleep 3
 grep -q "^w1 .*--model sonnet --effort low" $T/args.log && ok "w1 launched with --model sonnet --effort low" || { bad "w1 args"; cat $T/args.log; }
 PLUG=$(cd $SRC/plugin && pwd -P)
@@ -317,6 +327,7 @@ Bash(git push */main)
 Bash(git push */main *)'
 [ "$(rules $T/state/settings/em.json ask | grep '^Bash(git push ')" = "$base_rules" ] && ok "ask on any push to the base branch (main, from origin/main): the 8 patterns" || { bad "base-branch ask"; rules $T/state/settings/em.json ask; }
 chk=$($S -c $T/team.yaml check 2>&1)
+echo "$chk" | grep -qxF "bootstrap : $T/bin/boot (run in each new worktree before its seat starts)" && echo "$chk" | grep -qxF "copy      : .env.local, conf/dev.json, missing.txt (from the main checkout into each new worktree)" && ok "check: bootstrap and copy lines" || { bad "check: bootstrap and copy lines"; echo "$chk" | grep -E "^(bootstrap|copy) "; }
 echo "$chk" | grep -qE "^em +Manager .* bypassPermissions " && echo "$chk" | grep -qE "^w1 +Worker One .* default " && ok "check: MODE column per role" || { bad "check MODE column"; echo "$chk"; }
 echo "$chk" | grep -qE "^w1 +Worker One +tt-w1 +sonnet +low " && echo "$chk" | grep -qE "^em +Manager +tt-em +\(inherit\) +\(inherit\) " \
   && ok "check: MODEL and EFFORT columns per role (a role's own, or inherit)" || { bad "check MODEL/EFFORT columns"; echo "$chk"; }
@@ -485,6 +496,7 @@ $S -c $T/team.yaml migrate w2 2>&1 | grep -E "moved|REFUSE|skip" | cut -c1-150
 $S -c $T/team.yaml up --no-view w2 2>&1 | grep -E "start|error" | cut -c1-150
 case "$(git -C $T/repo worktree list)" in *"$VOL/$ROOT/team-w2"*) ok "w2 recreated on the volume";; *) bad "w2 recreated on the volume";; esac
 [ ! -d $T/repo/.claude/worktrees/team-w2 ] && ok "legacy w2 folder gone" || bad "legacy w2 folder gone"
+[ "$(grep -c '^w2 ' $T/boot.log)" = 1 ] && [ "$(grep -c '^w1 ' $T/boot.log)" = 1 ] && ok "repo.bootstrap runs once per new worktree: for w2 now, not again for w1" || { bad "repo.bootstrap runs"; cat $T/boot.log; }
 echo "--- status"; $S -c $T/team.yaml status | cut -c1-150
 echo "--- dirty legacy is refused"
 $S -c $T/team.yaml down --yes w1 >/dev/null; $S -c $T/team.yaml migrate w1 2>&1 | grep -c "removed 0" | grep -q 1 && true
@@ -729,6 +741,18 @@ accept "an mcp server-scoped glob in allow" "" "$(rule allow '"mcp__puppeteer__*
 accept "a parameter rule on a non-main field" "" "$(rule deny '"Agent(model:opus)", "Bash(command -v *)", "Bash(ls:*)"')"
 accept "the manual alias" "permission_mode: manual"
 reject "gate_on_stop without repo.gate" "gate_on_stop needs repo.gate" "" "" ", gate_on_stop: true"
+REPO_EXTRA='bootstrap: ""' reject "an empty repo.bootstrap" "repo.bootstrap must be a non-empty command"
+REPO_EXTRA='copy: .env' reject "a repo.copy that is not a list" "repo.copy must be a list of paths"
+REPO_EXTRA='copy: [../x]' reject "a repo.copy path outside the checkout (..)" "repo.copy: '../x' must be a relative path inside the main checkout"
+REPO_EXTRA='copy: [/etc/hosts]' reject "an absolute repo.copy path" "repo.copy: '/etc/hosts' must be a relative path inside the main checkout"
+REPO_EXTRA='copy: ["~/x"]' reject "a repo.copy path under ~" "repo.copy: '~/x' must be a relative path inside the main checkout"
+# A failing bootstrap stops the start with its output, and removes the worktree it ran in so the next
+# up runs it again (#10). Nothing is started for that seat.
+printf '#!/bin/sh\necho boom-out\necho boom-err >&2\nexit 3\n' > $T/bin/boot-fail; chmod +x $T/bin/boot-fail
+REPO_EXTRA="bootstrap: \"$T/bin/boot-fail\"" mk "wrapper: $T/bin/wrap"; echo "  w8: { title: B, workdir: { type: worktree }, prompt_text: \"p\" }" >> $T/v.yaml
+bf=$(TEAM_STATE_DIR=$T/state5 $S -c $T/v.yaml up --no-view w8 2>&1); rc=$?
+[ $rc -ne 0 ] && echo "$bf" | grep -qF "boom-out" && echo "$bf" | grep -qF "boom-err" && echo "$bf" | grep -qF "repo.bootstrap failed (exit 3)" && [ ! -e $VOL/$ROOT/team-w8 ] && ! git -C $T/repo worktree list | grep -q "team-w8" && ! tmux has-session -t '=tv-w8' 2>/dev/null &&
+  ok "a failing repo.bootstrap stops the start with its output, removes the new worktree and starts no seat" || { bad "failing repo.bootstrap (rc=$rc)"; echo "$bf" | tail -6; git -C $T/repo worktree list; }
 REPO_EXTRA='gate: "true"' reject "a non-boolean gate_on_stop" "gate_on_stop must be true or false" "" "" ", gate_on_stop: yes please"
 REPO_EXTRA='gate: ""' reject "an empty gate" "repo.gate must be a non-empty command" ""
 REPO_EXTRA='gate: "true", gate_timeout: 0' reject "a zero gate_timeout" "repo.gate_timeout must be a positive whole number of seconds" ""
