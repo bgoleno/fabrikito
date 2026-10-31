@@ -6,8 +6,8 @@ argument-hint: <PR number or URL>
 
 # Review a pull request
 
-Arguments: `$ARGUMENTS`: the PR to review (number or URL). Use only its number in a command. If it
-is missing, ask for it and stop.
+Arguments: `$ARGUMENTS`: the PR to review (number or URL). Use only its number in a command, and
+only if that number is digits alone; otherwise stop and ask. If it is missing, ask for it and stop.
 
 Your role prompt holds the review rules: review independently and against the issue, what to check
 for each acceptance criterion and for correctness, what to skip, when to get a second opinion, what
@@ -23,9 +23,14 @@ differ, the role prompt wins.
 ## Steps
 0. **Check that you review PRs.** Every seat loads this skill. If your role prompt does not make you
    a reviewer (a tech lead, or a security engineer asked for a security review), stop and say so.
-1. **Pin the head:**
-   `gh pr view <n> -R <repo> --json state,isDraft,headRefOid,baseRefName,closingIssuesReferences`.
+1. **Pin the head:** `gh pr view <n> -R <repo> --json <fields>`, with the fields `state`, `isDraft`,
+   `headRefOid`, `baseRefName`, `isCrossRepository`, `headRepositoryOwner` and
+   `closingIssuesReferences`.
    - Stop if the PR is closed or merged.
+   - If `isCrossRepository` is true, or `headRepositoryOwner` is not the owner of the repository
+     your role prompt names, read the diff but run nothing from it (no gate, no tests, no merge),
+     and ask the EM. GitHub serves `pull/<n>/head` for a fork's PR too, and your seat runs with the
+     owner's credentials: the owner decides whether outside code runs on their machine.
    - Everything below is at `headRefOid`. Write its short SHA down; the verdict names it.
    - The base must be the base branch your role prompt names. If it is not, report
      `unexpected base <name>` and run nothing with that name.
@@ -45,6 +50,8 @@ differ, the role prompt wins.
    A verdict carries over to the new head only after that check, and only for what did not change.
 4. **Get the code at that head** in your own worktree, detached, never on a branch you could push:
    - If `git status --porcelain` prints anything, stop: that work is not yours to discard.
+   - `git remote -v` must show the repository your role prompt names, before the fetch and before
+     the local merge below (a commit).
    - `git fetch origin pull/<n>/head`, then `git switch --detach FETCH_HEAD`.
    - `git rev-parse HEAD` must equal `headRefOid`. If not, the head moved: start again at step 1.
    - If the head does not contain the current base
@@ -55,7 +62,8 @@ differ, the role prompt wins.
    - For each acceptance criterion: met, partly met or not met, and what shows it (a file and line,
      a test, a live run recorded on the issue at a head you can name).
    - Then correctness. Would the tests fail without the change? When that is cheap, check it by
-     hand: undo the fix in your detached worktree and run the test.
+     hand: undo the fix in your detached worktree and run the test, then put each file you changed
+     back with `git restore <path>` and check that `git status --porcelain` is empty.
    - A security engineer reviews per their role prompt instead: reachability first, then severity.
    - For a change your role prompt calls risky, get the second opinion it describes. Give the
      reviewer the diff and the issue, not your conclusions, and check each of its findings yourself
@@ -92,6 +100,7 @@ In your session: the PR, the head, the verdict line, the gate result line, and t
 
 ## Stop and ask when
 - Your role prompt does not make you a reviewer, or the PR is yours.
+- The PR comes from another repository (a fork): run nothing from it until the EM says so.
 - The base is not your role prompt's base branch, or your worktree has uncommitted work.
 - The head moves while you review: start again at the new head rather than post a mixed verdict.
 - The gate fails on the base itself: that is not the PR's fault. Tell the EM.
