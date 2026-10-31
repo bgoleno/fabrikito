@@ -270,16 +270,24 @@ are labelled `[from <role>]`, and the owner's are `[from owner]`. The label is s
 run from inside a seat (found from the terminals of the processes that started it) is labelled with
 that seat's role, never `[from owner]`; this stops a mislabel by accident, and the labels are still
 not authenticated ([#29](../../issues/29)). When it cannot tell, `say` refuses rather than guess: when
-`ps` cannot read its process or one of its ancestors, when tmux cannot list its panes, or when it runs inside a seat of another
-team on the same tmux server (any session `up` started, which sets `TEAM_ROLE`). The check looks only at
-the tmux server `say` addresses: a process is labelled `[from owner]` when it has no terminal at all, or
-when its terminal is not a seat's pane on that server. So a seat on another tmux server is labelled
-`[from owner]`, for example a seat that runs `test/live-env.sh run` to drive a throwaway team on a
-private server. A background job that outlives the command that started it, or a command a seat runs in a new tmux
-session, is not caught and is labelled `[from owner]` (the comment above `caller_seat` in `factory.sh` lists every
-such way). A seat cannot `say` to itself. A `TEAM_ROLE` that is set must be one of the team's role
-ids: `say` refuses any other value, and the reserved `owner` and `launcher`, sending no keys and
+`ps` cannot read its process or one of its ancestors, when tmux cannot list its panes, when it runs
+inside a seat of another team on the same tmux server (any session `up` started, which sets
+`TEAM_ROLE`), or when a tmux server other than the one `say` addresses is among its ancestors. The last
+is a pane of another server, whose seats `say` cannot see ([#115](../../issues/115)). It refuses a seat of
+any team on any other server, and the owner's own pane on such a server too. From a terminal outside tmux
+the owner is still `[from owner]` (`TEAM_ROLE=owner` is refused). A background job that outlives the
+command that started it, or a command a seat runs in a new tmux session on the server `say` addresses, is
+not caught and is labelled `[from owner]` (the comment above `caller_seat` in `factory.sh` lists every such
+way). A seat cannot `say` to itself. A `TEAM_ROLE` that is set must be one of the team's role ids, or
+`live-test`: `say` refuses any other value, and the reserved `owner` and `launcher`, sending no keys and
 logging NOT-DELIVERED.
+
+`live-test` is the driver label. `test/live-env.sh run` sets `TEAM_ROLE=live-test`, so a live test that a
+seat drives sends as `[from live-test]`, never as `[from owner]`. No role id can be `live-test`, since role
+ids hold no hyphen. `say` refuses it when it addresses the default tmux server, where the real team runs.
+It works that out from `TMUX` and `TMUX_TMPDIR`, before any tmux command. The limit: a real team the owner
+runs on a tmux server other than the default one is not told apart from a test team, and can receive
+`[from live-test]`.
 
 ### The kickoff
 
@@ -300,7 +308,7 @@ authenticated (#29): it keeps the kickoff from looking like owner input, nothing
 sends (#39), through a hook in each seat's generated settings.
 
 Each `say` (`say all` included) appends exactly one line of five tab-separated fields: the local time
-(`2026-10-30T14:05:09`), the sender (`TEAM_ROLE`, the seat `say` ran inside, `owner`, or `?` when `TEAM_ROLE` is unset and
+(`2026-10-30T14:05:09`), the sender (`TEAM_ROLE`, which is a role id or `live-test`; the seat `say` ran inside; `owner`; or `?` when `TEAM_ROLE` is unset and
 `say` refused because it could not tell whether it ran inside a seat), the recipient (a role id or `all`),
 `delivered` or `NOT-DELIVERED`, and the message as typed, without its `[from <role>]` label. The
 sender and the message are escaped so the record stays on one line and holds no terminal control
@@ -574,9 +582,10 @@ d=$(test/live-env.sh new)                                  a private folder: tmu
 test/live-env.sh run "$d" ./factory.sh -c /path/to/throwaway.yaml up
 test/live-env.sh run "$d" tmux ls                          any command, with TMUX_TMPDIR=$d/tmux and
                                                            TEAM_STATE_DIR=$d/state (absolute), TEAM_VIEW=0,
-                                                           and TMUX and a seat's TEAM_CONFIG, TEAM_ROLE and
-                                                           TEAM_SCRIPT unset (so factory.sh without -c never
-                                                           finds the seat's real team)
+                                                           TEAM_ROLE=live-test (the driver label), and TMUX
+                                                           and a seat's TEAM_CONFIG and TEAM_SCRIPT unset (so
+                                                           factory.sh without -c never finds the seat's real
+                                                           team)
 test/live-env.sh down "$d"                                 stop its tmux server, remove the folder
 ```
 
@@ -608,9 +617,11 @@ file is swapped; a copy that cannot be made, or a shared install caught mid-rein
 start). It also covers `up` refusing a throwaway team on the default tmux server (TMUX and TMUX_TMPDIR
 unset, `/tmp` by two spellings, an empty or missing TMUX_TMPDIR, a relative one under CDPATH, TMUX naming
 the default socket) before any tmux call, going ahead on a private server, for a team file in `teams/` and
-with `--default-socket`, and `test/live-env.sh` (its environment, with a seat's TEAM_CONFIG, TEAM_ROLE and
-TEAM_SCRIPT unset and the folders resolved, its private socket, and refusing a missing folder, one `new`
-did not make, one whose tmux folder resolves to `/tmp`, and one whose socket folder or socket is a link).
+with `--default-socket`, and `test/live-env.sh` (its environment, with a seat's TEAM_CONFIG and TEAM_SCRIPT unset, TEAM_ROLE
+`live-test` and the folders resolved, its private socket, and refusing a missing folder, one `new`
+did not make, one whose tmux folder resolves to `/tmp`, and one whose socket folder or socket is a link). It also covers `say` across tmux servers
+(#115): with `TEAM_ROLE` unset, a seat on one server and a pane of another are refused; a live-env driver sends
+`[from live-test]`; and `live-test` is refused on the default server before any tmux call.
 
 The exit code is authoritative: `test/e2e.sh` exits 0 only when it reaches the end with every
 assertion passed (`RESULT pass=<n> fail=0`), and non-zero when any assertion fails or the run stops
