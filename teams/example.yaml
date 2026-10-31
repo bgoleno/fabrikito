@@ -117,9 +117,17 @@ permissions:
   ask:
     # Merging a PR is the owner's (or, when told, the EM's) step. Every role but em denies it
     # outright below; this ask covers a role added later without rules of its own.
+    # The spellings: gh pr merge (any flags after it), the same with a flag such as -R before the
+    # subcommand, the REST and GraphQL merge calls, auto-merge, and merging a branch without a PR
+    # (#85). `check` warns about a role that has neither a deny nor an ask on each of them.
     - Bash(gh pr merge *)
+    - Bash(gh pr -* merge *)
+    - Bash(gh pr -* merge)
     - Bash(gh api *pulls/*/merge*)
+    - Bash(gh api *repos/*/merges*)
     - Bash(gh api graphql*mergePullRequest*)
+    - Bash(gh api graphql*enablePullRequestAutoMerge*)
+    - Bash(gh api graphql*mergeBranch*)
 
 # Seats start in this order. Each needs: title, workdir, and one of `prompt` (a file) or
 # `prompt_text` (inline). `summary` is the line shown in the roster every seat sees.
@@ -162,7 +170,16 @@ roles:
     skills:
       - "code-review": to review a PR's diff for correctness bugs
       - "superpowers:writing-plans": to turn an agreed design into steps an engineer can follow
-    permissions: { deny: ["Bash(gh pr merge *)", "Bash(gh api *pulls/*/merge*)", "Bash(gh api graphql*mergePullRequest*)"] }
+    permissions:
+      deny:
+        - Bash(gh pr merge *)
+        - Bash(gh pr -* merge *)
+        - Bash(gh pr -* merge)
+        - Bash(gh api *pulls/*/merge*)
+        - Bash(gh api *repos/*/merges*)
+        - Bash(gh api graphql*mergePullRequest*)
+        - Bash(gh api graphql*enablePullRequestAutoMerge*)
+        - Bash(gh api graphql*mergeBranch*)
   fs1:
     title: Senior Full-Stack Software Engineer
     summary: implements assigned issues
@@ -174,7 +191,16 @@ roles:
       - "superpowers:systematic-debugging": on a bug or a failing test, before proposing a fix
       - "superpowers:verification-before-completion": before saying work is done or opening a PR
       - "superpowers:receiving-code-review": before acting on review comments
-    permissions: { deny: ["Bash(gh pr merge *)", "Bash(gh api *pulls/*/merge*)", "Bash(gh api graphql*mergePullRequest*)"] }
+    permissions:
+      deny:
+        - Bash(gh pr merge *)
+        - Bash(gh pr -* merge *)
+        - Bash(gh pr -* merge)
+        - Bash(gh api *pulls/*/merge*)
+        - Bash(gh api *repos/*/merges*)
+        - Bash(gh api graphql*mergePullRequest*)
+        - Bash(gh api graphql*enablePullRequestAutoMerge*)
+        - Bash(gh api graphql*mergeBranch*)
   fs2:
     title: Senior Full-Stack Software Engineer
     summary: implements assigned issues
@@ -186,7 +212,16 @@ roles:
       - "superpowers:systematic-debugging": on a bug or a failing test, before proposing a fix
       - "superpowers:verification-before-completion": before saying work is done or opening a PR
       - "superpowers:receiving-code-review": before acting on review comments
-    permissions: { deny: ["Bash(gh pr merge *)", "Bash(gh api *pulls/*/merge*)", "Bash(gh api graphql*mergePullRequest*)"] }
+    permissions:
+      deny:
+        - Bash(gh pr merge *)
+        - Bash(gh pr -* merge *)
+        - Bash(gh pr -* merge)
+        - Bash(gh api *pulls/*/merge*)
+        - Bash(gh api *repos/*/merges*)
+        - Bash(gh api graphql*mergePullRequest*)
+        - Bash(gh api graphql*enablePullRequestAutoMerge*)
+        - Bash(gh api graphql*mergeBranch*)
   qa:
     title: QA Engineer
     summary: verifies behaviour, owns regression coverage
@@ -197,7 +232,16 @@ roles:
       - "superpowers:verification-before-completion": before reporting a result
       - "superpowers:systematic-debugging": when a behaviour is not what the issue says
       - "run": to start the app and see a change working
-    permissions: { deny: ["Bash(gh pr merge *)", "Bash(gh api *pulls/*/merge*)", "Bash(gh api graphql*mergePullRequest*)"] }
+    permissions:
+      deny:
+        - Bash(gh pr merge *)
+        - Bash(gh pr -* merge *)
+        - Bash(gh pr -* merge)
+        - Bash(gh api *pulls/*/merge*)
+        - Bash(gh api *repos/*/merges*)
+        - Bash(gh api graphql*mergePullRequest*)
+        - Bash(gh api graphql*enablePullRequestAutoMerge*)
+        - Bash(gh api graphql*mergeBranch*)
   sec:
     title: Security Engineer
     summary: security review and triage
@@ -205,4 +249,13 @@ roles:
     prompt: ../roles/sec.md
     skills:
       - "security-review": to review a branch's pending changes for security issues
-    permissions: { deny: ["Bash(gh pr merge *)", "Bash(gh api *pulls/*/merge*)", "Bash(gh api graphql*mergePullRequest*)"] }
+    permissions:
+      deny:
+        - Bash(gh pr merge *)
+        - Bash(gh pr -* merge *)
+        - Bash(gh pr -* merge)
+        - Bash(gh api *pulls/*/merge*)
+        - Bash(gh api *repos/*/merges*)
+        - Bash(gh api graphql*mergePullRequest*)
+        - Bash(gh api graphql*enablePullRequestAutoMerge*)
+        - Bash(gh api graphql*mergeBranch*)

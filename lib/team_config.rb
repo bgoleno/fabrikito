@@ -15,6 +15,8 @@
 #   team_config.rb <team.yaml> settings <id>       the seat's generated Claude Code settings (JSON)
 #   team_config.rb <team.yaml> permissions_report  each seat's mode and rules, for `check`
 #   team_config.rb <team.yaml> warnings            what `check` warns about (held messages, merging)
+#   team_config.rb <team.yaml> matching_rules <id> <command>  the seat's deny/ask rules a command
+#                                                  matches (an approximation, see #rule_matches?)
 #
 # Ruby is used because it ships with macOS and parses YAML without installing anything.
 # Unknown keys are an error, not ignored: a misspelled `volume:` that silently fell back to a
@@ -72,9 +74,21 @@ PERMISSION_MODES = %w[default manual acceptEdits plan auto dontAsk bypassPermiss
 # the first match decides (https://code.claude.com/docs/en/permissions).
 PERMISSION_LISTS = %w[deny ask allow].freeze
 
-# The ways a seat could merge a PR from Bash. `check` warns about a role whose rules neither deny
-# nor ask on each of them, unless the team file says the role may merge (roles.<id>.may_merge).
-MERGE_PATTERNS = ['Bash(gh pr merge *)', 'Bash(gh api *pulls/*/merge*)', 'Bash(gh api graphql*mergePullRequest*)'].freeze
+# The ways a seat could merge a PR (or a branch) from Bash, as tl decided in #85. `check` warns about
+# a role whose rules neither deny nor ask on each of them, unless the team file says the role may
+# merge (roles.<id>.may_merge). teams/example.yaml denies or asks on the same list.
+# - `gh pr merge *` also matches a bare `gh pr merge` (a trailing ` *` that is the only wildcard).
+# - `gh pr -* merge *` is any flag before the subcommand (-R o/r, --repo o/r, --repo=o/r). The space
+#   after merge keeps `gh pr -R o/r view 5 --json mergeable` out; `gh pr -* merge` is the same with
+#   no argument after merge (the current branch's PR), since a rule with two `*` has no bare form.
+# - GraphQL: merge, auto-merge, and mergeBranch (a branch merged without a PR); REST: the PR merge
+#   endpoint, and POST /repos/{o}/{r}/merges (a branch merged without a PR).
+MERGE_PATTERNS = [
+  'Bash(gh pr merge *)', 'Bash(gh pr -* merge *)', 'Bash(gh pr -* merge)',
+  'Bash(gh api *pulls/*/merge*)', 'Bash(gh api *repos/*/merges*)',
+  'Bash(gh api graphql*mergePullRequest*)', 'Bash(gh api graphql*enablePullRequestAutoMerge*)',
+  'Bash(gh api graphql*mergeBranch*)'
+].freeze
 
 # Flags factory.sh sets itself, or that would undo this file's permission keys. :always, or
 # :with_mode (only when a seat has a permission_mode; a legacy file may still pass them in args).
@@ -729,13 +743,30 @@ class TeamConfig
   # trailing `*` is part of the rule" (https://code.claude.com/docs/en/permissions). Read as `cmd*`,
   # Bash(gh pr mer:*) would wrongly count as covering `gh pr merge *`.
   def rule_covers?(rule, pattern)
+    rule_matches?(rule, pattern[/\ABash\((.*)\)\z/m, 1].to_s)
+  end
+
+  # Whether a Bash rule matches one command's text, as the permissions docs describe it: `*` is any
+  # text, `cmd:*` is `cmd *`, and a trailing ` *` that is the rule's only wildcard also matches the
+  # bare command (`Bash(ls *)` matches `ls`). An approximation for `check` and tests: it does not
+  # split compound commands, strip wrappers or VAR= prefixes, as Claude Code does.
+  def rule_matches?(rule, command)
     return true if ['Bash', 'Bash(*)'].include?(rule)
 
     spec = rule[/\ABash\((.*)\)\z/m, 1]
     return false if spec.nil?
 
-    re = Regexp.new("\\A#{spec.sub(/:\*\z/, ' *').split('*', -1).map { |s| Regexp.escape(s) }.join('.*')}\\z", Regexp::MULTILINE)
-    re.match?(pattern[/\ABash\((.*)\)\z/m, 1])
+    spec = spec.sub(/:\*\z/, ' *')
+    return true if spec.end_with?(' *') && spec.count('*') == 1 && command == spec[0...-2]
+
+    re = Regexp.new("\\A#{spec.split('*', -1).map { |s| Regexp.escape(s) }.join('.*')}\\z", Regexp::MULTILINE)
+    re.match?(command)
+  end
+
+  # The deny and ask rules of a seat that match a command, strongest first, as "<list> <rule>".
+  def matching_rules(id, command)
+    merged = merged_permissions(id)
+    %w[deny ask].flat_map { |l| merged[l].select { |r| rule_matches?(r, command) }.map { |r| "#{l} #{r}" } }
   end
 
   # What `check` warns about. Warnings do not stop a start.
@@ -916,5 +947,6 @@ when 'kickoff' then puts cfg.kickoff(args.fetch(0) { die 'kickoff needs a role i
 when 'settings' then puts JSON.pretty_generate(cfg.settings(args.fetch(0) { die 'settings needs a role id' }))
 when 'permissions_report' then puts cfg.permissions_report
 when 'warnings' then puts cfg.warnings
+when 'matching_rules' then puts cfg.matching_rules(args.fetch(0) { die 'matching_rules needs a role id' }, args.fetch(1) { die 'matching_rules needs a command' })
 else die "unknown command '#{cmd}'"
 end
