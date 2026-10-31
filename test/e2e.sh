@@ -842,6 +842,13 @@ og=$(PATH=$T/oldgit:$PATH $S -c $T/team9.yaml up --no-view w9 2>&1); rc=$?
 [ $rc -ne 0 ] && echo "$og" | grep -qF "needs git 2.36 or later" && [ ! -e $VOL/$ROOT/team-w9 ] && ! tmux has-session -t '=tt-w9' 2>/dev/null &&
   ok "up stops when git cannot list the worktrees with -z, so the legacy-worktree refusal is never skipped (no worktree made, no seat started)" || { bad "up with a git that cannot list with -z (rc=$rc)"; echo "$og"; }
 tmux kill-session -t '=tt-w9' 2>/dev/null; git -C $T/repo worktree remove --force $VOL/$ROOT/team-w9 2>/dev/null; git -C $T/repo worktree remove --force $T/legacy9/team-w9 2>/dev/null
+# A worktree's branch name is shown escaped too (sec's review): git refuses ESC and a newline in a ref
+# name but takes a bidi override (U+202E), which would reorder the line on a terminal.
+BR="bidi"$'\xe2\x80\xae'"txt"; git -C $T/repo worktree add -q -b "$BR" $T/bidi/team-w1 origin/main
+mig=$($S -c $T/team.yaml migrate w1 2>&1)
+[ -d $T/bidi/team-w1 ] && echo "$mig" | grep -qF "has branch 'bidi\xE2\x80\xAEtxt' checked out" && ! echo "$mig" | grep -qF "$BR" &&
+  ok "migrate shows a worktree's branch name escaped (a bidi override), and keeps the worktree" || { bad "branch name with a bidi override"; echo "$mig"; }
+git -C $T/repo worktree remove --force $T/bidi/team-w1 2>/dev/null; git -C $T/repo branch -q -D "$BR" 2>/dev/null
 echo "--- unmounted volume"
 sed "s#volume: $VOL#volume: /Volumes/NotMounted#" $T/team.yaml > $T/team2.yaml
 $S -c $T/team.yaml down --yes w2 >/dev/null

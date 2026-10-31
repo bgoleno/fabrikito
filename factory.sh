@@ -1182,7 +1182,7 @@ cwd_users() {
 # lets through by design. The working-folder check holds on any server, and for a copy with another
 # session prefix too, whose `alive` misses the real seats even on the default server.
 cmd_migrate() {
-  local roles=${*:-$ROLES} r p s dir name moved=0 users cu
+  local roles=${*:-$ROLES} r p s b dir name moved=0 users cu
   for r in $roles; do check_role "$r"; done
   require_worktree_list
   for r in $roles; do
@@ -1196,7 +1196,12 @@ cmd_migrate() {
       if alive "$r"; then echo "skip   $r: seat is up; stop it first ($SELF down --yes $r)"; continue; fi
       if [ ! -d "$p" ]; then echo "skip   $r: $s is registered but missing (run: git -C $REPO worktree prune)"; continue; fi
       if [ -n "$(git -C "$p" status --porcelain)" ]; then echo "REFUSE $r: $s has uncommitted or untracked files"; continue; fi
-      if [ -n "$(git -C "$p" branch --show-current)" ]; then echo "REFUSE $r: $s has branch '$(git -C "$p" branch --show-current)' checked out; move that work by hand"; continue; fi
+      # The branch name is shown escaped too: git refuses ESC and a newline in a ref name, but takes a
+      # C1 control or a bidi override, which would reorder the line on a terminal. set -e: a failing
+      # assignment would end the script, so a git that cannot read the branch gives "" as the old test
+      # did, and the HEAD check below then refuses.
+      b=$(git -C "$p" branch --show-current) || b=""
+      if [ -n "$b" ]; then echo "REFUSE $r: $s has branch '$(log_field "$b")' checked out; move that work by hand"; continue; fi
       if ! git -C "$p" merge-base --is-ancestor HEAD "$BASE"; then echo "REFUSE $r: $s HEAD is not contained in $BASE (unpushed commits)"; continue; fi
       # set -e: a failing $(...) assignment would end the script, so its status is caught here.
       cu=0; users=$(cwd_users "$p") || cu=$?
