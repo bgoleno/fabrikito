@@ -303,7 +303,7 @@ $S -c $T/team.yaml check 2>&1 | grep -qxF "plugin    : $PLUG (skills as /factory
 echo "--- generated settings"
 # The user's rules, in team-then-role order, without duplicates. Rules the launcher adds itself
 # (Edit denies on its own files) are checked separately, so they are left out of these lists.
-perms() { ruby -rjson -e 'p = JSON.parse(File.read(ARGV[0]))["permissions"] || {}; %w[deny ask allow].each { |k| l = (p[k] || []).reject { |r| r.start_with?("Edit(//", "Bash(git push ") }; puts "#{k}=#{l.join(" | ")}" }; puts "disable=#{p["disableBypassPermissionsMode"]}"' "$1" 2>&1; }
+perms() { ruby -rjson -e 'p = JSON.parse(File.read(ARGV[0]))["permissions"] || {}; %w[deny ask allow].each { |k| l = (p[k] || []).reject { |r| r.start_with?("Edit(//", "Bash(git push ") || r =~ %r{\ARead\(//.*/state/messages\.log\)\z} }; puts "#{k}=#{l.join(" | ")}" }; puts "disable=#{p["disableBypassPermissionsMode"]}"' "$1" 2>&1; }
 # rules <file> <deny|ask|allow>: one rule per line
 rules() { ruby -rjson -e 'puts((JSON.parse(File.read(ARGV[0]))["permissions"] || {})[ARGV[1]] || [])' "$1" "$2"; }
 want_em='deny=Read(//**/.env) | Bash(touch tt-deny*)
@@ -413,6 +413,32 @@ ss_em=$(sshook < $T/state/settings/em.json); ss_w1=$(sshook < $T/state/settings/
   && [ "$ss_w1" = "1 | false | command | $SRC/lib/session_start.sh | $T/state | w1 | $VOL/$ROOT/team-w1 | 10 | false" ] \
   && [ "$ss_w2" = "1 | false | command | $SRC/lib/session_start.sh | $T/state | w2 | $VOL/$ROOT/team-w2 | 10 | nil" ] \
   && ok "every seat (em, w1, w2): one SessionStart hook running session_start.sh with state, role, workdir; disableAllHooks false only for gated w1" || { bad "SessionStart hook"; echo "$ss_em"; echo "$ss_w1"; echo "$ss_w2"; }
+# Every seat logs its SendMessage traffic to messages.log (#39): a PostToolUse hook for a message that
+# went out and a PostToolUseFailure hook for one that failed, both on SendMessage only, with the log,
+# the sender's role and the roster's session-to-role map as arguments.
+smhook() { ruby -rjson -e 'j = JSON.parse(STDIN.read); h = j["hooks"] || {}
+  puts(%w[PostToolUse PostToolUseFailure].map { |e| a = h[e] || []; x = (a[0] || {}).fetch("hooks", [])[0] || {}
+    [e, a.size, (a[0] || {})["matcher"], x["type"], x["command"], *x["args"], x["timeout"]].join(" | ") })' 2>&1; }
+smwant() { for e in PostToolUse PostToolUseFailure; do echo "$e | 1 | SendMessage | command | $SRC/lib/log_message.sh | $T/state/messages.log | $1 | tt-em=em | tt-w1=w1 | tt-w2=w2 | 5"; done; }
+sm_em=$(smhook < $T/state/settings/em.json); sm_w1=$(smhook < $T/state/settings/w1.json); sm_w2=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml settings w2 | smhook)
+[ "$sm_em" = "$(smwant em)" ] && [ "$sm_w1" = "$(smwant w1)" ] && [ "$sm_w2" = "$(smwant w2)" ] \
+  && ok "every seat (em, w1, w2): SendMessage logging hooks on PostToolUse and PostToolUseFailure, with log, role and the session map" || { bad "SendMessage logging hooks"; echo "$sm_em"; echo "$sm_w1"; }
+# The log holds every native message in full, private reports to the EM included (owner decision on
+# #110): every seat but em has a Read deny on it, in both spellings. An accident guard only.
+lr=""; w2deny=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml settings w2 | ruby -rjson -e 'puts JSON.parse(STDIN.read)["permissions"]["deny"]')
+for sp in "$RT" "$T"; do
+  rules $T/state/settings/em.json deny | grep -qxF "Read(/$sp/state/messages.log)" && lr="$lr em-denied($sp)"
+  rules $T/state/settings/w1.json deny | grep -qxF "Read(/$sp/state/messages.log)" || lr="$lr w1-not-denied($sp)"
+  echo "$w2deny" | grep -qxF "Read(/$sp/state/messages.log)" || lr="$lr w2-not-denied($sp)"
+done
+[ -z "$lr" ] && ok "messages.log: Read denied to w1 and w2 (both spellings), readable by em" || { bad "messages.log read rules:$lr"; rules $T/state/settings/w1.json deny | grep messages; }
+# check names the Read deny for the seats that have it, and keeps it out of the protected-path count.
+# w1's team and role denies hold no Edit rule, so its protected paths are its Edit denies but the notes
+# and the auto-memory folder (#112), which check names on their own.
+nw1=$(sect w1 | sed -n 's/.*added: Edit deny on \([0-9]*\) protected paths.*/\1/p')
+ew1=$(rules $T/state/settings/w1.json deny | grep '^Edit(' | grep -v -e '/state/notes/' -e '/memory/\*\*' | wc -l | tr -d ' ')
+sect w1 | grep -F "added: " | grep -qF ", Read deny on the message log" && ! sect em | grep -qF "Read deny on the message log" && [ -n "$nw1" ] && [ "$nw1" = "$ew1" ] \
+  && ok "check: w1's added line names the message log Read deny (not counted among its $nw1 protected paths), em's does not" || { bad "check: message log Read deny line (counted $nw1, Edit denies $ew1)"; sect w1; sect em; }
 # A seat may write its own note without a prompt (it is outside its working directory), and only its
 # own: every other seat's note is denied, as exact paths in both spellings, since a note is put into
 # its seat's context at each start.
@@ -431,13 +457,16 @@ sect em | grep -qF "added: Edit deny on" && sect em | grep -qF ", Edit allow on 
 # note: check says which. Throwaway config folders, so the owner's own settings play no part.
 mkdir -p $T/cfgoff $T/cfgon && echo '{"disableAllHooks": true}' > $T/cfgoff/settings.json && echo '{}' > $T/cfgon/settings.json
 hk=$(CLAUDE_CONFIG_DIR=$T/cfgoff $S -c $T/team.yaml check 2>&1 | grep "^hooks ")
-[ "$hk" = "hooks     : disableAllHooks is true in $T/cfgoff/settings.json, so em, w2 get no session-start note (a gated seat turns hooks back on for its gate)" ] \
+[ "$hk" = "hooks     : disableAllHooks is true in $T/cfgoff/settings.json, so em, w2 get no session-start note and no SendMessage logging (a gated seat turns hooks back on for its gate)" ] \
   && ! CLAUDE_CONFIG_DIR=$T/cfgon $S -c $T/team.yaml check 2>&1 | grep -q "^hooks " && ! CLAUDE_CONFIG_DIR=$T/no-such-cfg $S -c $T/team.yaml check 2>&1 | grep -q "^hooks " \
   && ok "check: a hooks line naming the ungated seats when the user's settings disable all hooks, none otherwise" || { bad "check: hooks line"; echo "$hk"; }
 [ -d $T/state/notes ] && ok "up makes the notes folder under the state folder" || bad "no $T/state/notes after up"
 grep -qF "$T/state/notes/em.md" $T/state/prompts/em.md && ok "the rendered prompt names the seat's own note" || bad "the prompt does not name $T/state/notes/em.md"
 # The allow covers Edit (and Write), not a Bash redirect, which prompts outside bypass (qa, live on #90).
 grep -qF "Write it with the Write or Edit tool, not Bash" $T/state/prompts/em.md && ok "the prompt says to write the note with Write or Edit, not Bash" || bad "the prompt does not say how to write the note"
+# Seats are told their SendMessage traffic is logged too (#39), not that only say is.
+tr '\n' ' ' < $T/state/prompts/em.md | tr -s ' ' | grep -qF 'Every `say` and every `SendMessage` you send is logged, message included,' \
+  && ! grep -qF "traffic is not, and is only in each session's transcript" $T/state/prompts/em.md && ok "the prompt says SendMessage traffic is logged as say's is" || bad "the prompt still says SendMessage is not logged"
 grep -qF "progress note" $T/state/prompts/em.kickoff && ok "the default kickoff asks for the note's task and next step" || { bad "kickoff and the note"; cat $T/state/prompts/em.kickoff; }
 echo "Task: survive a restart" > $T/state/notes/em.md
 rules $T/state/settings/w1.json deny | grep -qxF "Edit(/$RT/state/gate/**)" && ok "the gate's own state (its failure counter) is Edit-protected" || bad "gate state not protected"
@@ -1194,6 +1223,72 @@ mkdir -p $T/slowgit && printf '#!/bin/sh\ncase " $* " in *" status "*) exec slee
 t0=$(date +%s); PATH=$T/slowgit:$PATH sst $T/s; t1=$(date +%s)
 [ $rc = 0 ] && [ $((t1 - t0)) -lt 9 ] && echo "$out" | grep -qF "clip" && echo "$out" | grep -qF "git status did not finish within 4s" && echo "$out" | grep -qF "subject" \
   && ok "a git status that hangs is cut at 4s (the hook took $((t1 - t0))s): the note and recent commits still print" || { bad "slow git status (rc=$rc, $((t1 - t0))s)"; echo "$out"; }
+echo "--- SendMessage log hook (lib/log_message.sh, run directly with hook input on stdin)"
+# smlog <to> <message> [event] [tool_response JSON]: runs the hook as seat w9 of a roster whose
+# sessions are tt-em, tt-w1 and tt-w2; sets rc, out (stdout and stderr) and line (what it appended).
+mkdir -p $T/lstate; LG=$T/lstate/messages.log; : > $LG
+smlog() { local n payload rs=${4:-}
+  [ -n "$rs" ] || rs='{"success":true,"message":"in inbox"}'
+  # Claude Code sends UTF-8 JSON whatever the seat's locale; the values are forced to UTF-8 so this
+  # stand-in can build it under LC_ALL=C too.
+  payload=$(TO="$1" M="$2" EV="${3:-PostToolUse}" RS="$rs" ruby -rjson -e '
+    u = ->(k) { ENV[k].dup.force_encoding("UTF-8") }
+    j = { "hook_event_name" => ENV["EV"], "tool_name" => "SendMessage", "tool_input" => { "to" => u.("TO"), "message" => u.("M") } }
+    ENV["EV"] == "PostToolUseFailure" ? j["error"] = "boom" : j["tool_response"] = JSON.parse(ENV["RS"])
+    print JSON.generate(j)')
+  n=$(wc -l < $LG)
+  out=$(printf '%s' "$payload" | $SRC/lib/log_message.sh $LG w9 tt-em=em tt-w1=w1 tt-w2=w2 2>&1); rc=$?
+  line=$(tail -n +$((n + 1)) $LG); [ "$(wc -l < $LG)" -eq $((n + 1)) ] || line="<$(( $(wc -l < $LG) - n )) lines>"; }
+# hlogged <to> <message> <recipient> <outcome> <escaped> <what> [event] [response]: one line, in say's
+# format, with say's escaping, reversible with printf %b, and nothing printed (the tool result stands).
+hlogged() { smlog "$1" "$2" "${7:-}" "${8:-}"
+  if [ $rc = 0 ] && [ -z "$out" ] && [ "$(printf '%s\n' "$line" | cut -f2-4)" = "w9	$3	$4" ] && [ "$(printf '%s\n' "$line" | cut -f5-)" = "$5" ] \
+    && [ "$(printf '%b' "$(printf '%s\n' "$line" | cut -f5-)")" = "$2" ] && printf '%s\n' "$line" | cut -f1 | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}$'; then
+    ok "SendMessage log: $6"
+  else bad "SendMessage log: $6 (rc=$rc)"; echo "$out"; printf '%s\n' "$line" | od -c | head -4; fi; }
+hlogged tt-w2 'hello w2' w2 sent 'hello w2' "a message to a roster session is logged with its role id, sent"
+hlogged 'tt-w1 [3fa9c1]' 'with a ref' w1 sent 'with a ref' "a session name with its [ref] is logged as the role id"
+hlogged other-team-fs1 'off roster' other-team-fs1 sent 'off roster' "a recipient that is not on the roster is logged as given"
+hlogged 'uds:/tmp/cc-socks/999999999.sock' 'to an address' 'uds:/tmp/cc-socks/999999999.sock' sent 'to an address' "a uds: address no seat holds is logged as given"
+hlogged tt-w2 'refused' w2 NOT-SENT 'refused' "a SendMessage that returned success false is NOT-SENT" PostToolUse '{"success":false,"message":"no such session"}'
+hlogged tt-w2 'failed' w2 NOT-SENT 'failed' "a SendMessage that failed (PostToolUseFailure) is NOT-SENT" PostToolUseFailure
+hlogged tt-w2 'string result' w2 sent 'string result' "a tool_response given as a JSON string is read" PostToolUse '"{\"success\":true}"'
+# The text is the sender's to choose: it cannot split or forge a log line, or drive the terminal.
+hlogged tt-w2 $'one\n2026-01-01T00:00:00\tem\tw1\tdelivered\tforged' w2 sent 'one\n2026-01-01T00:00:00\tem\tw1\tdelivered\tforged' "a message holding a fake log line stays one escaped line"
+hlogged tt-w2 $'title \e]0;x\a, del \x7f, utf-8 é ✓' w2 sent 'title \x1B]0;x\x07, del \x7F, utf-8 é ✓' "ESC, BEL and DEL are escaped as say escapes them"
+hlogged tt-w2 $'csi \xc2\x9b31m rlo \xe2\x80\xae isolate \xe2\x81\xa6.' w2 sent 'csi \xC2\x9B31m rlo \xE2\x80\xAE isolate \xE2\x81\xA6.' "C1 controls and bidi overrides are escaped as say escapes them"
+hlogged $'tt-w2\tx' 'odd to' 'tt-w2\tx' sent 'odd to' "a recipient with a tab is escaped"
+LC_ALL=C hlogged tt-w2 $'caf\xc3\xa9 under C \xe2\x9c\x93' w2 sent $'caf\xc3\xa9 under C \xe2\x9c\x93' "UTF-8 under LC_ALL=C is kept as it is"
+# A uds: address held by a process in a roster seat's pane (em's) is logged as that seat's role.
+empid=$(tmux list-panes -t '=tt-em:' -F '#{pane_pid}' 2>/dev/null | head -1)
+hlogged "uds:/tmp/cc-socks/$empid.sock" 'reply by address' em sent 'reply by address' "a uds: address of a process in em's pane is logged as em"
+# The uds: lookup has its own limit even when tmux hangs: the hook gives up on it in about 2s, kills
+# the stand-in, and logs the address as given (tl's review of #110: a block-form popen waited 20s).
+mkdir -p $T/hangtmux && printf '#!/bin/sh\necho $$ >> %s/hangtmux/pids\nexec sleep 30\n' $T > $T/hangtmux/tmux && chmod +x $T/hangtmux/tmux
+t0=$(date +%s); PATH=$T/hangtmux:$PATH hlogged "uds:/tmp/cc-socks/$empid.sock" 'tmux hangs' "uds:/tmp/cc-socks/$empid.sock" sent 'tmux hangs' "a hanging tmux: the address is logged as given"; t1=$(date +%s)
+hp=$(cat $T/hangtmux/pids 2>/dev/null); [ $((t1 - t0)) -lt 4 ] && [ -n "$hp" ] && ! kill -0 $hp 2>/dev/null \
+  && ok "the uds: lookup is cut at its limit (the hook took $((t1 - t0))s) and the hung tmux is killed" || bad "uds: lookup limit ($((t1 - t0))s, stand-in pid ${hp:-none} $(kill -0 ${hp:-0} 2>/dev/null && echo alive))"
+# smraw <JSON text>: runs the hook on hook input as given, not built by JSON.generate.
+smraw() { local n=$(wc -l < $LG); out=$(printf '%s' "$1" | $SRC/lib/log_message.sh $LG w9 tt-w2=w2 2>&1); rc=$?
+  line=$(tail -n +$((n + 1)) $LG); [ "$(wc -l < $LG)" -eq $((n + 1)) ] || line="<$(( $(wc -l < $LG) - n )) lines>"; }
+# A lone surrogate escape is valid JSON text that Ruby's json refuses: it becomes U+FFFD, and a valid
+# pair is kept, so the line is still logged (tl's review of #110: it was silently dropped).
+smraw '{"hook_event_name":"PostToolUse","tool_name":"SendMessage","tool_input":{"to":"tt-w2","message":"hidden \ud800 text, low \udc00, pair 😀, kept \\ud800"},"tool_response":{"success":true}}'
+[ $rc = 0 ] && [ -z "$out" ] && [ "$(printf '%s\n' "$line" | cut -f2-5)" = $'w9\tw2\tsent\thidden \xef\xbf\xbd text, low \xef\xbf\xbd, pair \xf0\x9f\x98\x80, kept \\\\ud800' ] \
+  && ok "SendMessage log: lone surrogates become U+FFFD, a pair and an escaped backslash stay, the line is logged" || { bad "lone surrogates (rc=$rc)"; printf '%s\n' "$line" | od -c | head -4; }
+# A message that is not a string is logged as its JSON text.
+smraw '{"hook_event_name":"PostToolUse","tool_name":"SendMessage","tool_input":{"to":"tt-w2","message":{"a":[1,"b"]}},"tool_response":{"success":true}}'
+[ $rc = 0 ] && [ "$(printf '%s\n' "$line" | cut -f5)" = '{"a":[1,"b"]}' ] && ok "SendMessage log: a message that is not a string is logged as JSON" || { bad "non-string message"; echo "$line"; }
+# Input that still cannot be read is logged as a placeholder line, so a message never goes unrecorded.
+smraw 'not json'
+[ $rc = 0 ] && [ -z "$out" ] && [ "$(printf '%s\n' "$line" | cut -f2-5)" = $'w9\t?\tUNREADABLE\t<hook input could not be read>' ] \
+  && ok "SendMessage log: unreadable hook input is logged as a placeholder line" || { bad "unreadable input (rc=$rc)"; echo "$line"; }
+# Nothing else is ever logged, and a broken log never fails the tool call.
+n=$(wc -l < $LG)
+printf '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}' | $SRC/lib/log_message.sh $LG w9 tt-w2=w2 >/dev/null 2>&1; r1=$?
+o3=$(printf '{"hook_event_name":"PostToolUse","tool_name":"SendMessage","tool_input":{"to":"tt-w2","message":"m"}}' | $SRC/lib/log_message.sh $T/no-such-dir/messages.log w9 2>&1); r3=$?
+[ $r1 = 0 ] && [ $r3 = 0 ] && [ -z "$o3" ] && [ "$(wc -l < $LG)" -eq "$n" ] && [ ! -e $T/no-such-dir ] \
+  && ok "another tool, and a log that cannot be written: exit 0, nothing printed, nothing logged" || { bad "log hook failure cases ($r1 $r3)"; echo "$o3"; }
 echo "--- the seats' claude copy: replaced, failed, mid-reinstall"
 cc -o $CP.new $T/c.c && mv $CP.new $CP
 $S -c $T/team.yaml status | grep -E "^em " | grep -q REPLACED && ok "status: a seat whose claude file was replaced under it shows REPLACED" || { bad "status REPLACED"; $S -c $T/team.yaml status; }
