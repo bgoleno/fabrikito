@@ -49,6 +49,12 @@ INSTALL = File.expand_path('..', __dir__)
 # repository's .claude/ is never read, and nothing is installed into the user's settings.
 PLUGIN_DIR = File.join(INSTALL, 'plugin')
 
+# Starts every kickoff. The kickoff is the seat's first user message, and seats tell the owner's voice
+# by input that carries no label, so without this a team file's kickoff would read as the owner
+# typing. `say` never sends with this label (the role id is reserved, and say refuses it as a sender).
+# It is not authenticated: it keeps the kickoff from looking like owner input by default.
+KICKOFF_LABEL = '[from launcher]'
+
 # The documented permission modes (https://code.claude.com/docs/en/permission-modes). `default`
 # is the config value and `manual` its CLI alias. Both are passed through as written: the 2.1.316
 # CLI accepts `--permission-mode default` although its error message lists only `manual`.
@@ -339,7 +345,9 @@ class TeamConfig
           'Team session started: you are the @@TITLE@@ (session @@SESSION@@). Your full role instructions are in your system prompt. ' \
           'Reply with one line confirming your role and working directory, then wait for a message from the EM or @@OWNER@@. ' \
           'Do not start any work until you receive one.'
-    subst(tpl.to_s, id)
+    # A label inside the text would make part of it read as another sender's (`[from owner]`).
+    die "the kickoff for #{id} must not contain a [from ...] label: #{KICKOFF_LABEL} is added in front of it" if tpl.to_s.include?('[from ')
+    "#{KICKOFF_LABEL} #{subst(tpl.to_s, id)}"
   end
 
   # A role's own value wins over sessions.claude. Neither set means the flag is omitted and the
@@ -645,6 +653,7 @@ class TeamConfig
     seen = {}
     roles.each do |id, r|
       die "role id '#{id}' must match #{ID_RE.source}" unless id.to_s =~ ID_RE
+      die "role id 'launcher' is reserved: a seat's say messages would carry the kickoff's #{KICKOFF_LABEL} label" if id.to_s == 'launcher'
       die "role '#{id}' must be a mapping" unless r.is_a?(Hash)
       bad = r.keys - ROLE_KEYS
       die "unknown key(s) under roles.#{id}: #{bad.join(', ')} (allowed: #{ROLE_KEYS.join(', ')})" unless bad.empty?
