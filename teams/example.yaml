@@ -172,6 +172,7 @@ roles:
     workdir: { type: project, path: /path/to/your/checkout }
     prompt: ../roles/em.md
     skills:
+      - "factory:handoff": before /clear, /compact, a restart or the end of a session
       - "superpowers:brainstorming": to pin down a vague request from the owner before filing issues
       - "factory:assign": to hand one issue to one seat with a complete brief
       - "factory:team-status": for the owner's status, or to see which PRs are ready and who owes the next move
@@ -192,6 +193,7 @@ roles:
     workdir: { type: worktree }
     prompt: ../roles/tl.md
     skills:
+      - "factory:handoff": before /clear, /compact, a restart or the end of a session
       - "code-review": to review a PR's diff for correctness bugs
       - "superpowers:writing-plans": to turn an agreed design into steps an engineer can follow
     permissions:
@@ -214,6 +216,7 @@ roles:
     skills:
       - "factory:start-task": when you take an assigned issue, before changing anything
       - "factory:ready-for-review": when a change is done, or a new head goes back to review
+      - "factory:handoff": before /clear, /compact, a restart or the end of a session
       - "superpowers:test-driven-development": before writing implementation code
       - "superpowers:systematic-debugging": on a bug or a failing test, before proposing a fix
       - "superpowers:verification-before-completion": before saying work is done or opening a PR
@@ -238,6 +241,7 @@ roles:
     skills:
       - "factory:start-task": when you take an assigned issue, before changing anything
       - "factory:ready-for-review": when a change is done, or a new head goes back to review
+      - "factory:handoff": before /clear, /compact, a restart or the end of a session
       - "superpowers:test-driven-development": before writing implementation code
       - "superpowers:systematic-debugging": on a bug or a failing test, before proposing a fix
       - "superpowers:verification-before-completion": before saying work is done or opening a PR
@@ -260,6 +264,7 @@ roles:
     prompt: ../roles/qa.md
     gate_on_stop: true
     skills:
+      - "factory:handoff": before /clear, /compact, a restart or the end of a session
       - "superpowers:verification-before-completion": before reporting a result
       - "superpowers:systematic-debugging": when a behaviour is not what the issue says
       - "run": to start the app and see a change working
@@ -280,6 +285,7 @@ roles:
     workdir: { type: worktree }
     prompt: ../roles/sec.md
     skills:
+      - "factory:handoff": before /clear, /compact, a restart or the end of a session
       - "security-review": to review a branch's pending changes for security issues
     permissions:
       deny:

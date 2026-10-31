@@ -269,7 +269,15 @@ are labelled `[from <role>]`, and the owner's are `[from owner]`. The label is s
 `TEAM_ROLE`, or `owner` when it is unset) and is not authenticated. When `TEAM_ROLE` is unset, `say`
 run from inside a seat (found from the terminals of the processes that started it) is labelled with
 that seat's role, never `[from owner]`; this stops a mislabel by accident, and the labels are still
-not authenticated ([#29](../../issues/29)). A `TEAM_ROLE` that is set must be one of the team's role
+not authenticated ([#29](../../issues/29)). When it cannot tell, `say` refuses rather than guess: when
+`ps` cannot read its process or one of its ancestors, when tmux cannot list its panes, or when it runs inside a seat of another
+team on the same tmux server (any session `up` started, which sets `TEAM_ROLE`). The check looks only at
+the tmux server `say` addresses: a process is labelled `[from owner]` when it has no terminal at all, or
+when its terminal is not a seat's pane on that server. So a seat on another tmux server is labelled
+`[from owner]`, for example a seat that runs `test/live-env.sh run` to drive a throwaway team on a
+private server. A background job that outlives the command that started it, or a command a seat runs in a new tmux
+session, is not caught and is labelled `[from owner]` (the comment above `caller_seat` in `factory.sh` lists every
+such way). A seat cannot `say` to itself. A `TEAM_ROLE` that is set must be one of the team's role
 ids: `say` refuses any other value, and the reserved `owner` and `launcher`, sending no keys and
 logging NOT-DELIVERED.
 
@@ -288,12 +296,12 @@ authenticated (#29): it keeps the kickoff from looking like owner input, nothing
 
 ### The message log
 
-`.state/<team>/messages.log` records every `say` with its delivery outcome. Until #39 lands (a hook that
-logs `SendMessage` too), it records `say` traffic only: read `SendMessage` traffic in each session's
-transcript (`ctrl+o` in an attached seat).
+`.state/<team>/messages.log` records every `say` with its delivery outcome, and every `SendMessage` a seat
+sends (#39), through a hook in each seat's generated settings.
 
 Each `say` (`say all` included) appends exactly one line of five tab-separated fields: the local time
-(`2026-10-30T14:05:09`), the sender (`TEAM_ROLE`, the seat `say` ran inside, or `owner`), the recipient (a role id or `all`),
+(`2026-10-30T14:05:09`), the sender (`TEAM_ROLE`, the seat `say` ran inside, `owner`, or `?` when `TEAM_ROLE` is unset and
+`say` refused because it could not tell whether it ran inside a seat), the recipient (a role id or `all`),
 `delivered` or `NOT-DELIVERED`, and the message as typed, without its `[from <role>]` label. The
 sender and the message are escaped so the record stays on one line and holds no terminal control
 codes: a backslash is written `\\`, a newline `\n`, a carriage return `\r`, a tab `\t`. Every other C0
@@ -302,7 +310,33 @@ control (below U+0020), DEL, C1 control (U+0080 to U+009F) and bidi embedding, o
 digits): U+009B is `\xC2\x9B`. Other text, such as `é` or `✓`, is written as it is. A message that is
 not valid UTF-8 has every byte from 0x80 up written as `\xHH`. If the escaping itself fails, the field
 reads `<log_field failed>`. The escaping is reversible: `printf '%b' "<field>"` in bash gives back
-the original text. The hook that will log `SendMessage` traffic (#39) is to write this same format.
+the original text.
+
+Each `SendMessage` from a seat appends one line in the same format, written by `lib/log_message.sh`, a
+`PostToolUse` and `PostToolUseFailure` hook on `SendMessage` in every seat's settings:
+
+- the sender is the seat's role id, and the message is the text it sent, escaped as above. A message
+  that is not a string is written as its JSON text. A lone UTF-16 surrogate escape in the hook input
+  (`\ud800` with no low half after it, or a low half alone), which Ruby's JSON parser refuses, is read
+  as U+FFFD (`�`); a valid pair is kept;
+- the recipient is a role id when the `to` names a roster seat's session (`sf-tl`, or `sf-tl [3fa9c1]`)
+  or is a `uds:` address whose process runs in a roster seat's pane, as a reply to a message does.
+  Anything else, another team's session, a subagent or an address no seat holds, is written as given;
+- the outcome is `sent` when the message reached the receiver's inbox, and `NOT-SENT` when
+  `SendMessage` returned `success: false` or failed. `sent` is not `delivered`: a receiver in another
+  permission mode can still hold a message for its user's approval, or refuse it, and that comes back
+  later as a notice to the sender, which the log does not see;
+- hook input that still cannot be read is logged as a line with the recipient `?`, the outcome
+  `UNREADABLE` and the message `<hook input could not be read>`, so a message is never left out of
+  the log without a trace.
+
+The hook prints nothing and always exits 0, so a log it cannot write costs that line, never the message
+or the tool result. Looking up the seat behind a `uds:` address (with `ps` and `tmux`) gives up after
+2 seconds, killing what it started, and the address is then written as given. The message is written to
+`messages.log` only, which holds every native message in full, private reports to the EM among them:
+every seat but `em` has a `Read` deny on it (see [Safety](#safety)). A seat whose hooks are all off
+(`disableAllHooks: true` in the user's settings, and no gate) logs nothing: `check` says which.
+Messages a seat receives are logged by their sender, so traffic from outside the team is not logged.
 
 ## Safety
 
@@ -334,7 +368,11 @@ role's (team first; a role can add or tighten a rule, never loosen one), plus wh
 - an `Edit` allow on the seat's own progress note (see [Progress notes](#progress-notes)), which is
   outside its working directory and would otherwise prompt in a mode other than bypass, and an `Edit`
   deny on every other seat's note: a note is put into its seat's context at each start, so a seat
-  that could write another's would have a lasting channel into it.
+  that could write another's would have a lasting channel into it;
+- a `Read` deny on the message log, `.state/<team>/messages.log` (both spellings, when a symlink makes
+  them differ), for every seat but the role with id `em`: the log holds every `SendMessage` in full. A
+  team with no `em` role has the deny on every seat. This is an accident guard, not a boundary: every
+  seat runs as the same OS user (#29), and a command that reads the file some other way is not stopped.
 
 `permission_mode` (in `sessions.claude`, or per role) picks the mode; the example uses `auto`.
 `bypassPermissions` skips every prompt and is meant for an isolated machine only. Deny rules hold in
@@ -438,7 +476,10 @@ command, the last 60 lines of its output and the path of the full log (`.state/<
 Roles without the switch never run it. The example gives it to the engineers and qa.
 
 - Only uncommitted work is gated at a stop: a clean tree, including committed but unpushed work, ends
-  the turn normally. Committed work is gated again when the reviewer runs the gate on the PR.
+  the turn normally. Committed work is gated again when the reviewer runs the gate on the PR. A
+  `git status` that fails (a corrupt index, say) counts as uncommitted work: the gate runs, and a
+  send-back says status failed. The hook's git calls do not run a repository's fsmonitor program;
+  clean filters stay on, because status needs them for a correct answer ([#104](../../issues/104)).
 - Only the seat's configured working tree is checked. Work left in another tree, such as a worktree
   Claude Code made for a subagent or for `EnterWorktree` under `<repo>/.claude/worktrees/`, is not
   gated.
