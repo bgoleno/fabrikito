@@ -597,7 +597,8 @@ box_state() {
     #   ╭──────…──✕─╮
     #   │ Resize your terminal to at least 110 columns to show the diff panel   │
     #   ╰──────…────╯
-    # With 14 rows or more the whole input box still shows under it, and the screen reads as usual.
+    # With 14 rows or more the whole input box still shows under it, and the screen reads as usual;
+    # but at 14 and 15 a message of two rows or more no longer fits (qa, #109), so the advice is 16.
     # With 13 or fewer, the screen ends at the input row: no bottom rule and no footer, so nothing
     # shows where the box ends, and say cannot deliver safely. True for exactly that screen: the last
     # row is the input row (❯ in column 0) under the top rule of this seat, with the notice right above.
@@ -641,7 +642,7 @@ box_refusal() {
     text) echo "the input box of $1 is not empty (someone typing, or an earlier message that was not sent): attach $1 and clear it ($SELF attach $1)" ;;
     copy-mode) echo "$1's pane is in copy mode (someone is scrolling): leave it with q ($SELF attach $1)" ;;
     unreadable) echo "could not read $1's screen" ;;
-    diff-notice) echo "$1 shows Claude Code's diff panel notice (\"Resize your terminal to at least 110 columns to show the diff panel\") in a pane too short to show the input box under it: make the pane 110 columns wide or more (the panel then docks beside the transcript), or give it 14 rows or more, or close the diff panel in $1 ($SELF attach $1)" ;;
+    diff-notice) echo "$1 shows Claude Code's diff panel notice (\"Resize your terminal to at least 110 columns to show the diff panel\") in a pane too short to show the input box under it: make the pane 110 columns wide or more (the panel then docks beside the transcript), or give it 16 rows or more, or close the diff panel in $1 ($SELF attach $1)" ;;
     *) echo "screen not recognised as ready (a permission prompt, a menu, a dialog?): attach $1 ($SELF attach $1)" ;;
   esac
 }

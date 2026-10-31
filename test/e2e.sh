@@ -693,8 +693,8 @@ tmux capture-pane -p -t '=tp-pv:' | grep -qF "Resize your terminal to at least 1
 delivered pv "a seat with the diff panel notice above its whole input box"
 refused pw "diff panel notice" "a seat whose diff panel notice pushed the end of its input box off a short pane, naming the notice"
 nout=$(TEAM_ROLE=em $S -c $T/tp.yaml say pw "notice wording check" 2>&1)
-echo "$nout" | grep -qF "110 columns wide or more" && echo "$nout" | grep -qF "14 rows or more" && echo "$nout" | grep -qF "close the diff panel" &&
-  ok "the refusal says how to clear the notice (110 columns, 14 rows, or close the panel)" || { bad "notice refusal wording"; echo "$nout"; }
+echo "$nout" | grep -qF "110 columns wide or more" && echo "$nout" | grep -qF "16 rows or more" && echo "$nout" | grep -qF "close the diff panel" &&
+  ok "the refusal says how to clear the notice (110 columns, 16 rows, or close the panel)" || { bad "notice refusal wording"; echo "$nout"; }
 refused py "screen not recognised as ready" "a seat at a permission prompt under the diff panel notice"
 tmux copy-mode -t '=tp-pq:'; refused pq "copy mode" "a seat whose pane is in copy mode"; tmux send-keys -t '=tp-pq:' -X cancel
 # When tmux cannot read the seat's screen, say cannot tell what is up: it refuses.
