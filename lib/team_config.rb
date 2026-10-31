@@ -139,6 +139,13 @@ GENERATED_DIRS = %w[settings launch prompts bin setup].freeze
 # GENERATED_DIRS, but not regenerated per start.
 HOOK_DIRS = %w[gate].freeze
 
+# The one role that may read messages.log. The log holds every native message in full, private
+# reports to the EM among them, so every other seat gets a Read deny on it (the owner's decision on
+# #110). An accident guard, not a boundary: every seat runs as the same OS user (#29), so a command
+# or script that reads the file another way is not stopped. A team with no role of this id has
+# every seat denied; the owner still reads the log directly.
+LOG_READER = 'em'.freeze
+
 # Where each seat keeps its progress note, <state>/notes/<role>.md (#5). Outside the worktree, so it
 # survives the worktree being recreated, and in neither list above, so a seat may write it.
 NOTES_DIR = 'notes'.freeze
@@ -520,6 +527,14 @@ class TeamConfig
     [File.expand_path(note_path(id)), real_path(note_path(id))].uniq.map { |p| "Edit(/#{glob_escape(p)})" }
   end
 
+  # The Read deny on messages.log for a seat other than LOG_READER, in both spellings.
+  def log_read_rules(id)
+    return [] if id == LOG_READER
+
+    log = File.join(state_dir, 'messages.log')
+    [File.expand_path(log), real_path(log)].uniq.map { |p| "Read(/#{glob_escape(p)})" }
+  end
+
   # A `permissions:` mapping (team level or a role's), checked. `where` names it in errors.
   def permission_section(h, where)
     return {} if h.nil?
@@ -702,7 +717,8 @@ class TeamConfig
     # deny the seat's own note, since deny wins over allow).
     own = note_rules(id)
     others = (roles.keys - [id]).flat_map { |r| note_rules(r) }
-    add.call({ 'deny' => protected_paths(id).map { |p| "Edit(/#{p})" } + others + memory_rules(id), 'ask' => base_push_rules, 'allow' => own }, 'factory.sh')
+    deny = protected_paths(id).map { |p| "Edit(/#{p})" } + others + log_read_rules(id) + memory_rules(id)
+    add.call({ 'deny' => deny, 'ask' => base_push_rules, 'allow' => own }, 'factory.sh')
     out
   end
 
@@ -777,6 +793,16 @@ class TeamConfig
       'args' => [state_dir, id, workdir(id)], 'timeout' => 10 }
   end
 
+  # The SendMessage hook every seat gets (#39): on PostToolUse and PostToolUseFailure, it appends the
+  # message to messages.log as say does, so native seat-to-seat traffic lands in the same log. The
+  # roster's session names map a recipient to its role. Exec form: no shell quoting. It never blocks
+  # or alters the message (lib/log_message.sh), and 5s is a backstop: it normally takes milliseconds.
+  def log_message_hook(id)
+    { 'type' => 'command', 'command' => File.join(INSTALL, 'lib', 'log_message.sh'),
+      'args' => [File.join(state_dir, 'messages.log'), id, *roles.keys.map { |r| "#{session(r)}=#{r}" }],
+      'timeout' => 5 }
+  end
+
   # A line for check when the user's own settings switch every hook off: seats without a gate then
   # get no session-start note. nil when hooks are on, or the file is missing or unreadable.
   def hooks_note
@@ -786,8 +812,8 @@ class TeamConfig
 
     off = roles.keys.reject { |r| gate_on_stop?(r) }
     who = off.empty? ? 'no seat gets' : "#{off.join(', ')} #{off.size == 1 ? 'gets' : 'get'}"
-    "disableAllHooks is true in #{path}, so #{who} no session-start note (a gated seat turns hooks " \
-      'back on for its gate)'
+    "disableAllHooks is true in #{path}, so #{who} no session-start note and no SendMessage logging " \
+      '(a gated seat turns hooks back on for its gate)'
   end
 
   # The seat's Claude Code settings, written to <state>/settings/<id>.json and passed with
@@ -811,6 +837,7 @@ class TeamConfig
       out['env']['CLAUDE_CODE_DISABLE_AUTO_MEMORY'] = '1'
     end
     out['hooks'] = { 'SessionStart' => [{ 'hooks' => [session_start_hook(id)] }] }
+    %w[PostToolUse PostToolUseFailure].each { |e| out['hooks'][e] = [{ 'matcher' => 'SendMessage', 'hooks' => [log_message_hook(id)] }] }
     if gate_on_stop?(id)
       out['hooks']['Stop'] = [{ 'hooks' => [stop_gate_hook(id)] }]
       # --settings outranks project and local settings, so a disableAllHooks: true written in the
@@ -836,12 +863,14 @@ class TeamConfig
         out << format('    %-5s: %s', list, own.empty? ? '(none)' : own.join(', '))
       end
       notes = (roles.keys - [id]).flat_map { |r| note_rules(r) }
+      logs = log_read_rules(id)
       mem = memory_rules(id)
-      added = merged['deny'].count { |r| factory.include?(r) && !notes.include?(r) && !mem.include?(r) }
+      added = merged['deny'].count { |r| factory.include?(r) && !notes.include?(r) && !logs.include?(r) && !mem.include?(r) }
       asks = merged['ask'].count { |r| factory.include?(r) }
       note = merged['allow'].any? { |r| factory.include?(r) } ? ', Edit allow on its own progress note and deny on the other seats\'' : ''
       memo = mem.empty? ? '' : ", Edit deny on the repository's auto-memory folder (#{mem.size} spellings)"
-      out << "    added: Edit deny on #{added} protected paths#{asks.positive? ? ", ask on #{asks} push-to-#{base_branch} patterns" : ''}#{note}#{memo}"
+      log = (merged['deny'] & logs).empty? ? '' : ', Read deny on the message log'
+      out << "    added: Edit deny on #{added} protected paths#{asks.positive? ? ", ask on #{asks} push-to-#{base_branch} patterns" : ''}#{note}#{memo}#{log}"
       out << '    note : allow rules have no effect in bypassPermissions' if mode.start_with?('bypassPermissions') && !(merged['allow'] - factory).empty?
       out << '    note : ask rules are refused in dontAsk mode, not asked' if mode == 'dontAsk' && !merged['ask'].empty?
     end
