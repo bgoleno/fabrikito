@@ -997,32 +997,53 @@ tall td refused "$(msg 490)" "the end of a tall message in a box that is not ful
 # A full box whose visible end matches but is under 40 characters is too little to go on: refused.
 tall te refused "$(msg 110)"$'\n'"ok"$'\n'"go" "a tall message whose visible end is under 40 characters"; why "under the 40 say needs" "too little of the message's end is visible"
 # Short panes (#84). The team view gives seats panes of 89x13 (10 seats) and 10 to 11 rows (12
-# seats). There the diff panel notice pushes the box off the screen (sa: 89x13, the notice, its
-# window-size unset), or a paste grows the box past the bottom (sb: 80x10, no notice, window-size
-# manual, as resize-window leaves it). say delivers to them by growing the seat's window to 220x50
-# for the delivery, then puts back its size and window-size exactly. A big seat (sc) is never resized.
-tmux resize-window -t '=tp-sa:' -x 89 -y 13; tmux set-option -w -u -t '=tp-sa:' window-size; tmux resize-window -t '=tp-sb:' -x 80 -y 10; sleep 1
+# seats). There the diff panel notice can push the box off the screen (sa: 89x13, the notice, its
+# window-size unset), and a paste can grow the box past the bottom (sb at 80x10, no notice,
+# window-size manual, as resize-window leaves it). say runs its checks at the pane's own size; only
+# when one refuses in a window under 110x12 does it grow the window to 220x50, run that check again,
+# and put back size and window-size exactly (tl on #132). A seat whose checks pass is never resized,
+# so the owner's view of it does not flash: sb at 89x13, and the big seat sc.
+tmux resize-window -t '=tp-sa:' -x 89 -y 13; tmux set-option -w -u -t '=tp-sa:' window-size; tmux resize-window -t '=tp-sb:' -x 89 -y 13; sleep 1
 geo() { printf '%s %s' "$(tmux display-message -p -t "=tp-$1:" '#{window_width}x#{window_height}')" "opt=[$(tmux show-options -w -t "=tp-$1:" window-size 2>&1)]"; }
 ga=$(geo sa); gb=$(geo sb); gc=$(geo sc)
-[ "$ga" = "89x13 opt=[]" ] && [ "$gb" = "80x10 opt=[window-size manual]" ] && [ "${gc%% *}" = 220x50 ] || bad "test setup: seat geometry (sa $ga, sb $gb, sc $gc)"
+[ "$ga" = "89x13 opt=[]" ] && [ "$gb" = "89x13 opt=[window-size manual]" ] && [ "${gc%% *}" = 220x50 ] || bad "test setup: seat geometry (sa $ga, sb $gb, sc $gc)"
 tmux capture-pane -p -t '=tp-sa:' | grep -qF "Resize your terminal to at least 110 columns" && ok "stand-in: sa (89x13) draws the diff panel notice" || bad "stand-in: no notice on sa"
-mkdir -p $T/rshim && printf '#!/bin/sh\n[ "$1" = resize-window ] && echo "$*" >> %s/resize.log\nexec %s "$@"\n' $T "$(command -v tmux)" > $T/rshim/tmux && chmod +x $T/rshim/tmux; : > $T/resize.log
+# rshim logs say's resize-window and paste-buffer calls, in order. steps <role> prints them for that
+# seat: grow (to 220x50), shrink (any other size) and paste.
+mkdir -p $T/rshim && printf '#!/bin/sh\ncase "$1" in resize-window|paste-buffer) echo "$*" >> %s/resize.log ;; esac\nexec %s "$@"\n' $T "$(command -v tmux)" > $T/rshim/tmux && chmod +x $T/rshim/tmux; : > $T/resize.log
+steps() {
+  LC_ALL=C awk -v w="-t $(tmux display-message -p -t "=tp-$1:" '#{window_id}') " -v s="-t =tp-$1:" '
+    $1 == "paste-buffer" && index($0 " ", s " ") { printf "paste " }
+    $1 == "resize-window" && index($0, w) { printf "%s ", ($0 ~ / -x 220 -y 50$/ ? "grow" : "shrink") }' $T/resize.log
+}
+# (i) checks that pass in a small window: no resize at all.
+PATH=$T/rshim:$PATH tall sb ok "short pane, one line" "a one-line message to a seat in an 89x13 pane whose checks pass"
+PATH=$T/rshim:$PATH tall sb ok "$(msg 400)" "a 400-character line to the 89x13 seat (its box scrolls)"
+[ "$(steps sb)" = "paste paste " ] && [ "$(geo sb)" = "$gb" ] && ok "say does not resize a small seat whose checks pass (the owner's view does not flash)" || { bad "the small seat whose checks pass was resized ($(steps sb); $(geo sb), was $gb)"; cat $T/resize.log; }
+# (iii) the notice in place of the box: the check before the paste refuses, so say grows the window,
+# checks again, pastes and sends Enter in the grown window, then puts it back.
+: > $T/resize.log
 PATH=$T/rshim:$PATH tall sa ok "short pane, one line" "a one-line message to a seat in an 89x13 pane with the diff panel notice"
 PATH=$T/rshim:$PATH tall sa ok "line one"$'\n'"line two"$'\n'"line three" "a three-line message to the 89x13 seat"
-PATH=$T/rshim:$PATH tall sb ok "short pane, one line" "a one-line message to a seat in an 80x10 pane (its box would grow past the bottom)"
+[ "$(steps sa)" = "grow paste shrink grow paste shrink " ] && ok "say grows the seat with the notice before the paste, once per message, and puts it back" || { bad "steps for the seat with the notice ($(steps sa))"; cat $T/resize.log; }
+# (ii) #84's own case: the box is whole before the paste, and the paste grows it past the bottom of an
+# 80x10 pane. The check after the paste refuses, so say grows the window, checks again and sends Enter.
+tmux resize-window -t '=tp-sb:' -x 80 -y 10; sleep 1; gb=$(geo sb); : > $T/resize.log
+[ "$gb" = "80x10 opt=[window-size manual]" ] || bad "test setup: sb geometry ($gb)"
+PATH=$T/rshim:$PATH tall sb ok "$(msg 400)" "a 400-character line to a seat in an 80x10 pane (the paste grows its box past the bottom)"
 PATH=$T/rshim:$PATH tall sb ok "$(msg 290)"$'\n'"two" "a two-line, 300-character message to the 80x10 seat"
-# A seat slow to redraw after the resize (sd, 1.5s): until it does, its old 80x10 frame still reads as
-# an empty box at 220x50, so say waits for a rule as wide as the grown window before it pastes (tl on
-# #132); otherwise the paste lands before the redraw and the check after it refuses.
+[ "$(steps sb)" = "paste grow shrink paste grow shrink " ] && ok "say grows the 80x10 seat only after the paste, when the check after it refuses, and puts it back" || { bad "steps for the 80x10 seat ($(steps sb))"; cat $T/resize.log; }
+# A seat slow to redraw after the resize (sd, 1.5s): until it does, its old 80x10 frame is still on
+# the screen, so say waits for a rule as wide as the grown window before it checks again (tl on #132).
 # lastrule <role>: the width, in columns, of the last plain rule on the seat's screen (its box's bottom rule).
 lastrule() { tmux capture-pane -p -t "=tp-$1:" | LC_ALL=C awk '{ sub(/[ \t]+$/, "") } /^(\342\224\200)+$/ { last = length($0) / 3 } END { print last + 0 }'; }
 tmux resize-window -t '=tp-sd:' -x 80 -y 10; for i in $(seq 1 50); do [ "$(lastrule sd)" = 80 ] && break; sleep 0.1; done
 [ "$(lastrule sd)" = 80 ] || bad "test setup: sd did not redraw at 80 columns"
-tall sd ok "slow seat, one line" "a message to a seat slow to redraw after the resize (say waits for the redrawn box)"
+: > $T/resize.log; PATH=$T/rshim:$PATH tall sd ok "slow seat, one line" "a message to a seat slow to redraw after the resize (say waits for the redrawn box)"
+[ "$(steps sd)" = "paste grow shrink " ] || { bad "steps for the slow seat ($(steps sd))"; cat $T/resize.log; }
 [ "$(geo sa)" = "$ga" ] && [ "$(geo sb)" = "$gb" ] && ok "after each, the small seats' size and window-size are as before ($ga; $gb)" || bad "small seat geometry after say (sa $(geo sa), was $ga; sb $(geo sb), was $gb)"
-grep -q -- "-t $(tmux display-message -p -t '=tp-sa:' '#{window_id}') " $T/resize.log && grep -q -- "-t $(tmux display-message -p -t '=tp-sb:' '#{window_id}') " $T/resize.log && ok "say resized the small seats' windows for the delivery" || { bad "say did not resize the small seats"; cat $T/resize.log; }
 : > $T/resize.log; PATH=$T/rshim:$PATH tall sc ok "big pane" "a message to a seat in a 220x50 pane"
-[ ! -s $T/resize.log ] && [ "$(geo sc)" = "$gc" ] && ok "a seat in a big pane is not resized (no resize-window, same size and window-size)" || { bad "the big seat was touched ($(geo sc), was $gc)"; cat $T/resize.log; }
+! grep -q '^resize-window' $T/resize.log && [ "$(geo sc)" = "$gc" ] && ok "a seat in a big pane is not resized (no resize-window, same size and window-size)" || { bad "the big seat was touched ($(geo sc), was $gc)"; cat $T/resize.log; }
 # Two says to one small seat at once: each message arrives whole, one after the other, or one is
 # refused with a reason. Never an interleaved box. The keys the seat read must be whole pastes only.
 : > $T/keys-sa.log
@@ -1064,9 +1085,15 @@ wag=$(tmux display-message -p -t "$wa" '#{window_width}x#{window_height}')/$(tmu
 [ "$wag" = "89x13/" ] && [ "$(tmux display-message -p -t "$nw" '#{window_width}x#{window_height}')" = "$nwg" ] \
   && ok "the grown window is put back (89x13, window-size unset) after another window of the session became current; that one is left alone" || { bad "restore by window (grown window $wag, other $(tmux display-message -p -t "$nw" '#{window_width}x#{window_height}'), was $nwg)"; cat $T/ws.out; }
 tmux kill-window -t "$nw"; tmux send-keys -t '=tp-sa:' C-u; sleep 0.5
+# A small seat at a dialog: the check before the paste refuses, say grows the window once, the check
+# refuses again there, and say refuses with that reason, the window put back and nothing pasted.
+tmux resize-window -t '=tp-se:' -x 80 -y 10; cp $T/fake-pp-prompt.txt $T/fake-se-prompt.txt; tmux send-keys -t '=tp-se:' C-l; sleep 0.5
+ge=$(geo se); : > $T/resize.log
+PATH=$T/rshim:$PATH refused se "screen not recognised as ready" "a seat at a dialog in an 80x10 pane"
+[ "$(steps se)" = "grow shrink " ] && [ "$(geo se)" = "$ge" ] && ok "the seat at a dialog was grown once, then put back ($ge), and nothing was pasted" || { bad "steps for the seat at a dialog ($(steps se); $(geo se), was $ge)"; cat $T/resize.log; }
+rm $T/fake-se-prompt.txt; tmux send-keys -t '=tp-se:' C-l; sleep 0.5
 # A seat whose session ends mid-delivery: a TERM still runs the whole trap and ends say with 143
 # (tl on #132: under set -e the trap stopped at the failing resize-window and say exited 1).
-tmux resize-window -t '=tp-se:' -x 80 -y 10; sleep 0.5
 PATH=$T/pshim:$PATH TEAM_ROLE=em $S -c $T/tp.yaml say se "session gone" >$T/se.out 2>&1 & ep=$!
 for i in $(seq 1 100); do case "$(tmux display-message -p -t '=tp-se:' '#{window_width}x#{window_height}' 2>/dev/null)" in 220x50) break ;; esac; sleep 0.1; done; sleep 0.5
 tmux kill-session -t '=tp-se'; kill -TERM $ep; wait $ep; erc=$?
