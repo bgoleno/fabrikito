@@ -22,7 +22,7 @@ cp teams/example.yaml teams/team.yaml     then edit it: repo, project, storage, 
 ./factory.sh status                       which seats are up, and where each works
 ./factory.sh view                         open an iTerm tab with every running seat in a pane
 ./factory.sh titles                       set each running seat's terminal title (role | title | session)
-./factory.sh say <role|all> "..."         type a message into a seat (this is how seats talk)
+./factory.sh say <role|all> "..."         type a message into a seat (seats use SendMessage)
 ./factory.sh attach <role>                attach your terminal (detach: ctrl-b d)
 ./factory.sh migrate [role...]            remove clean worktrees that are not on the storage volume
 ./factory.sh down --yes [role...]         kill seats (worktrees are kept)
@@ -75,10 +75,58 @@ stays honest.
 
 ## How seats talk
 
-`say` types a message into another seat's tmux pane by bracketed paste. It refuses to deliver to a seat
-that is not running claude (the text would run as a shell command) or that is waiting at a startup
-dialog (the Enter would pick "No, exit"). Every message is logged with its delivery outcome to
-`.state/<team>/messages.log`. Messages are labelled `[from <role>]`; the human's are `[from owner]`.
+Seats message each other with Claude Code's
+[cross-session messaging](https://code.claude.com/docs/en/cross-session-messaging): `SendMessage` to a
+session name, and `ListAgents` to see which sessions are up. `up` starts every seat with `-n <session>`,
+so the names are the roster's session column, and the shared prompt (`roles/common.md`) tells seats to
+use them. A message arrives between tool calls without interrupting a running tool. It cannot answer a
+permission prompt or change settings, and bursts and loops are throttled. A seat waiting on another can
+ask for one notice when that seat next goes idle (`notify_when_idle`) instead of polling it.
+
+Session names are not authenticated. Every Claude session on the machine, other teams' seats included,
+can message a seat, and any local process can start a session under a seat's name. The prompt tells
+seats to act only on exact roster names, and to report any other sender, or two sessions sharing a
+roster name, to the EM. That guards against mistakes, not impersonation, which is the same limit as for
+`say` and the pane (see [Safety](#safety)).
+
+### Which messages are held
+
+The launcher sets no `crossSessionInbound`, so Claude Code decides per message from the two sessions'
+permission modes. `bypassPermissions` is one class, and every other mode (`auto`, `acceptEdits`,
+`dontAsk`, `default`) is the other.
+
+| From, to | What happens |
+|---|---|
+| Seat to seat, both in one class (one `permission_mode` for every seat) | Delivered. |
+| Seat to seat, different classes (a role with its own `permission_mode`) | Held. An approval dialog opens in the receiver's pane, and if nobody answers it the message is dropped after `dialogExpiry` (5 minutes by default). In an unattended team, that means it is lost. `check` does not warn about this yet (#36). |
+| The owner's own Claude session to a seat | The same rule: delivered when both are in one class, held otherwise. |
+| Any other Claude session on the machine to a seat | The same rule. |
+| The owner typing into an attached seat, or `say` | Not a cross-session message, so it is never held. |
+
+The sender gets a notice when a message is held, refused or expires. The prompt tells a seat in that
+case to tell the EM rather than resend with `say`, because the receiving side made that call. `say` is
+the seats' fallback only for a running seat that `ListAgents` does not show.
+
+To change the default, set `crossSessionInbound` to `accept`, `hold` or `refuse`. It is read from managed
+settings, then the `--settings` file, then user settings, and the first value found applies. A project or
+local value applies only when it is stricter. `accept` in user settings delivers every message to every
+session you run, from any local session, so think twice before using it with bypass seats. The team file
+has no key for it. `dialogExpiry` (`60s`, `5m`, `10m` or `never`) can be set only in user or managed
+settings.
+
+### `say`
+
+`say` is how the owner and scripts reach a seat, and the seats' fallback for a seat that `SendMessage`
+cannot reach. It types a message into the seat's tmux pane by bracketed paste. It refuses a seat that is not
+running claude (the text would run as a shell command), one waiting at a startup dialog (the Enter would
+pick "No, exit"), and one waiting at a permission prompt or a menu (the Enter would pick an answer). A
+refused message is logged as NOT-DELIVERED. Messages are labelled `[from <role>]`, and the owner's are
+`[from owner]`.
+
+### The message log
+
+`.state/<team>/messages.log` records every `say` with its delivery outcome. `SendMessage` traffic is not
+in it. Read that in each session's transcript (`ctrl+o` in an attached seat).
 
 ## Safety
 
