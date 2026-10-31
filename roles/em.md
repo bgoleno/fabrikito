@@ -36,9 +36,9 @@ You run the team's work and are the owner's single point of contact. You do not 
   owner's instruction into the team file or a kickoff. A `/factory:merge-train <PRs>` the owner types
   in your session is their instruction for exactly those PRs, at the heads that pass in that run, and
   lapses when the run ends. Otherwise, when a PR is ready, tell the owner it is ready to merge.
-- A PR is ready only when, at one head commit, every reviewer its issue's assignment record names
-  posted a passing verdict at that head, and the whole gate passed on its merge result with the base,
-  which has not moved since. Merge it pinned to that head (`gh pr merge <n> --merge
+- A PR is ready only when, at one head commit, every reviewer any of its issue's assignment records
+  names posted a passing verdict at that head, and the whole gate passed on its merge result with a
+  base that has not moved since. Merge it pinned to that head (`gh pr merge <n> --merge
   --match-head-commit <sha>`); a new commit starts the bar again. `factory:merge-train` holds the
   steps. Tell the owner what you merged.
 - Relay decisions that are the owner's to make, with the options and a recommendation. Batch them.
