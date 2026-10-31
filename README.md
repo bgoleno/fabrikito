@@ -396,7 +396,18 @@ role's (team first; a role can add or tighten a rule, never loosen one), plus wh
 - a `Read` deny on the message log, `.state/<team>/messages.log` (both spellings, when a symlink makes
   them differ), for every seat but the role with id `em`: the log holds every `SendMessage` in full. A
   team with no `em` role has the deny on every seat. This is an accident guard, not a boundary: every
-  seat runs as the same OS user (#29), and a command that reads the file some other way is not stopped.
+  seat runs as the same OS user (#29), and a command that reads the file some other way is not stopped;
+- rules on the security-triage record folder, `.state/<team>/triage/` (#138), where the
+  `factory:security-triage` skill has `sec` write its records. A record can hold an unfixed
+  medium-or-higher finding. The folder is outside every working directory, so without a rule each
+  write and read would prompt in a mode other than bypass. The role with id `sec` gets an `Edit` and
+  a `Read` allow on `triage/**`, the role with id `em` a `Read` allow (and an `Edit` deny), and every
+  other seat an `Edit` and a `Read` deny, all in both spellings. `up` makes the folder (mode 700,
+  set on an existing folder too) when the team has a `sec` role; nothing deletes a record. The role
+  id is fixed: a team whose security seat has another id gets no record folder, every seat but `em`
+  is denied it, and `check` warns about a role other than `sec` that lists the skill. Like the log's, these denies are an
+  accident guard, not a boundary. As with any settings change, a `sec` seat that is already running
+  when `up` writes these rules keeps its old settings until it restarts.
 
 `permission_mode` (in `sessions.claude`, or per role) picks the mode; the example uses `auto`.
 `bypassPermissions` skips every prompt and is meant for an isolated machine only. Deny rules hold in
@@ -657,7 +668,12 @@ another are refused; a live-env driver sends `[from live-test]`; and `live-test`
 server before any tmux call. And it covers `say` writing its log line before its terminal message (#128):
 with stderr closed, or a pipe whose reader has gone, a refusal and a down seat are still logged
 `NOT-DELIVERED`; the reason is still shown and no held file is left; and a log that cannot be appended to
-still lets the reason through.
+still lets the reason through. And it covers the security-triage record folder (#138): the allows for
+`sec` and `em` and the denies for every other seat, in both spellings; no deny shadowing those allows;
+a team with no `sec` role getting no folder; a glob character in the state path escaped, with the `**`
+left as it is; `check`'s lines and its warning; `up` making the folder, and giving an existing one
+mode 700 with its records left; and the skill telling `sec` to write and read a record with the file
+tools, not Bash.
 
 The exit code is authoritative: `test/e2e.sh` exits 0 only when it reaches the end with every
 assertion passed (`RESULT pass=<n> fail=0`), and non-zero when any assertion fails or the run stops

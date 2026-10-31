@@ -303,8 +303,9 @@ pd() { grep -E "^$1 " $T/args.log | grep -o -- "--plugin-dir [^ ]*"; }
 $S -c $T/team.yaml check 2>&1 | grep -qxF "plugin    : $PLUG (skills as /factory:<skill>)" && ok "check: plugin header shows the loaded plugin" || { bad "check: plugin header"; $S -c $T/team.yaml check 2>&1 | head -10; }
 echo "--- generated settings"
 # The user's rules, in team-then-role order, without duplicates. Rules the launcher adds itself
-# (Edit denies on its own files) are checked separately, so they are left out of these lists.
-perms() { ruby -rjson -e 'p = JSON.parse(File.read(ARGV[0]))["permissions"] || {}; %w[deny ask allow].each { |k| l = (p[k] || []).reject { |r| r.start_with?("Edit(//", "Bash(git push ") || r =~ %r{\ARead\(//.*/state/messages\.log\)\z} }; puts "#{k}=#{l.join(" | ")}" }; puts "disable=#{p["disableBypassPermissionsMode"]}"' "$1" 2>&1; }
+# (Edit denies on its own files, and the Read rules on the log and the triage folder) are checked
+# separately, so they are left out of these lists.
+perms() { ruby -rjson -e 'p = JSON.parse(File.read(ARGV[0]))["permissions"] || {}; %w[deny ask allow].each { |k| l = (p[k] || []).reject { |r| r.start_with?("Edit(//", "Bash(git push ") || r =~ %r{\ARead\(//.*/state/(messages\.log|triage/\*\*)\)\z} }; puts "#{k}=#{l.join(" | ")}" }; puts "disable=#{p["disableBypassPermissionsMode"]}"' "$1" 2>&1; }
 # rules <file> <deny|ask|allow>: one rule per line
 rules() { ruby -rjson -e 'puts((JSON.parse(File.read(ARGV[0]))["permissions"] || {})[ARGV[1]] || [])' "$1" "$2"; }
 want_em='deny=Read(//**/.env) | Bash(touch tt-deny*)
@@ -435,9 +436,9 @@ done
 [ -z "$lr" ] && ok "messages.log: Read denied to w1 and w2 (both spellings), readable by em" || { bad "messages.log read rules:$lr"; rules $T/state/settings/w1.json deny | grep messages; }
 # check names the Read deny for the seats that have it, and keeps it out of the protected-path count.
 # w1's team and role denies hold no Edit rule, so its protected paths are its Edit denies but the notes
-# and the auto-memory folder (#112), which check names on their own.
+# and the auto-memory folder (#112) and the triage folder (#138), which check names on their own.
 nw1=$(sect w1 | sed -n 's/.*added: Edit deny on \([0-9]*\) protected paths.*/\1/p')
-ew1=$(rules $T/state/settings/w1.json deny | grep '^Edit(' | grep -v -e '/state/notes/' -e '/memory/\*\*' | wc -l | tr -d ' ')
+ew1=$(rules $T/state/settings/w1.json deny | grep '^Edit(' | grep -v -e '/state/notes/' -e '/memory/\*\*' -e '/state/triage/\*\*' | wc -l | tr -d ' ')
 sect w1 | grep -F "added: " | grep -qF ", Read deny on the message log" && ! sect em | grep -qF "Read deny on the message log" && [ -n "$nw1" ] && [ "$nw1" = "$ew1" ] \
   && ok "check: w1's added line names the message log Read deny (not counted among its $nw1 protected paths), em's does not" || { bad "check: message log Read deny line (counted $nw1, Edit denies $ew1)"; sect w1; sect em; }
 # A seat may write its own note without a prompt (it is outside its working directory), and only its
@@ -454,6 +455,79 @@ rules $T/state/settings/w1.json deny | grep -qF "state/notes/**" && na="$na note
 sect em | grep -qF "Edit deny on the repository's auto-memory folder" && sect w1 | grep -qF "Edit deny on the repository's auto-memory folder" && ! sect w2 | grep -qF "auto-memory folder" && ok "check: names the auto-memory folder deny for em and w1, not for w2" || { bad "check: auto-memory folder"; sect w2; }
 sect em | grep -qF "added: Edit deny on" && sect em | grep -qF ", Edit allow on its own progress note and deny on the other seats'" && ! sect em | grep -E "^ +(allow|deny) *:" | grep -qF notes \
   && ok "check: the note allow is listed as added by the launcher, not among the team's allow rules" || { bad "check: note allow line"; sect em; }
+echo "--- security-triage record folder (#138)"
+# Only the role with id sec writes triage records, in <state>/triage/: it may edit and read the
+# folder (outside its working directory, so it would prompt otherwise), em may read it, and every
+# other seat is denied both, in both spellings. This team is the test team plus a sec role, and w2
+# lists the security-triage skill, which check warns about.
+sed 's/^  w2: { title: Worker Two, /  w2: { title: Worker Two, skills: ["factory:security-triage"], /' $T/team.yaml > $T/sec.yaml
+echo '  sec: { title: Security, workdir: { type: worktree }, prompt_text: "sec prompt" }' >> $T/sec.yaml
+# tset <team file> <role> <list>: that list of the role's generated settings, one rule a line.
+tset() { TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb "$1" settings "$2" | ruby -rjson -e 'puts((JSON.parse(STDIN.read)["permissions"] || {})[ARGV[0]] || [])' "$3"; }
+tr=""
+for r in sec em w1 w2; do
+  al=$(tset $T/sec.yaml $r allow); dn=$(tset $T/sec.yaml $r deny)
+  for sp in "$RT" "$T"; do
+    E="Edit(/$sp/state/triage/**)"; R="Read(/$sp/state/triage/**)"
+    has() { printf '%s\n' "$1" | grep -qxF "$2"; }
+    case $r in
+      sec) has "$al" "$E" && has "$al" "$R" && ! has "$dn" "$E" && ! has "$dn" "$R" || tr="$tr sec($sp)" ;;
+      em) has "$al" "$R" && ! has "$al" "$E" && has "$dn" "$E" && ! has "$dn" "$R" || tr="$tr em($sp)" ;;
+      *) has "$dn" "$E" && has "$dn" "$R" && ! has "$al" "$E" && ! has "$al" "$R" || tr="$tr $r($sp)" ;;
+    esac
+  done
+done
+[ -z "$tr" ] && [ "$T" != "$RT" ] && ok "triage folder: Edit and Read allowed to sec, Read to em (Edit denied), both denied to w1 and w2, both spellings" || { bad "triage folder rules:$tr"; tset $T/sec.yaml sec allow | grep triage; tset $T/sec.yaml w1 deny | grep triage; }
+# No deny of sec's (team, role or launcher) covers a file in the folder, nor any of em's Read denies:
+# a deny wins over an allow, so one would make the allow do nothing. Each Edit or Read path rule is
+# matched as a glob against a record's path, * crossing folders (wider than Claude Code's matching,
+# so it errs towards finding a shadow).
+shadow() { ruby -e 'tool = ARGV.shift; path = ARGV.shift
+  STDIN.read.split("\n").each { |r| m = r.match(/\A(Edit|Read)\(\/(.*)\)\z/) or next
+    next if tool == "Read" && m[1] != "Read"
+    puts r if File.fnmatch(m[2], path, File::FNM_DOTMATCH) }' "$@"; }
+sh=""; for sp in "$RT" "$T"; do
+  sh="$sh$(tset $T/sec.yaml sec deny | shadow Any "$sp/state/triage/pr-1.md")$(tset $T/sec.yaml em deny | shadow Read "$sp/state/triage/pr-1.md")"
+done
+probe=$(printf '%s\n' "Edit(/$RT/state/**)" "Read(//**/.env)" | shadow Any "$RT/state/triage/pr-1.md")
+[ -z "$sh" ] && [ "$probe" = "Edit(/$RT/state/**)" ] && ok "triage folder: no deny shadows sec's allows or em's Read allow (the matcher finds a shadow when there is one)" || { bad "triage folder: shadowed allow"; echo "$sh"; echo "probe: $probe"; }
+# A team with no sec role has no record folder, and no seat may write one.
+nt=""; for r in em w1 w2; do
+  al=$(tset $T/team.yaml $r allow); dn=$(tset $T/team.yaml $r deny)
+  printf '%s\n' "$al" | grep -qF "Edit(/$RT/state/triage/**)" && nt="$nt $r-edit-allowed"
+  printf '%s\n' "$dn" | grep -qxF "Edit(/$RT/state/triage/**)" || nt="$nt $r-edit-not-denied"
+  [ $r = em ] || printf '%s\n' "$dn" | grep -qxF "Read(/$RT/state/triage/**)" || nt="$nt $r-read-not-denied"
+done
+[ -z "$nt" ] && [ -z "$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml get state.triage_dir)" ] && [ ! -e $T/state/triage ] \
+  && ok "triage folder: a team with no sec role gets none (up made none), and every seat is denied writing there" || { bad "triage folder without a sec role:$nt"; ls -la $T/state; }
+# The folder is glob-escaped and the ** after it is not.
+tesc=$(TEAM_STATE_DIR='/tmp/sf-e2e-no[such]*dir' ruby $SRC/lib/team_config.rb $T/sec.yaml settings sec | ruby -rjson -e 'puts JSON.parse(STDIN.read)["permissions"]["allow"]' | grep triage)
+printf '%s\n' "$tesc" | grep -qxF 'Edit(//tmp/sf-e2e-no\[such\]\*dir/triage/**)' && printf '%s\n' "$tesc" | grep -qxF 'Read(//private/tmp/sf-e2e-no\[such\]\*dir/triage/**)' \
+  && ok "triage folder: glob characters in the state path are escaped, the trailing ** is not" || { bad "triage folder glob escaping"; echo "$tesc"; }
+# The skill keeps sec on the tools its allows cover: a Bash write or read of a record would prompt
+# outside bypass, which is what the folder's rules exist to prevent (#138, as #90 for the notes).
+tr '\n' ' ' < $SRC/plugin/skills/security-triage/SKILL.md | tr -s ' ' | grep -qF "Write and update the record with the Write or Edit tool, and read it with the Read tool, not Bash" \
+  && ok "the security-triage skill says to write and read the record with the file tools, not Bash" || bad "the security-triage skill does not say which tools write and read the record"
+# check names the rules on each seat's added line, and warns about a role other than sec that lists the skill.
+schk=$($S -c $T/sec.yaml check 2>&1); ssect() { echo "$schk" | sed -n "/^\[$1\]/,/^\[/p"; }
+ssect sec | grep -F "added: " | grep -qF ", Edit and Read allow on the triage record folder" && ssect em | grep -F "added: " | grep -qF ", Read allow and Edit deny on the triage record folder" \
+  && ssect w1 | grep -F "added: " | grep -qF ", Edit and Read deny on the triage record folder" \
+  && echo "$schk" | grep -qxF "warning: w2 lists factory:security-triage, but only a role with id sec may write triage records ($T/state/triage/): every other seat may not write there." \
+  && ! echo "$schk" | grep -q "warning: sec lists factory:security-triage" \
+  && ok "check: the triage folder rules on each seat's added line, and a warning for w2, which lists the skill and is not sec" || { bad "check: triage folder"; ssect sec; ssect em; echo "$schk" | grep warning; }
+# up makes the folder, owner-only, for a team with a sec role. up writes every seat's settings, so
+# this runs in a state folder and session prefix of its own, leaving the test team's alone. Only sec
+# is started; its session and worktree are removed afterwards.
+sed 's/^  prefix: tt$/  prefix: ts/' $T/sec.yaml > $T/sec2.yaml
+TEAM_STATE_DIR=$T/secstate $S -c $T/sec2.yaml up --no-view sec >/dev/null 2>&1
+[ -d $T/secstate/triage ] && [ "$(stat -f %Lp $T/secstate/triage)" = 700 ] && ok "up makes the triage folder (mode 700) for a team with a sec role" || { bad "up: triage folder"; ls -la $T/secstate; }
+# An existing folder with a looser mode gets 700 too, and its records are left alone. sec is still
+# running, so this up only writes settings and folders and skips the seat.
+chmod 755 $T/secstate/triage; echo record > $T/secstate/triage/pr-1.md
+TEAM_STATE_DIR=$T/secstate $S -c $T/sec2.yaml up --no-view sec >/dev/null 2>&1
+[ "$(stat -f %Lp $T/secstate/triage)" = 700 ] && [ "$(cat $T/secstate/triage/pr-1.md 2>/dev/null)" = record ] \
+  && ok "up gives an existing triage folder mode 700 and leaves its records" || { bad "up: existing triage folder"; ls -la $T/secstate/triage; }
+tmux kill-session -t '=ts-sec' 2>/dev/null; git -C $T/repo worktree remove --force $VOL/$ROOT/team-sec 2>/dev/null
 # A user who switched every hook off keeps that choice in seats without a gate, which then get no
 # note: check says which. Throwaway config folders, so the owner's own settings play no part.
 mkdir -p $T/cfgoff $T/cfgon && echo '{"disableAllHooks": true}' > $T/cfgoff/settings.json && echo '{}' > $T/cfgon/settings.json
