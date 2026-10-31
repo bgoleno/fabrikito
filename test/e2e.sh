@@ -151,7 +151,9 @@ int main(int n, char **v) {
     } else if (b == 21) blen = 0;                 /* ctrl-u clears the box */
     else if (b == 12) ;                           /* ctrl-l redraws (after a resize) */
     else if (blen < sizeof buf - 1) buf[blen++] = (char)b;
-    draw();
+    /* Not while a paste is coming in: a redraw per pasted byte (800 for a tall message) can still
+       be running at say's check after the paste on a loaded machine. ESC [ 201 ~ draws once. */
+    if (!paste) draw();
   }
   return 0;
 }
