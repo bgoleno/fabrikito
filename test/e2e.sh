@@ -54,7 +54,8 @@ git init -q --bare $T/local/origin.git; git clone -q $T/local/origin.git $T/repo
 #   prompt  a dialog, drawn instead of the box     output  lines drawn above the box
 #   mode    swallow (input never shows), below (a list under the box), prefill (text left in the box),
 #           suggest (a dim suggested prompt in the empty box), sticky (that suggestion stays drawn after
-#           any text), mixed (typed text and the dim suggestion)
+#           any text), mixed (typed text and the dim suggestion), cut (the screen ends at the input
+#           row: no bottom rule and no footer, as a pane too short for what is drawn above the box)
 # A submitted line that starts with ! is run by /bin/sh the way Claude Code's Bash tool runs a
 # command: in a child that leaves the pane's terminal (setsid), so the child has no tty of its own
 # and only the stand-in, its parent, holds the pane's tty.
@@ -126,6 +127,7 @@ static void draw(void) {
   if (blen == 0) printf(sticky || !strcmp(mode, "suggest") ? "\033[2mrun the tests\033[0m" : "\033[2mTry \"something\"\033[0m");
   for (size_t i = 0; i < blen; i++) { if (buf[i] == '\n') printf("\r\n  "); else putchar(buf[i]); }
   if (blen && sticky) printf(" \033[2mrun the tests\033[0m");
+  if (!strcmp(mode, "cut")) { fflush(stdout); return; }
   printf("\r\n%s\r\n", RULE);
   if (!strcmp(mode, "below")) printf("  \xe2\x9d\xaf suggestion one\r\n    suggestion two\r\n");
   printf("  SL line one\r\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle)\r\n");
@@ -521,7 +523,7 @@ echo "--- say delivers only to a seat showing its input box"
 # CLI that draws them differently shows up as a mismatch here. pu shows an invented select list
 # with no numbers and no key hint: any dialog say does not know must fail closed too.
 roles=""
-for r in pp pm pd ph pu pb pf ps pg px pk pq po ta tb tc td te; do roles="$roles  $r: { title: Seat $r, workdir: { type: project, path: $T/proj }, prompt_text: \"$r\" }
+for r in pp pm pd ph pu pb pf ps pg px pk pq po ta tb tc td te pv pw py; do roles="$roles  $r: { title: Seat $r, workdir: { type: project, path: $T/proj }, prompt_text: \"$r\" }
 "; done
 cat > $T/tp.yaml <<Y
 team: tp
@@ -591,6 +593,13 @@ M
 echo tall > $T/fake-ta-mode.txt; echo tall > $T/fake-te-mode.txt; echo tall-dim > $T/fake-tb-mode.txt; echo tall-typed > $T/fake-tc-mode.txt; echo tall-short > $T/fake-td-mode.txt
 echo below > $T/fake-pb-mode.txt; echo prefill > $T/fake-pf-mode.txt; echo swallow > $T/fake-ps-mode.txt
 echo suggest > $T/fake-pg-mode.txt; echo mixed > $T/fake-px-mode.txt; echo sticky > $T/fake-pk-mode.txt
+# The diff panel notice (#95), byte for byte as Claude Code 2.1.316 drew it in an 89-column pane on
+# 2026-10-31, then the reset its next row starts with. pv: above a whole input box. pw: the same,
+# in a pane too short for the box under it (the screen ends at the input row). py: above a dialog.
+notice=$(printf '\033[2m\342\225\255%s\033[0m\033[38;5;246m\342\234\225\033[2m\033[39m\342\224\200\342\225\256\n\342\224\202\033[0m \033[38;5;246mResize your terminal to at least 110 columns to show the diff panel\033[39m%19s\033[2m\342\224\202\n\342\225\260%s\342\225\257\n\033[0m' \
+  "$(printf '\342\224\200%.0s' $(seq 85))" "" "$(printf '\342\224\200%.0s' $(seq 87))")
+printf '%s\n' "$notice" > $T/fake-pv-output.txt; cp $T/fake-pv-output.txt $T/fake-pw-output.txt; echo cut > $T/fake-pw-mode.txt
+printf '%s\n%s\n' "$notice" "$fake_prompt" > $T/fake-py-prompt.txt
 { printf '%s\n' "$fake_prompt"; for i in $(seq 1 5); do echo "later output line $i"; done; } > $T/fake-pq-output.txt
 cat > $T/fake-po-output.txt <<'M'
 ⏺ The permission prompt asked "Do you want to proceed?" and the cursor sat on "❯ 1. Yes".
@@ -632,6 +641,15 @@ delivered pq "prompt text in the transcript above the box"
 delivered po "the seat's own output quoting prompt lines"
 TEAM_ROLE=em $S -c $T/tp.yaml say po "qa result: it asked 'Do you want to proceed?' with '❯ 1. Yes' and 'Esc to cancel · Tab to amend'" >/dev/null 2>&1; sleep 1
 delivered po "the message after one that quotes prompt text"
+# The notice alone is no reason to refuse: with the whole box under it, say delivers. Only when it
+# pushes the end of the box off the pane does say refuse, and then it says why and what clears it.
+tmux capture-pane -p -t '=tp-pv:' | grep -qF "Resize your terminal to at least 110 columns to show the diff panel" && ok "stand-in: pv draws the diff panel notice above its box" || bad "stand-in: no notice on pv"
+delivered pv "a seat with the diff panel notice above its whole input box"
+refused pw "diff panel notice" "a seat whose diff panel notice pushed the end of its input box off a short pane, naming the notice"
+nout=$(TEAM_ROLE=em $S -c $T/tp.yaml say pw "notice wording check" 2>&1)
+echo "$nout" | grep -qF "110 columns wide or more" && echo "$nout" | grep -qF "14 rows or more" && echo "$nout" | grep -qF "close the diff panel" &&
+  ok "the refusal says how to clear the notice (110 columns, 14 rows, or close the panel)" || { bad "notice refusal wording"; echo "$nout"; }
+refused py "screen not recognised as ready" "a seat at a permission prompt under the diff panel notice"
 tmux copy-mode -t '=tp-pq:'; refused pq "copy mode" "a seat whose pane is in copy mode"; tmux send-keys -t '=tp-pq:' -X cancel
 # When tmux cannot read the seat's screen, say cannot tell what is up: it refuses.
 mkdir -p $T/shim && printf '#!/bin/sh\n[ "$1" = capture-pane ] && exit 1\nexec %s "$@"\n' "$(command -v tmux)" > $T/shim/tmux && chmod +x $T/shim/tmux

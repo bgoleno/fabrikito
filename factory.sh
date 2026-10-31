@@ -542,6 +542,7 @@ has_claude() {
 #   text        the box holds text: typed by someone, or left by a message that was not sent
 #   copy-mode   someone is scrolling the pane (capture-pane would still show the box)
 #   unreadable  tmux could not read the pane
+#   diff-notice the diff panel's notice pushed the end of the input box off a short pane (#95)
 #   unknown     the screen does not end with the input box
 box_state() {
   local sess screen
@@ -580,13 +581,29 @@ box_state() {
         if (isdim) dimc++; else normc++
       }
     }
+    # The notice of the diff panel (#95), measured on 2.1.316: with the diff panel open (it opens by
+    # itself once a seat has changes to show in a pane 110 columns wide or more, and the choice is
+    # kept), a pane narrower than 110 columns draws this box above the input box:
+    #   ╭──────…──✕─╮
+    #   │ Resize your terminal to at least 110 columns to show the diff panel   │
+    #   ╰──────…────╯
+    # With 14 rows or more the whole input box still shows under it, and the screen reads as usual.
+    # With 13 or fewer, the screen ends at the input row: no bottom rule and no footer, so nothing
+    # shows where the box ends, and say cannot deliver safely. True for exactly that screen: the last
+    # row is the input row (❯ in column 0) under the top rule of this seat, with the notice right above.
+    # It only changes the wording of the refusal; the screen is refused either way.
+    function cutnotice() {
+      return n >= 5 && line[n] ~ /^❯(\302\240|$)/ && top(line[n - 1]) && line[n - 2] ~ /^╰(─)+╯$/ &&
+        line[n - 3] ~ /^│ Resize your terminal to at least [0-9]+ columns to show the diff panel +│$/ &&
+        line[n - 4] ~ /^╭(─)+✕─╮$/
+    }
     { raw[NR] = $0; p = plain($0); if (p != "") { n++; line[n] = p; at[n] = NR } }
     END {
       j = n
       for (f = 0; j > 0 && !rule(line[j]); j--) {
-        if (++f > 8 || line[j] !~ /^  [^ ]/ || line[j] ~ /❯|Enter to|Esc to/) { print "unknown\t0\t0\t"; exit }
+        if (++f > 8 || line[j] !~ /^  [^ ]/ || line[j] ~ /❯|Enter to|Esc to/) { print (cutnotice() ? "diff-notice" : "unknown") "\t0\t0\t"; exit }
       }
-      if (j < 1) { print "unknown\t0\t0\t"; exit }
+      if (j < 1) { print (cutnotice() ? "diff-notice" : "unknown") "\t0\t0\t"; exit }
       for (k = j - 1; k > 0 && line[k] !~ /^❯/; k--) {
         if (j - k > 60 || line[k] !~ /^  /) { print "unknown\t0\t0\t"; exit }
       }
@@ -614,6 +631,7 @@ box_refusal() {
     text) echo "the input box of $1 is not empty (someone typing, or an earlier message that was not sent): attach $1 and clear it ($SELF attach $1)" ;;
     copy-mode) echo "$1's pane is in copy mode (someone is scrolling): leave it with q ($SELF attach $1)" ;;
     unreadable) echo "could not read $1's screen" ;;
+    diff-notice) echo "$1 shows Claude Code's diff panel notice (\"Resize your terminal to at least 110 columns to show the diff panel\") in a pane too short to show the input box under it: make the pane 110 columns wide or more (the panel then docks beside the transcript), or give it 14 rows or more, or close the diff panel in $1 ($SELF attach $1)" ;;
     *) echo "screen not recognised as ready (a permission prompt, a menu, a dialog?): attach $1 ($SELF attach $1)" ;;
   esac
 }
