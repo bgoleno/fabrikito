@@ -41,7 +41,9 @@ default tmux server, where a real team runs: run it on a private server (see Tes
 `view` and `titles` apply the same rule before any tmux call, because a copy of a real team file shares its
 session prefix and would reach the real seats: kill them, type into them, show them or relabel them
 ([#105](../../issues/105), [#124](../../issues/124)). `status` only reads, and `migrate` keeps any worktree a
-running process works in, on whatever server ([#121](../../issues/121)). Each takes `--default-socket` too
+running process works in, on whatever server ([#121](../../issues/121)). It reads each worktree's path
+whole, so a path with a newline in it is acted on under its full path and shown escaped, never split in
+two ([#134](../../issues/134)). Each takes `--default-socket` too
 (`say` and `attach`: as the first argument), and `up --default-socket` passes it on to the view it opens. So a throwaway team file never goes in `teams/`,
 neither this checkout's nor a worktree's copy of it: there every command takes it for a real one. Put it
 in a temporary folder and run it on a private server.

@@ -795,6 +795,18 @@ mig=$($S -c $T/team.yaml migrate w1 2>&1)
 [ -d "$BW" ] && echo "$mig" | grep -qF 'tslash/team-w1: lsof escapes characters in its path' && echo "$mig" | grep -qF "removed 0 worktree(s)" && ok "migrate keeps a worktree in use whose path has a backslash in it (refused: lsof escapes it)" || { bad "worktree in use with a backslash in its path"; echo "$mig" | head -4; }
 kill $seatpid 2>/dev/null; wait $seatpid 2>/dev/null
 git -C $T/repo worktree remove --force "$BW" 2>/dev/null
+# A newline in a worktree's path (#134): read line by line, "$T/nl/a/team-w1<newline>b/team-w1" is
+# two paths, the first a truncated one named like w1's worktree. migrate must handle it under its
+# full path (lsof would print the newline escaped, so it is refused) and show it escaped, on one line.
+# git prints the physical path ($T may sit under a symlink, as /var does on macOS), so NE uses it.
+# Every line that names the folder must name all of it: none may show the truncated path.
+NW="$T/nl/a/team-w1"$'\n'"b/team-w1"; NE="$(cd "$T" && pwd -P)/nl/a/team-w1\\nb/team-w1"
+mkdir -p "$T/nl/a/team-w1"$'\n'"b" && git -C $T/repo worktree add -q --detach "$NW" origin/main
+mig=$($S -c $T/team.yaml migrate w1 2>&1)
+[ -d "$NW" ] && echo "$mig" | grep -qF "REFUSE w1: cannot tell whether a running process works in $NE: lsof escapes" && echo "$mig" | grep -qxF "  $NE" &&
+  ! echo "$mig" | grep -F "/nl/a/team-w1" | grep -qvF '/nl/a/team-w1\nb/team-w1' && echo "$mig" | grep -qF "removed 0 worktree(s)" &&
+  ok "migrate handles a worktree with a newline in its path under its full path (refused), and lists it escaped on one line" || { bad "worktree with a newline in its path"; echo "$mig"; }
+git -C $T/repo worktree remove --force "$NW" 2>/dev/null
 echo "--- unmounted volume"
 sed "s#volume: $VOL#volume: /Volumes/NotMounted#" $T/team.yaml > $T/team2.yaml
 $S -c $T/team.yaml down --yes w2 >/dev/null
