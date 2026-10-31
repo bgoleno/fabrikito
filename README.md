@@ -386,3 +386,8 @@ auto-updater being off in every seat and nowhere else, and the seats' own copy o
 `up`, never the shared file; still intact after the shared file is replaced; `REPLACED` when its own
 file is swapped; a copy that cannot be made, or a shared install caught mid-reinstall, stops the
 start).
+
+The exit code is authoritative: `test/e2e.sh` exits 0 only when it reaches the end with every
+assertion passed (`RESULT pass=<n> fail=0`), and non-zero when any assertion fails or the run stops
+early (a setup error, a signal). A run that stops early still removes what it made and says
+`ABORTED` on stderr. That makes it safe as a `repo.gate` command, which is judged by its exit code.

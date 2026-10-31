@@ -18,14 +18,22 @@ unset TMUX CLAUDE_CONFIG_DIR; export TMUX_TMPDIR=$T/tmux TEAM_STATE_DIR=$T/state
 # (TEAM_VIEW=0), and every up says --no-view too, so dropping either one still opens no window.
 printf '#!/bin/sh\necho "osascript $*" >> %s/osascript.log\nexit 1\n' "$T" > $T/bin/osascript; chmod +x $T/bin/osascript
 export PATH=$T/bin:$PATH TEAM_VIEW=0
-# Stopped early (a gate timeout kills this test's process group): stop the private tmux server,
-# which has left that group, and remove what the test made, as the cleanup at the end does.
-on_signal() {
+# Stopped early (a gate timeout kills this test's process group, a setup step exits, set -u trips):
+# stop the private tmux server, which has left that group, and remove what the test made, as the
+# cleanup at the end does. Not every assertion ran, so the exit status is never 0. The exit code is
+# what a gate reads (repo.gate, lib/stop_gate.sh): only a run that reaches the end with fail=0 is 0.
+finished=
+on_exit() {
+  local rc=$?
+  [ -n "$finished" ] && return
   tmux kill-server 2>/dev/null
   for w in "$VOL/$ROOT"/*; do [ -d "$w" ] && git -C $T/repo worktree remove --force "$w" 2>/dev/null; done
-  rmdir "$VOL/$ROOT" 2>/dev/null; rm -rf "$T"; exit 143
+  rmdir "$VOL/$ROOT" 2>/dev/null; rm -rf "$T"
+  echo "ABORTED before the end (exit $rc): pass=${pass:-0} fail=${fail:-0}" >&2
+  [ "$rc" -eq 0 ] && rc=1; exit "$rc"
 }
-trap on_signal TERM INT
+trap on_exit EXIT
+trap 'exit 143' TERM INT
 pass=0; fail=0; ok(){ echo "PASS $1"; pass=$((pass+1)); }; bad(){ echo "FAIL $1"; fail=$((fail+1)); }
 # throwaway repo with a "github" slug the origin URL contains
 git init -q --bare $T/local/origin.git; git clone -q $T/local/origin.git $T/repo 2>/dev/null
@@ -897,3 +905,4 @@ for w in team-w1 team-w2; do git -C $T/repo worktree remove --force $VOL/$ROOT/$
 rmdir $VOL/$ROOT 2>/dev/null; [ ! -e $VOL/$ROOT ] && ok "test folder removed from the volume" || bad "test folder removed from the volume ($(ls -A $VOL/$ROOT 2>&1 | head -3))"
 rm -rf "$T"
 echo "RESULT pass=$pass fail=$fail"
+finished=1; [ "$fail" -eq 0 ] && [ "$pass" -gt 0 ]
