@@ -677,6 +677,11 @@ left as it is; `check`'s lines and its warning; `up` making the folder, and givi
 mode 700 with its records left; and the skill telling `sec` to write and read a record with the file
 tools, not Bash.
 
+The cases live in `test/e2e/`, one file per area, and `test/e2e.sh` sources them in the order of its
+`AREAS` list, in one shell, after one shared setup ([#70](../../issues/70)). A new case goes in its
+area's file. A new file must be added to `AREAS`, or the run stops: it never skips a file it was not told
+about.
+
 The exit code is authoritative: `test/e2e.sh` exits 0 only when it reaches the end with every
 assertion passed (`RESULT pass=<n> fail=0`), and non-zero when any assertion fails or the run stops
 early (a setup error, a signal). A run that stops early still removes what it made and says
