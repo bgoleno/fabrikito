@@ -234,12 +234,12 @@ cmd_up() {
       fi
       echo '# The auto-updater would reinstall claude under this running seat, after which macOS can no'
       echo '# longer tell which process it is and its privacy grants stop working (#50). Update by hand.'
-echo 'export DISABLE_AUTOUPDATER=1'
-if [ "$(cfg role "$r" auto_memory)" = off ]; then
-  echo '# Auto memory is one folder for every worktree of the repo, loaded into every session there,'
-  echo '# so a seat would write unreviewed notes for all of them (#71). On with auto_memory: true.'
-  echo 'export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1'
-fi
+      echo 'export DISABLE_AUTOUPDATER=1'
+      if [ "$(cfg role "$r" auto_memory)" = off ]; then
+        echo '# Auto memory is one folder for every worktree of the repo, loaded into every session there,'
+        echo '# so a seat would write unreviewed notes for all of them (#71). On with auto_memory: true.'
+        echo 'export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1'
+      fi
       printf 'claude_bin=%q\n' "$CLAUDE_COPY"
       echo 'if [ -n "$wrapper" ] && [ -x "$wrapper" ]; then run=("$wrapper" "$claude_bin"); else run=("$claude_bin"); fi'
       printf '"${run[@]}"%s --settings %q -n %q \\\n' "$args_q" "$settings" "$sess"

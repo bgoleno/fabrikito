@@ -395,19 +395,19 @@ class TeamConfig
     (role(id)['permission_mode'] || claude['permission_mode'])&.to_s
   end
 
-# Claude Code's auto memory lives in <config>/projects/<repo>/memory/, one folder for the whole
-# repository: "all worktrees and subdirectories within the same repo share one auto memory
-# directory", and its MEMORY.md loads into every session there
-# (https://code.claude.com/docs/en/memory#storage-location). A seat's note would reach every other
-# seat and the owner's own sessions in the main checkout, unreviewed (#71), so it is off unless the
-# team file turns it on (a role's value wins over sessions.claude). On means the factory sets
-# nothing and Claude Code's own settings decide.
-def auto_memory?(id)
-  v = role(id).key?('auto_memory') ? role(id)['auto_memory'] : claude['auto_memory']
-  v == true
-end
+  # Claude Code's auto memory lives in <config>/projects/<repo>/memory/, one folder for the whole
+  # repository: "all worktrees and subdirectories within the same repo share one auto memory
+  # directory", and its MEMORY.md loads into every session there
+  # (https://code.claude.com/docs/en/memory#storage-location). A seat's note would reach every other
+  # seat and the owner's own sessions in the main checkout, unreviewed (#71), so it is off unless the
+  # team file turns it on (a role's value wins over sessions.claude). On means the factory sets
+  # nothing and Claude Code's own settings decide.
+  def auto_memory?(id)
+    v = role(id).key?('auto_memory') ? role(id)['auto_memory'] : claude['auto_memory']
+    v == true
+  end
 
-def args
+  def args
     a = claude['args'] || []
     die "'sessions.claude.args' must be a list" unless a.is_a?(Array)
     a.map(&:to_s)
@@ -654,14 +654,14 @@ def args
     # tell which process the seat's claude is, so its privacy grants (the worktree volume) stop
     # working until a restart (#50). The launch script exports this too; a value here also outranks
     # one in a project's .claude/settings.json. Update deliberately instead (README).
-out['env'] = { 'DISABLE_AUTOUPDATER' => '1' }
-unless auto_memory?(id)
-  # Both documented switches (same page as #auto_memory?): --settings outranks user, project and
-  # local settings, so a seat's /memory toggle or its .claude/settings.local.json cannot turn
-  # it back on. The launch script exports the variable too.
-  out['autoMemoryEnabled'] = false
-  out['env']['CLAUDE_CODE_DISABLE_AUTO_MEMORY'] = '1'
-end
+    out['env'] = { 'DISABLE_AUTOUPDATER' => '1' }
+    unless auto_memory?(id)
+      # Both documented switches (same page as #auto_memory?): --settings outranks user, project and
+      # local settings, so a seat's /memory toggle or its .claude/settings.local.json cannot turn
+      # it back on. The launch script exports the variable too.
+      out['autoMemoryEnabled'] = false
+      out['env']['CLAUDE_CODE_DISABLE_AUTO_MEMORY'] = '1'
+    end
     if gate_on_stop?(id)
       out['hooks'] = { 'Stop' => [{ 'hooks' => [stop_gate_hook(id)] }] }
       # --settings outranks project and local settings, so a disableAllHooks: true written in the
