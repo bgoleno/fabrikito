@@ -440,7 +440,7 @@ box_state() {
     # and 22 turn it off; the colour forms 38/48/58;5;n and ;2;r;g;b are skipped, so a colour
     # index of 2 is not read as dim.
     function scan(s, skip,    c, np, ps, i, v) {
-      if (skip) { i = index(s, "❯\302\240"); s = i ? substr(s, i + 5) : "" ; pre = substr(raw[at[k]], 1, i) }
+      if (skip) { i = index(s, "❯\302\240"); s = i ? substr(s, i + 5) : "" }
       while (s != "") {
         if (match(s, /^\033\[[0-9;]*m/)) {
           np = split(substr(s, 3, RLENGTH - 3), ps, ";"); if (np == 0) { isdim = 0 }
@@ -522,7 +522,9 @@ send_one() {
   # Enter only when the box now holds just this message: text that starts with its "[from <role>]"
   # (or the placeholder Claude Code shows for a long paste), and nothing drawn dim, such as a
   # suggestion left next to it, so the Enter can only submit the message. Otherwise a dialog came
-  # up, or the paste went nowhere. Still open: a dialog that appears after this check.
+  # up, or the paste went nowhere. Still open: a dialog that appears between the first check and
+  # the paste (the paste then lands in it; this check sees no box and sends no Enter), and one
+  # that appears after this check, before the Enter.
   st=$(box_state "$to")
   case $st in
     "text	0	${text%%]*}]"* | "text	0	[Pasted text #"*) ;;
