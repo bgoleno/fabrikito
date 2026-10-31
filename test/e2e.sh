@@ -475,6 +475,11 @@ mk "plugin: false"; pa=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T
 # A team's own --plugin-dir in args is allowed and kept: the flag repeats, so both plugins load.
 mk "args: [--plugin-dir, $T/other-plugin]"; pa=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml claude_args em | tr '\n' ' ')
 [ "$pa" = "--plugin-dir $T/other-plugin --plugin-dir $PLUG " ] && ok "a team's own --plugin-dir in args is kept next to the factory plugin" || { bad "own --plugin-dir in args"; echo "$pa"; }
+# Seats get an Edit deny on a plugin the team loads itself, in both spellings: a folder (existing or
+# not) with everything under it, a .zip as the file, a relative path taken from the seat's folder.
+mk "args: [--plugin-dir, $T/other-plugin, --plugin-dir=rel/plug.zip]"
+pdeny=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml settings em | ruby -rjson -e 'puts JSON.parse(STDIN.read)["permissions"]["deny"]')
+echo "$pdeny" | grep -qxF "Edit(/$RT/other-plugin/**)" && echo "$pdeny" | grep -qxF "Edit(/$RT/proj/rel/plug.zip)" && ok "a team's own --plugin-dir (folder, or .zip relative to the seat) is Edit-protected" || { bad "own plugin dir deny"; echo "$pdeny" | grep -i plug; }
 # An install with no plugin/ folder: refused at load time while the plugin is on, fine when off.
 mkdir -p $T/inst/lib && cp $SRC/lib/team_config.rb $T/inst/lib/
 mk; out=$(TEAM_STATE_DIR=$T/state ruby $T/inst/lib/team_config.rb $T/v.yaml validate 2>&1); rc=$?

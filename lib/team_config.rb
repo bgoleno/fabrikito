@@ -441,6 +441,8 @@ class TeamConfig
       File.join(INSTALL, 'factory.sh'), File.join(INSTALL, 'lib', '**'), File.join(INSTALL, 'roles', '**'),
       # the factory's plugin, which every seat loads at its next start
       File.join(PLUGIN_DIR, '**'),
+      # and any plugin the team loads itself with --plugin-dir in args
+      *args_plugin_paths(id),
       *wrapper_path,
       # settings a worktree session reads from the main checkout's root, and the skills, agents and
       # commands it reads from there when its own checkout lacks them. Not all of .claude/: Claude
@@ -464,6 +466,22 @@ class TeamConfig
       base = glob ? p[0...-3] : p
       [File.expand_path(base), real_path(base)].uniq.map { |b| glob ? "#{glob_escape(b)}/**" : glob_escape(b) }
     end.uniq
+  end
+
+  # Each --plugin-dir in sessions.claude.args (`--plugin-dir X` or `--plugin-dir=X`): the .zip file, or
+  # the folder with everything under it (whether or not it exists yet). claude runs in the seat's
+  # folder, so a relative path is taken from there; a leading ~ is the home folder.
+  def args_plugin_paths(id)
+    a = args
+    a.each_with_index.map do |x, i|
+      v = if x == '--plugin-dir' then a[i + 1]
+          elsif x.start_with?('--plugin-dir=') then x.split('=', 2)[1]
+          end
+      next if v.nil? || v.empty?
+
+      p = File.expand_path(v.sub(/\A~(?=\/|\z)/, Dir.home), workdir(id))
+      p.downcase.end_with?('.zip') ? p : File.join(p, '**')
+    end.compact
   end
 
   # The wrapper claude runs through, if one is set. Inside an .app bundle the whole bundle is
