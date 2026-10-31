@@ -469,7 +469,15 @@ ensure_claude_copy() {
     rm -f "$tmp"
     die "the copy of claude in $dir does not match $CLAUDE_SRC; retry up"
   fi
-  mv "$tmp" "$CLAUDE_COPY" || die "could not copy claude to $CLAUDE_COPY"
+  chmod 0555 "$tmp"
+  # Another up may have made the copy meanwhile, and its seat may already run it: never replace it.
+  # macOS mv -n exits 0 even when it does not move, so the temp file still being there is the sign.
+  mv -n "$tmp" "$CLAUDE_COPY" || { rm -f "$tmp"; die "could not copy claude to $CLAUDE_COPY"; }
+  if [ -e "$tmp" ]; then
+    rm -f "$tmp"
+    [ -x "$CLAUDE_COPY" ] || die "$CLAUDE_COPY exists but is not a runnable copy of claude; remove that exact file, then retry up"
+    return 0
+  fi
   echo "$how" >"$dir/.how"
   echo "  copied claude $CLAUDE_VERSION to $CLAUDE_COPY ($how)"
 }
@@ -477,16 +485,18 @@ ensure_claude_copy() {
 # The executable a running seat's claude process runs (its real path), REPLACED when the file at
 # that path is no longer the one it runs (another file put in its place, or its folder gone), "-"
 # when no claude runs in the pane, "?" when it cannot be told. lsof keeps printing the old path
-# after a replacement, so the inode is what is compared.
+# after a replacement, so the device and inode are what is compared.
 seat_exe() {
   local tty pid line
   tty=$(tmux display-message -p -t "=$(session "$1"):" '#{pane_tty}' 2>/dev/null) || { echo "?"; return; }
   pid=$(ps -t "${tty#/dev/}" -o pid=,comm= | awk '$2 ~ /(^|\/)claude(\.exe)?$/ { print $1; exit }')
   [ -n "$pid" ] || { echo "-"; return; }
-  line=$(lsof -a -p "$pid" -d txt -Fin 2>/dev/null |
-    awk '/^i/ { i = substr($0, 2) } /^n/ { n = substr($0, 2); if (n ~ /(^|\/)claude(\.exe)?$/) { print i " " n; exit } }')
+  # "<device, hex> <inode> <path>" of the claude executable it runs; stat gives the device in decimal.
+  line=$(lsof -a -p "$pid" -d txt -FDin 2>/dev/null |
+    awk '/^D/ { d = substr($0, 2) } /^i/ { i = substr($0, 2) } /^n/ { n = substr($0, 2); if (n ~ /(^|\/)claude(\.exe)?$/) { print d " " i " " n; exit } }')
   [ -n "$line" ] || { echo "?"; return; }
-  if [ "$(stat -f %i "${line#* }" 2>/dev/null)" = "${line%% *}" ]; then echo "${line#* }"; else echo REPLACED; fi
+  set -- $line
+  if [ "$(stat -f '%d %i' "${line#* * }" 2>/dev/null)" = "$(printf '%d' "$1" 2>/dev/null) $2" ]; then echo "${line#* * }"; else echo REPLACED; fi
 }
 
 # True when a claude process is attached to the seat's terminal. The pane's own command name is
