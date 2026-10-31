@@ -116,8 +116,10 @@ What the rules cannot do:
   `tail`, `sed`, `tee`, redirects). It does not cover `grep -r` over a folder, or a Python or Node
   script that opens the file itself.
 - The protected-path `Edit` denies stop the file tools, redirects, and `cp`, `mv` and `rm` with a
-  protected file as the target (checked on Claude Code 2.1.316). They do not stop a script or another
-  program that writes the file itself, such as a Python or Node script.
+  protected file as the target (checked on Claude Code 2.1.316). They match the command text Claude
+  writes, so they do not stop the same command run through another shell or a script (`sh -c 'cp …'`,
+  which qa checked gets through), or a program that writes the file itself, such as a Python or Node
+  script.
 - "Never force-push a branch you did not create" cannot be written as a pattern. Engineers keep
   force-pushing their own branches; only the EM is asked.
 - Any process running as this user can type into a seat's pane, so an ask rule guards against
