@@ -92,7 +92,7 @@ differ, the role prompt wins.
    - **Not the security engineer** (for example a tech lead): send it to `sec` and the EM only,
      with `SendMessage`. Tell the author nothing about it: sec's triage decides who is told. Do not
      post READY while it is open; a blocking point says only that one point went to `sec` and the
-     EM.
+     EM, with no class, file, line or severity.
    - **The security engineer:** triage it with `factory:security-triage`, which decides who is told
      and when: the author privately when the fix belongs on their PR, and anyone else only once the
      owner allows disclosure (rule 8).
@@ -106,6 +106,8 @@ differ, the role prompt wins.
    where it says to.
 10. **Leave your worktree clean:** nothing staged, and back where it was before the review
     (for example `git switch --detach origin/<base>`). Update your progress note if you keep one.
+    Other seats read it and the session start shows it, so name a finding held back in step 7 only
+    as "one point sent to sec and the EM", never by its class, file or severity.
 
 ## What to report
 In your session: the PR, the head, the verdict line, the gate result line, and the comment's URL.
