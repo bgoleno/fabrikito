@@ -418,10 +418,14 @@ class TeamConfig
       # the team file and the prompts it loads into every seat
       @path,
       *([prompts_common_path] + roles.values.map { |r| r['prompt'] && expand(r['prompt']) }).compact,
-      # the launcher itself
+      # the launcher itself, and the wrapper it runs claude through
       File.join(INSTALL, 'factory.sh'), File.join(INSTALL, 'lib', '**'), File.join(INSTALL, 'roles', '**'),
-      # local settings a worktree session reads from the main checkout's root
-      File.join(repo_path, '.claude', '**'),
+      *wrapper_path,
+      # settings a worktree session reads from the main checkout's root, and the skills, agents and
+      # commands it reads from there when its own checkout lacks them. Not all of .claude/: Claude
+      # Code makes its own worktrees in .claude/worktrees/, and seats must be able to edit them.
+      File.join(repo_path, '.claude', 'settings.json'), File.join(repo_path, '.claude', 'settings.local.json'),
+      *%w[skills agents commands].map { |d| File.join(repo_path, '.claude', d, '**') },
       # project settings load from the seat's own folder without a trust prompt, hooks included;
       # the rest of its .claude/ (commands, agents, skills) is ordinary project work
       File.join(workdir(id), '.claude', 'settings.json'), File.join(workdir(id), '.claude', 'settings.local.json'),
@@ -430,6 +434,18 @@ class TeamConfig
       File.join(claude_home, 'settings.json'), File.join(home, '.claude.json'), File.join(claude_home, 'CLAUDE.md'),
       *%w[plugins skills agents commands hooks].map { |d| File.join(claude_home, d, '**') }
     ].map { |p| p.end_with?('/**') ? "#{glob_escape(real_path(p[0...-3]))}/**" : glob_escape(real_path(p)) }.uniq
+  end
+
+  # The wrapper claude runs through, if one is set. Inside an .app bundle the whole bundle is
+  # protected: the program it runs can come from anywhere in the bundle (its Info.plist, other
+  # executables, frameworks), so the executable alone would not be enough.
+  def wrapper_path
+    w = claude['wrapper']
+    return [] if w.nil?
+
+    w = expand(w)
+    app = w[%r{\A(.*?\.app)/}, 1]
+    [app ? File.join(app, '**') : w]
   end
 
   def prompts_common_path
