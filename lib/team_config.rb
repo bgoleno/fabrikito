@@ -26,6 +26,17 @@ def die(msg)
   exit 1
 end
 
+# Team and prompt files are UTF-8 whatever the locale. Under LC_ALL=C, or with no locale set (cron,
+# env -i), File.read would tag them US-ASCII and the first non-ASCII byte in a prompt would make
+# the placeholder pass raise, which stops render and every command that validates the file (#72).
+def read_utf8(path)
+  s = File.read(path, encoding: 'UTF-8')
+  return s if s.valid_encoding?
+
+  line = s.each_line.find_index { |l| !l.valid_encoding? }.to_i + 1
+  die "#{path} is not valid UTF-8 (line #{line})"
+end
+
 TOP_KEYS = %w[team owner repo project storage sessions display prompts kickoff permissions roles].freeze
 DISPLAY_KEYS = %w[iterm primary window].freeze
 PROJECT_KEYS = %w[name url].freeze
@@ -161,7 +172,7 @@ class TeamConfig
     @dir = File.dirname(@path)
     die "cannot read #{@path}" unless File.file?(@path)
     begin
-      @c = YAML.safe_load(File.read(@path), permitted_classes: [], aliases: false)
+      @c = YAML.safe_load(read_utf8(@path), permitted_classes: [], aliases: false)
     rescue Psych::Exception => e
       die "#{@path} is not valid YAML: #{e.message}"
     end
@@ -280,7 +291,7 @@ class TeamConfig
   def read_prompt_file(rel)
     f = expand(rel)
     die "prompt file not found: #{f}" unless File.file?(f)
-    File.read(f)
+    read_utf8(f)
   end
 
   def role_prompt(id)
