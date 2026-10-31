@@ -411,8 +411,9 @@ class TeamConfig
     [' ', ':', '+', '/'].flat_map { |c| ["Bash(git push *#{c}#{b})", "Bash(git push *#{c}#{b} *)"] }
   end
 
-  # Patterns (real paths, escaped) for the files that change what a seat runs at its next start, or
-  # the rules it runs under now. Every seat
+  # Patterns (escaped) for the files that change what a seat runs at its next start, or the rules it
+  # runs under now: each path as configured and, when a symlink makes it differ, its real path too,
+  # so neither spelling (nor the link itself) is left open. Every seat
   # gets an Edit deny on each (Edit also covers Write, NotebookEdit and shell redirects). This is not
   # a boundary: a script can still write them. The sandbox is the boundary.
   def protected_paths(id)
@@ -433,6 +434,11 @@ class TeamConfig
       # Code makes its own worktrees in .claude/worktrees/, and seats must be able to edit them.
       File.join(repo_path, '.claude', 'settings.json'), File.join(repo_path, '.claude', 'settings.local.json'),
       *%w[skills agents commands].map { |d| File.join(repo_path, '.claude', d, '**') },
+      # what else a session at repo.path loads from the main checkout at its next start: the project's
+      # MCP servers (commands Claude Code starts), the hook scripts its settings call, and the
+      # instructions kept under .claude/. Seats change these in their worktrees, never here.
+      File.join(repo_path, '.mcp.json'), File.join(repo_path, '.claude', 'hooks', '**'),
+      File.join(repo_path, '.claude', 'CLAUDE.md'), File.join(repo_path, '.claude', 'rules', '**'),
       # project settings load from the seat's own folder without a trust prompt, hooks included;
       # the rest of its .claude/ (commands, agents, skills) is ordinary project work
       File.join(workdir(id), '.claude', 'settings.json'), File.join(workdir(id), '.claude', 'settings.local.json'),
@@ -440,7 +446,11 @@ class TeamConfig
       # where Claude Code's tools write legitimately)
       File.join(claude_home, 'settings.json'), File.join(home, '.claude.json'), File.join(claude_home, 'CLAUDE.md'),
       *%w[plugins skills agents commands hooks].map { |d| File.join(claude_home, d, '**') }
-    ].map { |p| p.end_with?('/**') ? "#{glob_escape(real_path(p[0...-3]))}/**" : glob_escape(real_path(p)) }.uniq
+    ].flat_map do |p|
+      glob = p.end_with?('/**')
+      base = glob ? p[0...-3] : p
+      [File.expand_path(base), real_path(base)].uniq.map { |b| glob ? "#{glob_escape(b)}/**" : glob_escape(b) }
+    end.uniq
   end
 
   # The wrapper claude runs through, if one is set. Inside an .app bundle the whole bundle is

@@ -156,13 +156,19 @@ Each seat starts with a generated settings file, `.state/<team>/settings/<role>.
 role's (team first; a role can add or tighten a rule, never loosen one), plus two sets factory.sh adds:
 
 - an `Edit` deny on the files that would change a seat's next start or its live rules: the generated
-  settings, launchers and prompts, the message log, the team file and its prompts, the launcher
-  (`factory.sh`, `lib/`, `roles/`) and the claude `wrapper` (its whole `.app` bundle, if it is in
-  one), the main checkout's `.claude/settings.json`, `settings.local.json`, `skills/`, `agents/` and
-  `commands/`, the seat's own `.claude/settings.json` and `settings.local.json`, and Claude Code's user
-  settings, MCP config, instructions and extensions under `~/.claude`. `.claude/worktrees/` stays
-  editable: Claude Code puts the worktrees it makes there, including those of a worktree seat's
-  subagents, which land under the main checkout;
+  settings, launchers and prompts, the message log and the gate's state, the team file and its
+  prompts, the launcher (`factory.sh`, `lib/`, `roles/`) and the claude `wrapper` (its whole `.app`
+  bundle, if it is in one), the main checkout's `.mcp.json`, `.claude/settings.json`,
+  `.claude/settings.local.json`, `.claude/CLAUDE.md`, and `.claude/hooks/`, `rules/`, `skills/`,
+  `agents/` and `commands/` (not the root `CLAUDE.md`, which is project work), the
+  seat's own `.claude/settings.json` and `settings.local.json`, and Claude Code's user settings, MCP
+  config, instructions and extensions under `~/.claude`. `.claude/worktrees/` stays editable: Claude
+  Code puts the worktrees it makes there, including those of a worktree seat's subagents, which land
+  under the main checkout. A path that runs through a symlink is denied both as configured and as its
+  real path, which stops `rm` and `mv` of a protected link; repointing a link with `ln -sf` is not a
+  file command Claude Code checks, and is not stopped (checked on 2.1.316). The seat's own `.mcp.json`
+  stays editable as project work; its servers normally need approval in a startup dialog, but with a
+  user setting such as `enableAllProjectMcpServers` on they load unprompted at the next start;
 - an `ask` on any push to the base branch (from `repo.base`), forced or not, since changes land through
   PRs. It is an early warning for a project whose base branch has no protection. The real control is a
   ruleset on the base branch that blocks force-push and deletion and requires a PR; where one exists,
