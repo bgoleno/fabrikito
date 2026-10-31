@@ -9,9 +9,9 @@ prompts, models and storage.
 
 ## Requirements
 
-macOS, `tmux`, `claude` (Claude Code), `git`, `gh`, and the system `ruby` (it parses the YAML; it ships
-with macOS). Optional: a wrapper program that runs claude (see `sessions.claude.wrapper`). A C compiler
-is needed only for `test/e2e.sh`.
+macOS, `tmux`, `claude` (Claude Code), `git` 2.36 or later (for `git worktree list -z`), `gh`, and the
+system `ruby` (it parses the YAML; it ships with macOS). Optional: a wrapper program that runs claude (see
+`sessions.claude.wrapper`). A C compiler is needed only for `test/e2e.sh`.
 
 ## Use
 

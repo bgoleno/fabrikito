@@ -175,6 +175,17 @@ worktree_paths() {
   done
 }
 
+# Callers read worktree_paths through a process substitution, and bash drops its exit status. So a
+# git that cannot list would look like a repo with no other worktrees: migrate would report
+# "removed 0" and up would skip #121's legacy refusal, both without a word. That happens with a git
+# older than 2.36, which added -z, or a repository git cannot read. Each caller runs this first, in
+# its own shell, so the failure stops the command instead. Both failures persist, so one check
+# before the read is enough; git failing only between the two calls is not handled.
+require_worktree_list() {
+  git -C "$REPO" worktree list --porcelain -z >/dev/null ||
+    die "cannot list the worktrees of $REPO with 'git worktree list --porcelain -z' (needs git 2.36 or later)"
+}
+
 # Registered worktrees of the repo with this folder name that are not at the expected path, each
 # ended by a NUL (worktree_paths). The name is taken with ${p##*/}, not basename: $(basename ...)
 # would drop a newline that ends the path.
@@ -199,6 +210,7 @@ ensure_worktree() {
     fi
     return 0
   fi
+  require_worktree_list
   legacy=""
   while IFS= read -r -d '' p; do legacy="$legacy${legacy:+, }$(log_field "$p")"; done < <(other_worktrees_named "$(cfg role "$id" worktree_name)" "$dir")
   if [ -n "$legacy" ]; then
@@ -1172,6 +1184,7 @@ cwd_users() {
 cmd_migrate() {
   local roles=${*:-$ROLES} r p s dir name moved=0 users cu
   for r in $roles; do check_role "$r"; done
+  require_worktree_list
   for r in $roles; do
     [ "$(wtype "$r")" = worktree ] || continue
     dir=$(workdir "$r")

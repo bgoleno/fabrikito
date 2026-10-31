@@ -814,12 +814,34 @@ git -C $T/repo worktree remove --force "$BW" 2>/dev/null
 # git prints the physical path ($T may sit under a symlink, as /var does on macOS), so NE uses it.
 # Every line that names the folder must name all of it: none may show the truncated path.
 NW="$T/nl/a/team-w1"$'\n'"b/team-w1"; NE="$(cd "$T" && pwd -P)/nl/a/team-w1\\nb/team-w1"
-mkdir -p "$T/nl/a/team-w1"$'\n'"b" && git -C $T/repo worktree add -q --detach "$NW" origin/main
+# The truncated path is made a real folder too, so code that misread the list would get past its -d
+# check and act on it, the issue's own case, not only report it "registered but missing".
+mkdir -p "$T/nl/a/team-w1"$'\n'"b" "$T/nl/a/team-w1" && git -C $T/repo worktree add -q --detach "$NW" origin/main
 mig=$($S -c $T/team.yaml migrate w1 2>&1)
 [ -d "$NW" ] && echo "$mig" | grep -qF "REFUSE w1: cannot tell whether a running process works in $NE: lsof escapes" && echo "$mig" | grep -qxF "  $NE" &&
-  ! echo "$mig" | grep -F "/nl/a/team-w1" | grep -qvF '/nl/a/team-w1\nb/team-w1' && echo "$mig" | grep -qF "removed 0 worktree(s)" &&
+  ! echo "$mig" | grep -F "/nl/a/team-w1" | grep -qvF '/nl/a/team-w1\nb/team-w1' && ! echo "$mig" | grep -qxF "  b/team-w1" && echo "$mig" | grep -qF "removed 0 worktree(s)" &&
   ok "migrate handles a worktree with a newline in its path under its full path (refused), and lists it escaped on one line" || { bad "worktree with a newline in its path"; echo "$mig"; }
 git -C $T/repo worktree remove --force "$NW" 2>/dev/null
+rmdir "$T/nl/a/team-w1" 2>/dev/null
+# A git that cannot list with -z must stop migrate and up (#134, tl's review). The list is read
+# through a process substitution, whose exit status bash drops, so without the check it reads as "no
+# other worktrees": migrate reports "removed 0" and up skips #121's legacy refusal. The stand-in fails
+# only on `worktree list ... -z`, as a git older than 2.36 does, and passes every other call through.
+mkdir -p $T/oldgit && cat > $T/oldgit/git <<G
+#!/bin/sh
+case " \$* " in *" worktree list "*" -z "*) echo "error: unknown switch 'z'" >&2; exit 129 ;; esac
+exec $(command -v git) "\$@"
+G
+chmod +x $T/oldgit/git
+og=$(PATH=$T/oldgit:$PATH $S -c $T/team.yaml migrate w1 2>&1); rc=$?
+[ $rc -ne 0 ] && echo "$og" | grep -qF "needs git 2.36 or later" && ! echo "$og" | grep -qF "removed 0" &&
+  ok "migrate stops when git cannot list the worktrees with -z, instead of reporting nothing to do" || { bad "migrate with a git that cannot list with -z (rc=$rc)"; echo "$og"; }
+cp $T/team.yaml $T/team9.yaml && echo '  w9: { title: Worker Nine, workdir: { type: worktree }, prompt_text: "w9 prompt" }' >> $T/team9.yaml
+git -C $T/repo worktree add -q --detach $T/legacy9/team-w9 origin/main
+og=$(PATH=$T/oldgit:$PATH $S -c $T/team9.yaml up --no-view w9 2>&1); rc=$?
+[ $rc -ne 0 ] && echo "$og" | grep -qF "needs git 2.36 or later" && [ ! -e $VOL/$ROOT/team-w9 ] && ! tmux has-session -t '=tt-w9' 2>/dev/null &&
+  ok "up stops when git cannot list the worktrees with -z, so the legacy-worktree refusal is never skipped (no worktree made, no seat started)" || { bad "up with a git that cannot list with -z (rc=$rc)"; echo "$og"; }
+tmux kill-session -t '=tt-w9' 2>/dev/null; git -C $T/repo worktree remove --force $VOL/$ROOT/team-w9 2>/dev/null; git -C $T/repo worktree remove --force $T/legacy9/team-w9 2>/dev/null
 echo "--- unmounted volume"
 sed "s#volume: $VOL#volume: /Volumes/NotMounted#" $T/team.yaml > $T/team2.yaml
 $S -c $T/team.yaml down --yes w2 >/dev/null
