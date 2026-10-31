@@ -682,10 +682,12 @@ waitfile $XLOG "$n"; sleep 1
 [ "$(tail -1 $XLOG | cut -f2-4)" = "live-test	em	delivered" ] && tail -c +$((k + 1)) $T/keys-em.log | grep -qF "[from live-test] driven through live-env" &&
   ok "a live-env driver inside a seat sends as [from live-test], logged live-test" || { bad "live-env driver label"; tail -1 $XLOG; cat $T/xs3.out; }
 # 4. live-test addressed to the default server is refused before say runs any tmux command: TMUX and
-# TMUX_TMPDIR unset, and a stand-in tmux first on PATH that records every call and runs none.
+# TMUX_TMPDIR unset, and a stand-in tmux first on PATH that records every call and runs none. The team
+# file here is a throwaway one, which say refuses on the default server anyway (#105), so
+# --default-socket lets say past that guard to show that live-test is refused on its own.
 mkdir -p $T/rec && printf '#!/bin/sh\necho "tmux $*" >> %s/rec.log\nexit 1\n' "$T" > $T/rec/tmux && chmod +x $T/rec/tmux; rm -f $T/rec.log
 n=$(wc -l < $T/state/messages.log)
-out=$(env -u TMUX -u TMUX_TMPDIR PATH="$T/rec:$PATH" TEAM_ROLE=live-test $S -c $T/team.yaml say w1 "live-test to the default server" 2>&1); rc=$?
+out=$(env -u TMUX -u TMUX_TMPDIR PATH="$T/rec:$PATH" TEAM_ROLE=live-test $S -c $T/team.yaml say --default-socket w1 "live-test to the default server" 2>&1); rc=$?
 [ $rc -ne 0 ] && [ ! -e $T/rec.log ] && lastlog live-test w1 'live-test to the default server' && echo "$out" | grep -q "default tmux server" &&
   ok "TEAM_ROLE=live-test addressed to the default tmux server is refused before any tmux command, logged NOT-DELIVERED" || { bad "live-test on the default server (rc=$rc)"; echo "$out"; cat $T/rec.log 2>&1; tail -1 $T/state/messages.log; }
 # 5. This test's own process: when a tmux server is among its ancestors (run from a seat), say with
@@ -1505,6 +1507,46 @@ lt $S -c $T/lt.yaml up --no-view --default-socket
 mkdir -p $T/inst/teams; for p in factory.sh lib roles plugin; do ln -s $SRC/$p $T/inst/$p; done; cp $T/lt.yaml $T/inst/teams/lt.yaml
 lt $T/inst/factory.sh -c $T/inst/teams/lt.yaml up --no-view
 [ "$calls" -gt 0 ] && ! echo "$out" | grep -qF "default tmux server" && ok "up goes ahead on the default server for a team file in teams/" || { bad "up for a team file in teams/ (rc=$rc, calls=$calls)"; echo "$out"; }
+# The same rule for down (with and without --yes), say, attach and view (#105). A team of two
+# stand-in seats (fw-fa, fw-fb) runs on the e2e's private server. A copy of its team file outside
+# teams/ is then used with TMUX and TMUX_TMPDIR unset, so the launcher takes the default server, and
+# a stand-in tmux first on PATH logs each call and passes it to the private server: a command that
+# is not refused reaches those seats, and never the user's real default server. Each must be refused
+# before any tmux call, and the seats must be as they were: the same sessions, started at the same
+# time with the same pane process, and no key typed into either. down --yes comes last, so a red run
+# kills them last.
+PRIV=$T/tmux/tmux-$(id -u)/default
+printf 'team: fw\nrepo: { path: %s/repo, github: local/origin.git }\nproject: { name: B, url: "https://github.com/users/x/projects/9" }\nstorage: { volume: %s, root: %s }\nsessions: { prefix: fw, claude: { wrapper: %s/bin/wrap } }\nroles:\n  fa: { title: FA, workdir: { type: project, path: %s/proj }, prompt_text: "fa" }\n  fb: { title: FB, workdir: { type: project, path: %s/proj }, prompt_text: "fb" }\n' $T $VOL $ROOT $T $T $T > $T/fw.yaml
+TEAM_STATE_DIR=$T/fwstate TEAM_VIEW=0 $S -c $T/fw.yaml up --no-view >/dev/null 2>&1
+mkdir -p $T/fwdtmux; printf '#!/bin/sh\necho "$*" >> %s/fwd.log\nexec %s -S %s "$@"\n' $T "$(command -v tmux)" $PRIV > $T/fwdtmux/tmux; chmod +x $T/fwdtmux/tmux
+cp $T/fw.yaml $T/copy.yaml
+seats() { tmux -S $PRIV list-sessions -F '#{session_name} #{session_created} #{pane_pid}' 2>/dev/null | grep '^fw-' | sort; }
+keys() { cat $T/keys-fa.log $T/keys-fb.log 2>/dev/null | cksum; }
+# fw <command...>: runs it on the stand-in default server; sets out, rc and calls (tmux calls made)
+fw() { : > $T/fwd.log; out=$(env -u TMUX -u TMUX_TMPDIR "PATH=$T/fwdtmux:$PATH" TEAM_STATE_DIR=$T/fwstate TEAM_ROLE=fa "$@" 2>&1 </dev/null); rc=$?; calls=$(wc -l < $T/fwd.log | tr -d ' '); }
+before=$(seats); kb=$(keys)
+echo "$before" | grep -q '^fw-fa ' && echo "$before" | grep -q '^fw-fb ' || bad "test setup: fw-fa and fw-fb did not start on the e2e's tmux server"
+for c in "down" "down fb" "say fb hello-from-a-copy" "say all hello-from-a-copy" "attach fa" "attach" "view" "view --print" "down --yes fb" "down --yes"; do
+  fw $S -c $T/copy.yaml $c
+  refused_default && echo "$out" | grep -qF "$T/copy.yaml" && [ "$(seats)" = "$before" ] && [ "$(keys)" = "$kb" ] \
+    && ok "$c, with a copy of the team file on the default server: refused before any tmux call, every seat as it was" || { bad "$c with a copy on the default server (rc=$rc, tmux calls=$calls)"; echo "$out" | head -3; }
+done
+# The owner's real team file (in teams/) works on the default server as before, and --default-socket
+# lets a team that is meant to run there through. None of these kills a seat or opens iTerm.
+cp $T/fw.yaml $T/inst/teams/fw.yaml
+fw $T/inst/factory.sh -c $T/inst/teams/fw.yaml down
+[ "$calls" -gt 0 ] && echo "$out" | grep -qF "would kill fa (fw-fa)" && [ "$(seats)" = "$before" ] && ok "down for a team file in teams/ goes ahead on the default server (would kill, nothing killed)" || { bad "down for a team file in teams/ (rc=$rc, calls=$calls)"; echo "$out"; }
+fw $T/inst/factory.sh -c $T/inst/teams/fw.yaml attach fa
+[ "$calls" -gt 0 ] && ! echo "$out" | grep -qF "default tmux server" && ok "attach for a team file in teams/ goes ahead on the default server" || { bad "attach for a team file in teams/ (rc=$rc, calls=$calls)"; echo "$out"; }
+fw $S -c $T/copy.yaml down --default-socket
+[ "$calls" -gt 0 ] && echo "$out" | grep -qF "would kill fa (fw-fa)" && [ "$(seats)" = "$before" ] && ok "down --default-socket goes ahead on the default server" || { bad "down --default-socket (rc=$rc, calls=$calls)"; echo "$out"; }
+fw $S -c $T/copy.yaml attach --default-socket fa
+[ "$calls" -gt 0 ] && ! echo "$out" | grep -qF "default tmux server" && ok "attach --default-socket goes ahead on the default server" || { bad "attach --default-socket (rc=$rc, calls=$calls)"; echo "$out"; }
+fw $S -c $T/copy.yaml view --print --default-socket
+[ $rc = 0 ] && echo "$out" | grep -qF "fw-fa" && ok "view --print --default-socket goes ahead on the default server" || { bad "view --print --default-socket (rc=$rc)"; echo "$out" | head -3; }
+fw $S -c $T/copy.yaml say --default-socket fb hello-from-the-default-socket
+! echo "$out" | grep -qF "default tmux server" && [ "$calls" -gt 0 ] && ok "say --default-socket goes ahead on the default server" || { bad "say --default-socket (rc=$rc, calls=$calls)"; echo "$out"; }
+TEAM_STATE_DIR=$T/fwstate $S -c $T/fw.yaml down --yes >/dev/null 2>&1
 # test/live-env.sh: new makes a private environment, run runs a command in it, down removes it.
 LE=$SRC/test/live-env.sh
 le=$(env -u TMUX $LE new 2>&1); rc=$?
