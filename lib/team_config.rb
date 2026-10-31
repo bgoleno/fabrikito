@@ -655,6 +655,32 @@ class TeamConfig
     [claude_config_paths, default].uniq
   end
 
+  # The repository's auto-memory folder in every config folder (#108), as Edit-rule paths. Auto
+  # memory lives in <config>/projects/<project>/memory/, one folder for the repository and every
+  # worktree of it (https://code.claude.com/docs/en/memory#storage-location), named after the main
+  # checkout's path: "non-alphanumeric characters replaced by -", and a name over 200 characters
+  # cut to 200 with a hash of the full path appended
+  # (https://code.claude.com/docs/en/sessions#where-transcripts-are-stored). The hash cannot be
+  # computed here, so such a name is matched by its first 200 characters and a *. Both spellings
+  # of the checkout's path (as configured and real) give a name, and both spellings of each config
+  # folder are denied. A seat with auto memory off still has its file tools; this keeps them out
+  # of the folder the owner's own sessions load at every start.
+  def memory_paths
+    names = [File.expand_path(repo_path), real_path(repo_path)].uniq.map do |p|
+      n = p.gsub(/[^A-Za-z0-9]/, '-')
+      n.length > 200 ? "#{n[0, 200]}*" : n
+    end.uniq
+    claude_config_locations.flat_map do |home, _|
+      [File.expand_path(home), real_path(home)].uniq.flat_map do |h|
+        names.map { |n| "#{glob_escape(File.join(h, 'projects'))}/#{n}/memory/**" }
+      end
+    end.uniq
+  end
+
+  def memory_rules(id)
+    auto_memory?(id) ? [] : memory_paths.map { |p| "Edit(/#{p})" }
+  end
+
   def prompts_common_path
     p = @c['prompts']
     p && p['common'] ? expand(p['common']) : nil
@@ -676,7 +702,7 @@ class TeamConfig
     # deny the seat's own note, since deny wins over allow).
     own = note_rules(id)
     others = (roles.keys - [id]).flat_map { |r| note_rules(r) }
-    add.call({ 'deny' => protected_paths(id).map { |p| "Edit(/#{p})" } + others, 'ask' => base_push_rules, 'allow' => own }, 'factory.sh')
+    add.call({ 'deny' => protected_paths(id).map { |p| "Edit(/#{p})" } + others + memory_rules(id), 'ask' => base_push_rules, 'allow' => own }, 'factory.sh')
     out
   end
 
@@ -810,10 +836,12 @@ class TeamConfig
         out << format('    %-5s: %s', list, own.empty? ? '(none)' : own.join(', '))
       end
       notes = (roles.keys - [id]).flat_map { |r| note_rules(r) }
-      added = merged['deny'].count { |r| factory.include?(r) && !notes.include?(r) }
+      mem = memory_rules(id)
+      added = merged['deny'].count { |r| factory.include?(r) && !notes.include?(r) && !mem.include?(r) }
       asks = merged['ask'].count { |r| factory.include?(r) }
       note = merged['allow'].any? { |r| factory.include?(r) } ? ', Edit allow on its own progress note and deny on the other seats\'' : ''
-      out << "    added: Edit deny on #{added} protected paths#{asks.positive? ? ", ask on #{asks} push-to-#{base_branch} patterns" : ''}#{note}"
+      memo = mem.empty? ? '' : ", Edit deny on the repository's auto-memory folder (#{mem.size} spellings)"
+      out << "    added: Edit deny on #{added} protected paths#{asks.positive? ? ", ask on #{asks} push-to-#{base_branch} patterns" : ''}#{note}#{memo}"
       out << '    note : allow rules have no effect in bypassPermissions' if mode.start_with?('bypassPermissions') && !(merged['allow'] - factory).empty?
       out << '    note : ask rules are refused in dontAsk mode, not asked' if mode == 'dontAsk' && !merged['ask'].empty?
     end
