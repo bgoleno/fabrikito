@@ -11,6 +11,12 @@ S=$SRC/factory.sh
 T=$(mktemp -d "${TMPDIR:-/tmp}/team-e2e.XXXX"); T=$(cd "$T" && pwd); mkdir -p $T/bin $T/tmux $T/local
 ROOT="Projects/_teamtest-$$"; VOL=${TEST_VOLUME:-}
 unset TMUX CLAUDE_CONFIG_DIR; export TMUX_TMPDIR=$T/tmux TEAM_STATE_DIR=$T/state
+# No run may drive iTerm (#93). A stand-in osascript first on PATH records every call and does
+# nothing, and the run fails at the end if it was called: `up` opens a real iTerm window unless told
+# not to, every run left its windows on the user's screen, and enough of them used up every pty on
+# the machine, so tmux could no longer start the test's own seats.
+printf '#!/bin/sh\necho "osascript $*" >> %s/osascript.log\nexit 1\n' "$T" > $T/bin/osascript; chmod +x $T/bin/osascript
+export PATH=$T/bin:$PATH
 # Stopped early (a gate timeout kills this test's process group): stop the private tmux server,
 # which has left that group, and remove what the test made, as the cleanup at the end does.
 on_signal() {
@@ -667,6 +673,8 @@ for r in $(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml ids); do
   n=$(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render "$r" 2>/dev/null | wc -l | tr -d ' ')
   [ "${n:-0}" -gt 0 ] && [ "$n" -lt 200 ] && ok "example seat $r renders a prompt under 200 lines ($n)" || bad "example seat $r renders a prompt of ${n:-?} lines (limit 199)"
 done
+echo "--- iTerm"
+[ ! -e $T/osascript.log ] && ok "nothing in this run called osascript, so no iTerm window was opened" || { bad "osascript was called $(wc -l < $T/osascript.log | tr -d ' ') time(s)"; cut -c1-120 $T/osascript.log | head -5; }
 echo "--- cleanup"
 $S -c $T/team.yaml down --yes >/dev/null 2>&1; tmux kill-server 2>/dev/null
 for w in team-w1 team-w2; do git -C $T/repo worktree remove --force $VOL/$ROOT/$w 2>/dev/null; git -C $T/repo worktree remove --force $T/repo/.claude/worktrees/$w 2>/dev/null; done
