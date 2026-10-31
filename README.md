@@ -81,8 +81,17 @@ time, before anything starts.
 and `skills/`) that `up` loads into every seat with `--plugin-dir <this checkout>/plugin`. Seats work in
 the target project's folders, where this repository's own `.claude/` is never read, so this is how the
 factory's skills reach them. Nothing is installed into your settings: a session the factory did not start
-does not have the plugin. Its skills are namespaced by the plugin name and show as `/factory:<skill>`. For
-now it holds one placeholder, `/factory:ping`, which only proves the plugin loaded.
+does not have the plugin. Its skills are namespaced by the plugin name and show as `/factory:<skill>`.
+
+Its skills are procedures for a role (assigning an issue, for example), loaded only when used instead of
+sitting in every prompt. The skill folders under [`plugin/skills/`](plugin/skills/) are the list, and each
+skill's `description` says whom it is for and when to use it. `/factory:ping` only proves the plugin loaded.
+Every seat loads every skill. A skill reaches its role through its description and through that role's
+`skills:` in the team file (`teams/example.yaml` names each one where it belongs). A skill only the owner
+may start sets `disable-model-invocation`. A skill is the procedure. The rules it applies (a brief's
+template, the review bar) stay in the role prompt, which the skill points to rather than copies, and a
+skill stops if the prompt lacks them. `test/e2e.sh` checks every skill's frontmatter, so adding one needs no
+new test code.
 
 - It is on by default. A team file without `sessions.claude.plugin` gets the plugin at its next `up`, and
   with it every skill (and, later, every hook or agent) added to `plugin/` after that. Set
@@ -173,6 +182,12 @@ message. Anything else fails closed, with a reason:
 
 Attach to the seat, deal with it, and send again. If the box does not show the message after the paste,
 no Enter is sent and the text stays in the box, where it goes out with the next Enter; `say` says so.
+A message taller than the box (up to 800 characters and 3 lines; a longer paste shows as a `[Pasted
+text #N]` placeholder) scrolls it, so only the message's end is visible. `say` then sends it only when
+the box is full (floor((pane rows - 10) / 2) rows, at least 3) and its visible text is the message's
+last 40 or more characters. One gap remains: if someone starts typing in the moment between `say`'s
+empty-box check and the paste, and the message scrolls that text out of view, it goes out with the
+message.
 The input box is recognised as Claude Code 2.1.316 draws it, so a CLI update that changes it makes `say`
 refuse every seat until `factory.sh` is updated. A refused message is logged as NOT-DELIVERED. Messages
 are labelled `[from <role>]`, and the owner's are `[from owner]`. The label is set by the sender (from
@@ -395,7 +410,13 @@ auto-updater being off in every seat and nowhere else, and the seats' own copy o
 `up`, never the shared file; still intact after the shared file is replaced; `REPLACED` when its own
 file is swapped; a copy that cannot be made, or a shared install caught mid-reinstall, stops the
 start). It also covers `up` refusing a throwaway team on the default tmux server (TMUX and TMUX_TMPDIR
-unset, `/tmp` by two spellings, an empty or missing TMUX_TMPDIR, TMUX naming the default socket) before any
-tmux call, going ahead on a private server, for a team file in `teams/` and with `--default-socket`, and
-`test/live-env.sh` (its environment and private socket, and refusing a missing folder, one `new` did not
-make, and one whose tmux folder resolves to `/tmp`).
+unset, `/tmp` by two spellings, an empty or missing TMUX_TMPDIR, a relative one under CDPATH, TMUX naming
+the default socket) before any tmux call, going ahead on a private server, for a team file in `teams/` and
+with `--default-socket`, and `test/live-env.sh` (its environment, with a seat's TEAM_CONFIG, TEAM_ROLE and
+TEAM_SCRIPT unset and the folders resolved, its private socket, and refusing a missing folder, one `new`
+did not make, one whose tmux folder resolves to `/tmp`, and one whose socket folder or socket is a link).
+
+The exit code is authoritative: `test/e2e.sh` exits 0 only when it reaches the end with every
+assertion passed (`RESULT pass=<n> fail=0`), and non-zero when any assertion fails or the run stops
+early (a setup error, a signal). A run that stops early still removes what it made and says
+`ABORTED` on stderr. That makes it safe as a `repo.gate` command, which is judged by its exit code.
