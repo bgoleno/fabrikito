@@ -40,6 +40,26 @@ def read_utf8(path)
   die "#{path} is not valid UTF-8 (line #{line})"
 end
 
+# Strings from outside the team file are tagged by the locale too: environment values, the home
+# folder, the command line and the install folder come back US-ASCII or ASCII-8BIT under LC_ALL=C or
+# with no locale. One with a non-ASCII byte then clashes with the UTF-8 team file in a substitution,
+# a join or JSON (#82), so each is read as UTF-8 where it enters, and invalid UTF-8 stops with its
+# source named. Path functions keep UTF-8 when their inputs are UTF-8, so the entry points suffice.
+def utf8(s, source)
+  u = s.to_s.dup.force_encoding('UTF-8')
+  return u if u.valid_encoding?
+
+  die "#{source} is not valid UTF-8: #{u.scrub('?')}"
+end
+
+def env_utf8(name, default = nil)
+  ENV.key?(name) ? utf8(ENV[name], "the environment variable #{name}") : default
+end
+
+def home_utf8
+  utf8(Dir.home, 'the home folder (HOME)')
+end
+
 TOP_KEYS = %w[team owner repo project storage sessions display prompts kickoff permissions roles].freeze
 DISPLAY_KEYS = %w[iterm primary window].freeze
 PROJECT_KEYS = %w[name url].freeze
@@ -58,7 +78,7 @@ PREFIX_RE = /\A[a-z0-9][a-z0-9-]*\z/.freeze
 SKILL_RE = /\A[A-Za-z0-9][A-Za-z0-9._-]*(:[A-Za-z0-9][A-Za-z0-9._-]*)?\z/.freeze
 
 # The folder factory.sh and this file are installed in.
-INSTALL = File.expand_path('..', __dir__)
+INSTALL = utf8(File.expand_path('..', __dir__), 'the install folder')
 
 # The factory's own plugin (skills, later agents and hooks). Each seat loads it with --plugin-dir, so it
 # reaches exactly the sessions factory.sh starts: seats work in the target project's folders, where this
@@ -204,7 +224,7 @@ class TeamConfig
   attr_reader :path, :dir
 
   def initialize(path)
-    @path = File.expand_path(path)
+    @path = utf8(File.expand_path(path), 'the team file path')
     @dir = File.dirname(@path)
     die "cannot read #{@path}" unless File.file?(@path)
     begin
@@ -216,7 +236,7 @@ class TeamConfig
   end
 
   def expand(p)
-    File.expand_path(p.to_s.sub(/\A~(?=\/|\z)/, Dir.home), @dir)
+    File.expand_path(p.to_s.sub(/\A~(?=\/|\z)/, home_utf8), @dir)
   end
 
   def section(name, allowed, required: true)
@@ -287,7 +307,7 @@ class TeamConfig
 
   def volume
 
-    File.expand_path(storage['volume'].to_s.sub(/\A~(?=\/|\z)/, Dir.home))
+    File.expand_path(storage['volume'].to_s.sub(/\A~(?=\/|\z)/, home_utf8))
 
   end
   def root
@@ -350,7 +370,7 @@ class TeamConfig
   def vars(id)
     {
       'TITLE' => title(id), 'ROLE' => id, 'SESSION' => session(id), 'PREFIX' => prefix,
-      'SCRIPT' => ENV.fetch('TEAM_SCRIPT', 'factory.sh'), 'LOG' => ENV.fetch('TEAM_LOG', 'messages.log'),
+      'SCRIPT' => env_utf8('TEAM_SCRIPT', 'factory.sh'), 'LOG' => env_utf8('TEAM_LOG', 'messages.log'),
       'REPO' => repo_path, 'WORKDIR' => workdir(id), 'WORKTREE_ROOT' => worktree_root,
       'VOLUME' => volume, 'GITHUB_REPO' => github, 'GITHUB_URL' => "https://github.com/#{github}",
       'PROJECT_NAME' => project['name'].to_s, 'PROJECT_URL' => project['url'].to_s, 'TEAM' => @c['team'].to_s, 'OWNER' => owner, 'ROSTER' => roster,
@@ -358,8 +378,10 @@ class TeamConfig
     }
   end
 
+  # Every value is checked as UTF-8 before it goes in, whatever produced it, so a value from a new
+  # source cannot bring back the encoding clash in gsub (#82).
   def subst(text, id)
-    v = vars(id)
+    v = vars(id).map { |k, s| [k, utf8(s, "the value of @@#{k}@@")] }.to_h
     out = text.gsub(/@@([A-Z_]+)@@/) { v.key?(Regexp.last_match(1)) ? v[Regexp.last_match(1)] : die("unknown placeholder @@#{Regexp.last_match(1)}@@ in a prompt") }
     out
   end
@@ -484,7 +506,7 @@ class TeamConfig
 
   # Generated prompts, launchers, settings and the message log live here.
   def state_dir
-    File.expand_path(ENV['TEAM_STATE_DIR'] || File.join(INSTALL, '.state', @c['team'].to_s))
+    File.expand_path(env_utf8('TEAM_STATE_DIR') || File.join(INSTALL, '.state', @c['team'].to_s))
   end
 
   # The seat's progress note (#5). Seats write it; up only makes its folder; nothing deletes it.
@@ -592,7 +614,7 @@ class TeamConfig
           end
       next if v.nil? || v.empty?
 
-      p = File.expand_path(v.sub(/\A~(?=\/|\z)/, Dir.home), workdir(id))
+      p = File.expand_path(v.sub(/\A~(?=\/|\z)/, home_utf8), workdir(id))
       p.downcase.end_with?('.zip') ? p : File.join(p, '**')
     end.compact
   end
@@ -616,10 +638,10 @@ class TeamConfig
   # each seat's launch script pins the same value (or unsets it), so a seat uses the folder its rules
   # protect, whatever the tmux server's own environment holds.
   def claude_config_paths
-    dir = ENV['CLAUDE_CONFIG_DIR'].to_s
-    return [File.join(Dir.home, '.claude'), File.join(Dir.home, '.claude.json')] if dir.empty?
+    dir = env_utf8('CLAUDE_CONFIG_DIR').to_s
+    return [File.join(home_utf8, '.claude'), File.join(home_utf8, '.claude.json')] if dir.empty?
 
-    dir = File.expand_path(dir.sub(/\A~(?=\/|\z)/, Dir.home))
+    dir = File.expand_path(dir.sub(/\A~(?=\/|\z)/, home_utf8))
     [dir, File.join(dir, '.claude.json')]
   end
 
@@ -628,7 +650,7 @@ class TeamConfig
   # owner's own sessions started without the variable (another terminal, the desktop app) still
   # load settings, hooks and MCP servers from the default folder.
   def claude_config_locations
-    default = [File.join(Dir.home, '.claude'), File.join(Dir.home, '.claude.json')]
+    default = [File.join(home_utf8, '.claude'), File.join(home_utf8, '.claude.json')]
     [claude_config_paths, default].uniq
   end
 

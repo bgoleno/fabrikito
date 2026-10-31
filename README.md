@@ -94,6 +94,11 @@ a good start.
 Unknown keys, missing prompt files, duplicate session names and unknown placeholders are errors at load
 time, before anything starts.
 
+Text is UTF-8 whatever the locale (`LC_ALL=C`, cron, `env -i`): the team and prompt files, and the
+values the launcher fills in from outside them (`TEAM_SCRIPT`, `TEAM_LOG`, `TEAM_STATE_DIR`,
+`CLAUDE_CONFIG_DIR`, the home folder, the team file's own path), so non-ASCII paths and names work in
+prompts, kickoffs and settings. Invalid UTF-8 in any of them is an error that names where it came from.
+
 ## The factory plugin
 
 `plugin/` is a Claude Code [plugin](https://code.claude.com/docs/en/plugins) (`.claude-plugin/plugin.json`

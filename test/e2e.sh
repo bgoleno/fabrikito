@@ -482,6 +482,43 @@ LC_ALL=C TEAM_ROLE=em $S -c $T/team-u.yaml say w2 'from a team with a non-ASCII 
 LC_ALL=C ruby $SRC/lib/team_config.rb $T/team-u.yaml render em 2>&1 | grep -qF $'em prompt, caf\xc3\xa9 \xe2\x80\xa6' \
   && LC_ALL=C ruby $SRC/lib/team_config.rb $T/team-u.yaml kickoff em 2>&1 | grep -qxF $'[from launcher] start, caf\xc3\xa9 \xe2\x80\xa6' \
   && ok "a non-ASCII prompt and kickoff come out byte for byte under LC_ALL=C" || bad "non-ASCII prompt or kickoff under LC_ALL=C"
+# Non-ASCII values from outside the team file too (#82): environment values, the home folder and the
+# team file's own folder are tagged by the locale, and under LC_ALL=C or with no locale a non-ASCII
+# byte in one stopped render (subst), settings (JSON) and check. The workdir and owner come from the
+# team file, which lives in a non-ASCII folder.
+E=$'\xc3\xa9'; mkdir -p "$T/dir$E" "$T/proj$E" "$T/home$E" "$T/state$E"; NT="$T/dir$E/team.yaml"
+E=$E P="$T/proj$E" ruby -pe '$_ = "owner: \"Zo#{ENV["E"]}\"\n" + $_ if $_.start_with?("team: ")
+  sub(/workdir: \{ type: project, path: \S+ \}, prompt_text: "em prompt"/) { %Q(workdir: { type: project, path: "#{ENV["P"]}" }, prompt_text: "em @@OWNER@@ @@WORKDIR@@ @@SCRIPT@@ @@LOG@@") }' $T/team.yaml > "$NT"
+# rn <C | none> <command> [VAR=value ...]: team_config.rb on that team under LC_ALL=C, or with no
+# locale at all (env -i: no LANG, no LC_*), with non-ASCII values for the variables it reads.
+rn() { local l=$1 c=$2; shift 2
+  set -- HOME="$T/home$E" TEAM_STATE_DIR="$T/state$E" TEAM_SCRIPT="$T/dir$E/factory.sh" TEAM_LOG="$T/state$E/messages.log" \
+    CLAUDE_CONFIG_DIR="$T/home$E/.claude" "$@"
+  # PATH is passed as one word: it can hold spaces.
+  if [ $l = C ]; then env LC_ALL=C "$@" ruby $SRC/lib/team_config.rb "$NT" $c em 2>&1
+  else env -i PATH="$PATH" "$@" ruby $SRC/lib/team_config.rb "$NT" $c em 2>&1; fi; }
+for l in C none; do
+  out=$(rn $l render); echo "$out" | grep -qxF "em Zo$E $T/proj$E $T/dir$E/factory.sh $T/state$E/messages.log" \
+    && ok "non-ASCII owner, workdir, TEAM_SCRIPT and TEAM_LOG render byte for byte ($l)" || { bad "non-ASCII render ($l)"; echo "$out" | tail -2; }
+  out=$(rn $l kickoff); echo "$out" | grep -qF "or Zo$E." && ok "the kickoff names the non-ASCII owner ($l)" || { bad "non-ASCII kickoff ($l)"; echo "$out" | tail -2; }
+  out=$(rn $l settings); echo "$out" | ruby -rjson -e 'd = JSON.parse(STDIN.read)["permissions"]["deny"]; exit(ARGV.all? { |w| d.include?(w) } ? 0 : 1)' \
+    "Edit(/$T/proj$E/.claude/settings.json)" "Edit(/$T/state$E/settings/**)" "Edit(/$T/home$E/.claude/settings.json)" "Edit(/$NT)" \
+    && ok "settings with a non-ASCII workdir, state folder, home, config folder and team file folder ($l)" || { bad "non-ASCII settings ($l)"; echo "$out" | tail -2; }
+  out=$(rn $l permissions_report); [ $? = 0 ] && echo "$out" | grep -qF "[em]" && ok "check's permission report with a non-ASCII home ($l)" || { bad "non-ASCII permissions_report ($l)"; echo "$out" | tail -2; }
+done
+# Invalid UTF-8 from outside is an error that names where it came from, not a Ruby backtrace.
+out=$(rn C render TEAM_SCRIPT=$'/x/\xff/factory.sh'); [ $? != 0 ] && echo "$out" | grep -qF "the environment variable TEAM_SCRIPT is not valid UTF-8" && ! echo "$out" | grep -q "Error)" \
+  && ok "an environment value that is not UTF-8 is refused, naming the variable" || { bad "invalid TEAM_SCRIPT"; echo "$out" | tail -2; }
+out=$(rn none settings HOME=$'/tmp/x\xff'); [ $? != 0 ] && echo "$out" | grep -qF "the home folder (HOME) is not valid UTF-8" && ! echo "$out" | grep -q "Error)" \
+  && ok "a home folder that is not UTF-8 is refused, naming HOME" || { bad "invalid HOME"; echo "$out" | tail -2; }
+# say validates and renders the whole team before it sends: from that team, under both locales.
+for l in C none; do
+  n=$(wc -l < $T/state/messages.log)
+  if [ $l = C ]; then LC_ALL=C HOME="$T/home$E" TEAM_ROLE=em $S -c "$NT" say w2 "from a non-ASCII team ($l)" >/dev/null 2>&1
+  else env -i PATH="$PATH" HOME="$T/home$E" TMUX_TMPDIR="$TMUX_TMPDIR" TEAM_STATE_DIR="$TEAM_STATE_DIR" TEAM_ROLE=em $S -c "$NT" say w2 "from a non-ASCII team ($l)" >/dev/null 2>&1; fi
+  [ "$(wc -l < $T/state/messages.log)" -eq $((n + 1)) ] && tail -1 $T/state/messages.log | grep -qF "from a non-ASCII team ($l)" \
+    && ok "say from a team with a non-ASCII workdir, owner and home ($l)" || { bad "say from a non-ASCII team ($l)"; tail -1 $T/state/messages.log; }
+done
 # The sender comes from TEAM_ROLE, which nothing validates: it is escaped like the message.
 n=$(wc -l < $T/state/messages.log)
 TEAM_ROLE=$'e\tm\nx' $S -c $T/team.yaml say w2 "from an odd sender" >/dev/null 2>&1
