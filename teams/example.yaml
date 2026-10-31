@@ -265,6 +265,7 @@ roles:
     gate_on_stop: true
     skills:
       - "factory:handoff": before /clear, /compact, a restart or the end of a session
+      - "factory:verify-behavior": to verify a PR at its exact head and post one result
       - "superpowers:verification-before-completion": before reporting a result
       - "superpowers:systematic-debugging": when a behaviour is not what the issue says
       - "run": to start the app and see a change working
