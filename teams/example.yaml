@@ -145,6 +145,7 @@ roles:
     prompt: ../roles/em.md
     skills:
       - "superpowers:brainstorming": to pin down a vague request from the owner before filing issues
+      - "factory:team-status": for the owner's status, or to see which PRs are ready and who owes the next move
     permissions:
       # Ask before a force-push. Engineers keep force-pushing their own branches unattended (they
       # rebase); "never force-push a branch you did not create" cannot be written as a pattern.
