@@ -162,6 +162,11 @@ cmd_check() {
   done
   echo "(inherit = flag omitted; the seat uses model, effortLevel and permissions.defaultMode from ~/.claude/settings.json)"
   echo
+  echo "kickoff (each seat's first message; the label marks it as team configuration, not the owner's voice):"
+  for r in $ROLES; do
+    TEAM_SCRIPT=$SELF TEAM_LOG=$LOG cfg kickoff "$r" | sed "1s/^/  [$r] /; 2,\$s/^/    /"
+  done
+  echo
   cfg permissions_report
   echo "valid."
 }
@@ -562,6 +567,8 @@ log_field() {
 cmd_say() {
   local to=${1:-} from=${TEAM_ROLE:-owner} text r rc=0
   [ -n "$to" ] && [ $# -ge 2 ] || die "usage: say <role|all> <message...>"
+  # [from launcher] marks the kickoff as team configuration; say never sends with it.
+  [ "$from" = launcher ] && die "the sender 'launcher' is reserved for the kickoff (TEAM_ROLE=launcher)"
   shift
   text="[from $from] $*"
   mkdir -p "$STATE"
