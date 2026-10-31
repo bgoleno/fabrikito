@@ -154,6 +154,8 @@ cmd_check() {
   plugin=$(cfg get sessions.plugin)
   if [ -n "$plugin" ]; then echo "plugin    : $plugin (skills as /factory:<skill>)"; else echo "plugin    : off (sessions.claude.plugin: false)"; fi
   echo "gate      : $(cfg get repo.gate_summary)"
+  hooks_note=$(cfg get hooks.note)
+  [ -z "$hooks_note" ] || echo "hooks     : $hooks_note"
   echo "updates   : Claude Code's auto-updater is off in every seat (DISABLE_AUTOUPDATER=1); update by hand, then down and up"
   if resolve_claude; then
     echo "claude    : $CLAUDE_SRC, version $CLAUDE_VERSION; seats run the team's copy $CLAUDE_COPY$([ -x "$CLAUDE_COPY" ] || echo ' (made at the next up)')"
@@ -198,6 +200,8 @@ cmd_up() {
   resolve_claude || die "$CLAUDE_ERR"
   for r in $roles; do check_role "$r"; done
   for a in $(cfg get state.generated_dirs); do mkdir -p "$STATE/$a"; done
+  # Progress notes (#5): seats write them, so up only makes the folder and never touches a note.
+  mkdir -p "$(cfg get state.notes_dir)"
   ensure_claude_copy
   # Roles start in the order given (file order by default).
   for r in $roles; do
