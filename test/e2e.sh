@@ -525,6 +525,25 @@ mkdir -p $T/inst/lib && cp $SRC/lib/team_config.rb $T/inst/lib/
 mk; out=$(TEAM_STATE_DIR=$T/state ruby $T/inst/lib/team_config.rb $T/v.yaml validate 2>&1); rc=$?
 [ $rc != 0 ] && echo "$out" | grep -qF "plugin.json is missing" && ok "rejects plugin on with no plugin manifest in the install" || { bad "missing plugin manifest (rc=$rc)"; echo "$out"; }
 mk "plugin: false"; TEAM_STATE_DIR=$T/state ruby $T/inst/lib/team_config.rb $T/v.yaml validate >/dev/null 2>&1 && ok "accepts plugin: false with no plugin manifest in the install" || bad "plugin: false with no manifest"
+echo "--- skills named in a role's prompt"
+render_em() { ruby $SRC/lib/team_config.rb $T/v.yaml render em 2>&1; }
+accept "skills by name and with a note" "" "" ', skills: [code-review, { "superpowers:test-driven-development": "before writing implementation code" }]'
+out=$(render_em)
+echo "$out" | grep -qxF -- '- `code-review`' && echo "$out" | grep -qxF -- '- `superpowers:test-driven-development`: before writing implementation code' \
+  && ok "the rendered prompt lists each configured skill, with its note" || { bad "skills in the rendered prompt"; echo "$out"; }
+# Nothing is assumed installed: the section says a listed skill may be absent, and what to do then.
+echo "$out" | grep -qF "if it is installed" && echo "$out" | grep -qF "If one is not installed, work without it" \
+  && ok "the skills section holds when a skill is not installed" || { bad "skills wording"; echo "$out"; }
+[ "$(echo "$out" | grep -n -xF 'p' | cut -d: -f1)" -lt "$(echo "$out" | grep -n -xF '## Skills' | cut -d: -f1)" ] 2>/dev/null \
+  && ok "the skills section follows the role's own prompt" || { bad "skills section position"; echo "$out"; }
+ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render fs1 2>&1 | grep -qF -- '- `superpowers:test-driven-development`: ' \
+  && ok "the example team names skills in an engineer's prompt" || bad "the example team names skills in an engineer's prompt"
+mk ""; render_em | grep -q "Skills" && bad "a role without skills gets a skills section" || ok "a role without skills gets no skills section"
+reject "skills that are not a list" "roles.em.skills must be a list" "" "" ", skills: code-review"
+reject "a skill name with a space" "roles.em.skills: 'code review' is not a skill name" "" "" ', skills: ["code review"]'
+reject "a skill listed twice" "roles.em.skills: 'code-review' is listed twice" "" "" ", skills: [code-review, code-review]"
+reject "a skill entry with two names" "roles.em.skills: a mapping entry must be one skill name and its note" "" "" ', skills: [{ a: "x", b: "y" }]'
+reject "a skill note over two lines" "roles.em.skills: the note for 'a' must be one line of text" "" "" ', skills: [{ a: "x\ny" }]'
 # The wrapper claude runs through is protected like factory.sh: a file, or its whole .app bundle.
 mk; ws=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml settings em)
 echo "$ws" | grep -q "wrap\|\.app" && bad "no wrapper configured, but a wrapper deny was added" || ok "no wrapper configured: no wrapper deny"
