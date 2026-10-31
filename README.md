@@ -374,6 +374,17 @@ other seat and the owner without review, outside the PR process. Set `auto_memor
 unsets the variable, so it is not inherited from a tmux server started inside a seat). `check` shows it per seat
 in the MEMORY column.
 
+Turning auto memory off stops a seat from writing memory by itself, but not from editing that folder
+with its file tools. So every seat with auto memory off also gets an `Edit` deny (which covers the
+Write tool too) on the repository's auto-memory folder, in every config folder and both spellings of
+the main checkout's path ([#108](../../issues/108)). Claude Code names the folder after that path, with
+every non-alphanumeric character turned into `-`; a name over 200 characters is matched by its first
+200 and a `*`, because Claude Code appends a hash to it. As with the other denies, Bash redirects, `tee`
+and `cp` into the folder are stopped too, and a script that opens the file itself is not (checked on
+Claude Code 2.1.314). `check` names the deny in each seat's `added:` line. The deny covers only that
+default folder: if you set `autoMemoryDirectory` in your settings, your sessions load memory from the
+folder it names, and the deny keeps protecting a folder nobody reads, with no warning.
+
 These rules are an accident guard, not a security boundary: every seat runs as the owner's OS user,
 with the owner's GitHub credential, and can change what loads. [#29](../../issues/29) tracks making
 them a boundary.

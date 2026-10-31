@@ -214,6 +214,7 @@ roles:
     prompt: ../roles/fs.md
     gate_on_stop: true
     skills:
+      - "factory:start-task": when you take an assigned issue, before changing anything
       - "factory:handoff": before /clear, /compact, a restart or the end of a session
       - "superpowers:test-driven-development": before writing implementation code
       - "superpowers:systematic-debugging": on a bug or a failing test, before proposing a fix
@@ -237,6 +238,7 @@ roles:
     prompt: ../roles/fs.md
     gate_on_stop: true
     skills:
+      - "factory:start-task": when you take an assigned issue, before changing anything
       - "factory:handoff": before /clear, /compact, a restart or the end of a session
       - "superpowers:test-driven-development": before writing implementation code
       - "superpowers:systematic-debugging": on a bug or a failing test, before proposing a fix
