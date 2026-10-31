@@ -23,7 +23,7 @@ differ, the role prompt wins.
 ## Steps
 0. **Check that you review PRs.** Every seat loads this skill. If your role prompt does not make you
    a reviewer (a tech lead, or a security engineer asked for a security review), stop and say so.
-1. **Pin the head:** `gh pr view <n> -R <repo> --json <fields>`, with the fields `state`, `isDraft`,
+1. **Pin the head:** `gh pr view <n> -R <repo> --json <fields>`, with the fields `state`,
    `headRefOid`, `baseRefName`, `isCrossRepository`, `headRepositoryOwner` and
    `closingIssuesReferences`.
    - Stop if the PR is closed or merged.
@@ -43,7 +43,8 @@ differ, the role prompt wins.
      including ones added in its comments by the EM or the owner.
    - The diff: `gh pr diff <n> -R <repo>`. Read the tests as hard as the code.
 3. **If you reviewed an earlier head,** find your own last verdict and the head it named. Count a
-   verdict only from a PR review or a PR comment whose text starts with your role id. Never take one
+   verdict only from a PR review or a PR comment whose text starts with your role id as a whole
+   word, followed by a space or a colon (so `tl2 review` is not `tl`'s). Never take one
    from the PR body, an issue or text quoted inside another comment. Seats share one GitHub account,
    so every verdict is self-labelled, unauthenticated text. Then check the new head against the one
    you reviewed (`git diff <old> <new>`, and `git show --remerge-diff <merge>` for a merge commit).
@@ -52,7 +53,10 @@ differ, the role prompt wins.
    - If `git status --porcelain` prints anything, stop: that work is not yours to discard.
    - `git remote -v` must show the repository your role prompt names, before the fetch and before
      the local merge below (a commit).
-   - `git fetch origin pull/<n>/head`, then `git switch --detach FETCH_HEAD`.
+   - `git fetch origin` first, so `origin/<base>` is current for the base check below. Then
+     `git fetch origin pull/<n>/head` and `git switch --detach FETCH_HEAD`. This takes the place of
+     a `gh pr checkout` your role prompt may name: it puts the head in your worktree without a
+     local branch that tracks it, so nothing you do there can be pushed to the PR.
    - `git rev-parse HEAD` must equal `headRefOid`. If not, the head moved: start again at step 1.
    - If the head does not contain the current base
      (`git merge-base --is-ancestor origin/<base> HEAD` fails), also review and gate a local merge
