@@ -67,9 +67,11 @@ sessions:
     # permission_mode: bypassPermissions
     # Model and effort for every seat (a role can override either). Left unset, the flag is
     # omitted and each seat inherits `model` and `effortLevel` from ~/.claude/settings.json.
-    # model takes an alias or a full id; effort is low | medium | high | xhigh | max.
+    # model takes an alias or a full id; effort is low | medium | high | xhigh | max. Effort is the
+    # main cost and depth control: medium suits coordination, high subtle work, and max only a hard
+    # problem a seat works on unattended, such as a security hunt. The roles below set their own.
     # model: opus
-    # effort: xhigh
+    # effort: high
 
 # What `up` shows once the seats are running, and what `./factory.sh view` shows any time: a new
 # iTerm tab with every running seat in a pane. The primary seat is on the left at the full height
@@ -123,6 +125,7 @@ permissions:
 
 # Seats start in this order. Each needs: title, workdir, and one of `prompt` (a file) or
 # `prompt_text` (inline). `summary` is the line shown in the roster every seat sees.
+# Each seat costs tokens while it works, so start only the seats a task needs: README, "Right-sizing".
 # Optional per role: `gate_on_stop:` (see repo.gate), `model:`, `effort:` and `permission_mode:` (override sessions.claude),
 # `permissions:` (added to the team's), `session:` (tmux name), `kickoff:` (first message),
 # `skills:` (skills to name in the seat's prompt, below), `may_merge:` (below).
@@ -140,6 +143,7 @@ permissions:
 roles:
   em:
     title: Engineering Manager
+    effort: medium
     summary: owns the board, assigns work, the owner's single contact
     workdir: { type: project, path: /path/to/your/checkout }
     prompt: ../roles/em.md
@@ -157,6 +161,7 @@ roles:
       they give you something to do.
   tl:
     title: Tech Lead
+    effort: high
     summary: design direction, reviews every PR
     workdir: { type: worktree }
     prompt: ../roles/tl.md
@@ -166,6 +171,7 @@ roles:
     permissions: { deny: ["Bash(gh pr merge *)", "Bash(gh api *pulls/*/merge*)", "Bash(gh api graphql*mergePullRequest*)"] }
   fs1:
     title: Senior Full-Stack Software Engineer
+    effort: high
     summary: implements assigned issues
     workdir: { type: worktree }
     prompt: ../roles/fs.md
@@ -178,6 +184,7 @@ roles:
     permissions: { deny: ["Bash(gh pr merge *)", "Bash(gh api *pulls/*/merge*)", "Bash(gh api graphql*mergePullRequest*)"] }
   fs2:
     title: Senior Full-Stack Software Engineer
+    effort: high
     summary: implements assigned issues
     workdir: { type: worktree }
     prompt: ../roles/fs.md
@@ -190,6 +197,7 @@ roles:
     permissions: { deny: ["Bash(gh pr merge *)", "Bash(gh api *pulls/*/merge*)", "Bash(gh api graphql*mergePullRequest*)"] }
   qa:
     title: QA Engineer
+    effort: high
     summary: verifies behaviour, owns regression coverage
     workdir: { type: worktree }
     prompt: ../roles/qa.md
@@ -201,6 +209,7 @@ roles:
     permissions: { deny: ["Bash(gh pr merge *)", "Bash(gh api *pulls/*/merge*)", "Bash(gh api graphql*mergePullRequest*)"] }
   sec:
     title: Security Engineer
+    effort: high
     summary: security review and triage
     workdir: { type: worktree }
     prompt: ../roles/sec.md
