@@ -688,6 +688,23 @@ rm -rf $VOL/$ROOT/team-w1.tmp 2>/dev/null
 git -C $T/repo worktree remove --force $VOL/$ROOT/team-w1 && git -C $T/repo worktree add -q --detach $T/repo/.claude/worktrees/team-w1 origin/main && echo scratch > $T/repo/.claude/worktrees/team-w1/untracked.txt
 mig=$($S -c $T/team.yaml migrate w1 2>&1); echo "$mig" | grep -E "REFUSE|moved" | cut -c1-140
 echo "$mig" | grep -q "REFUSE w1" && [ -f $T/repo/.claude/worktrees/team-w1/untracked.txt ] && ok "dirty worktree refused and untouched" || bad "dirty worktree refused and untouched"
+# A worktree that a running process works in is never removed (#121), whatever tmux server migrate
+# reaches. w1 is down here, so `alive` sees no seat, as a copy of the team file on another server
+# would see a real one. A stand-in "running seat" (a process whose working folder is inside the
+# worktree) must keep it whole, git-ignored files included (.env.local and conf/ are excluded).
+LW=$T/repo/.claude/worktrees/team-w1
+rm $LW/untracked.txt && mkdir -p $LW/conf && echo "SEAT=1" > $LW/.env.local && echo '{"seat":1}' > $LW/conf/local.json
+[ -z "$(git -C $LW status --porcelain)" ] || bad "test setup: the legacy w1 worktree is not clean"
+(cd $LW/conf && exec sleep 600) & seatpid=$!
+sleep 1
+tree() { (cd $LW 2>/dev/null && find . -path ./.git -prune -o -type f -print | LC_ALL=C sort | while IFS= read -r f; do cksum "$f"; done); }
+t0=$(tree)
+mig=$($S -c $T/team.yaml migrate w1 2>&1)
+[ -d $LW ] && [ -n "$t0" ] && [ "$(tree)" = "$t0" ] && echo "$t0" | grep -qF ".env.local" && echo "$mig" | grep -qE "REFUSE w1: .*/worktrees/team-w1 is the working folder of a running process" && echo "$mig" | grep -qF "removed 0 worktree(s)" \
+  && ok "migrate keeps a clean worktree that a running process works in (its folder, ignored files and all, byte-identical)" || { bad "migrate removed or changed a worktree in use"; echo "$mig" | head -4; }
+kill $seatpid 2>/dev/null; wait $seatpid 2>/dev/null
+mig=$($S -c $T/team.yaml migrate w1 2>&1)
+[ ! -e $LW ] && echo "$mig" | grep -qE "moved  w1: removed .*/worktrees/team-w1;" && ok "the same worktree, idle once the process is gone, is migrated" || { bad "idle worktree not migrated"; echo "$mig" | head -4; }
 echo "--- unmounted volume"
 sed "s#volume: $VOL#volume: /Volumes/NotMounted#" $T/team.yaml > $T/team2.yaml
 $S -c $T/team.yaml down --yes w2 >/dev/null

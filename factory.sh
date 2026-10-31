@@ -1037,12 +1037,35 @@ cmd_attach() {
   if [ -n "${TMUX:-}" ]; then tmux switch-client -t "=$(session "$r")"; else tmux attach -t "=$(session "$r")"; fi
 }
 
+# The pids of the processes whose working folder is folder $1 or inside it, one line, from lsof
+# (macOS prints every process's cwd, physically resolved, in about half a second). Returns 2 when
+# lsof cannot answer: it lists itself at least, so an empty list means it failed.
+cwd_users() {
+  local p out
+  p=$(CDPATH= cd -- "$1" 2>/dev/null && pwd -P) || return 2
+  out=$(lsof -w -d cwd -F pn 2>/dev/null)
+  [ -n "$out" ] || return 2
+  printf '%s\n' "$out" | awk -v p="$p" '
+    /^p/ { pid = substr($0, 2) }
+    /^n/ { n = substr($0, 2); if (n == p || index(n, p "/") == 1) printf "%s%s", (c++ ? " " : ""), pid }
+    END { if (c) print "" }'
+}
+
 # Remove worktrees that are registered under a team role's folder name but are not at the
 # configured location. Bounded by construction: only a clean worktree, with no branch checked
 # out and HEAD already contained in the base ref, is removed, so nothing it holds can be lost
-# except ignored files (node_modules, build output), which a fresh install recreates.
+# except ignored files (node_modules, build output), which a fresh install recreates. And never one
+# that a running process works in (#121): `alive` asks only the tmux server this command reaches,
+# so a seat started from another server (or from a copy of the team file with another prefix) looks
+# down. The working folders are checked last, right before the removal, so a seat started while
+# migrate ran is still seen. A process that enters the folder after that check is not.
+#
+# #105's rule (refuse a team file outside teams/ on the default tmux server) is not applied here: it
+# acts only on the default server, where `alive` already sees the real seats, while the gap #121
+# found is on a private server, which that rule lets through by design. The working-folder check
+# holds on any server.
 cmd_migrate() {
-  local roles=${*:-$ROLES} r p dir name moved=0
+  local roles=${*:-$ROLES} r p dir name moved=0 users
   for r in $roles; do check_role "$r"; done
   for r in $roles; do
     [ "$(wtype "$r")" = worktree ] || continue
@@ -1055,6 +1078,8 @@ cmd_migrate() {
       if [ -n "$(git -C "$p" status --porcelain)" ]; then echo "REFUSE $r: $p has uncommitted or untracked files"; continue; fi
       if [ -n "$(git -C "$p" branch --show-current)" ]; then echo "REFUSE $r: $p has branch '$(git -C "$p" branch --show-current)' checked out; move that work by hand"; continue; fi
       if ! git -C "$p" merge-base --is-ancestor HEAD "$BASE"; then echo "REFUSE $r: $p HEAD is not contained in $BASE (unpushed commits)"; continue; fi
+      if ! users=$(cwd_users "$p"); then echo "REFUSE $r: cannot tell whether a running process works in $p (lsof gave no answer)"; continue; fi
+      if [ -n "$users" ]; then echo "REFUSE $r: $p is the working folder of a running process (pid $users); stop it first"; continue; fi
       git -C "$REPO" worktree remove "$p"
       echo "moved  $r: removed $p; '$SELF up $r' recreates it at $dir"
       moved=$((moved + 1))

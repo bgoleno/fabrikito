@@ -25,6 +25,7 @@ cp teams/example.yaml teams/team.yaml     then edit it: repo, project, storage, 
 ./factory.sh say <role|all> "..."         type a message into a seat (seats use SendMessage)
 ./factory.sh attach <role>                attach your terminal (detach: ctrl-b d)
 ./factory.sh migrate [role...]            remove clean worktrees that are not on the storage volume
+                                          (never one a running process works in)
 ./factory.sh down --yes [role...]         kill seats (worktrees are kept)
 ./factory.sh -c path/to/other.yaml up     use a different team file
 ```
@@ -592,7 +593,7 @@ exist. A throwaway team's worktrees on the volume are not removed by `down`; rem
 
 `TEST_VOLUME=/Volumes/YourDrive test/e2e.sh` runs the launcher against a throwaway repo with a stand-in
 `claude` on a private tmux server. It covers worktree placement on the volume, per-role model and
-effort (and the example team's effort per role), message delivery, migrating a legacy worktree (clean and dirty), and refusing to run when the
+effort (and the example team's effort per role), message delivery, migrating a legacy worktree (clean, dirty, and kept while a running process works in it), and refusing to run when the
 volume is not mounted. It also covers the generated settings files (merged rules, protected paths,
 base-branch rules, permission mode and launch flags), the factory plugin (its manifest, `--plugin-dir`
 with the plugin's real path, `sessions.claude.plugin: false`, a bad value, a missing manifest, a team's
