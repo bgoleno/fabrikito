@@ -68,6 +68,8 @@ Where the two differ, the role prompt wins.
    and why, the exact proposed text or test (quoted, as a diff where it edits a file), and
    "Waiting on the owner's approval; not to be assigned before it." Then post one line on the
    incident linking the new issue, with `gh issue comment` or `gh pr comment` and `--body-file`.
+   Write each body file before the command that posts it, and check that both landed (`gh issue
+   view` of each) before you report them.
 10. **Ask for the approval.** As the EM: send the owner the issue's URL with your recommendation,
     batched with other decisions as your role prompt says. As the owner: decide in your session.
     Either way the decision is recorded on the issue ("owner approved on <date>", or the owner's own
