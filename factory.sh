@@ -539,12 +539,21 @@ send_one() {
 }
 
 # One messages.log field, escaped so a record stays on one line and the terminal reading the log
-# with tail cannot be driven by the message (an ESC sequence could retitle it or hide lines):
-# backslash becomes \\, newline \n, CR \r, tab \t, and any other C0 control or DEL \xHH. Bytes
-# from 0x80 up (UTF-8) are left as they are. Reversible: printf '%b' gives back the original.
-# Works on bytes (.b), so a message that is not valid UTF-8 is escaped instead of raising.
+# with tail cannot be driven by the message (an ESC or CSI sequence could retitle it or hide lines;
+# a bidi override could reorder how the line shows): backslash becomes \\, newline \n, CR \r, tab
+# \t, and every other C0 control, DEL, C1 control (U+0080-U+009F) and bidi embedding, override or
+# isolate (U+202A-U+202E, U+2066-U+2069) is written as its UTF-8 bytes in \xHH form. This goes by
+# code point, not by byte: the check mark is E2 9C 93, and 0x9C alone is a C1 control. Text that is
+# not valid UTF-8 has every byte from 0x80 up escaped instead, so a stray 0x9B cannot act as CSI.
+# Reversible: printf '%b' gives back the original. --disable-gems: RubyGems is not needed, and its
+# loading has failed in an unreadable working directory. If ruby fails, a fixed marker is logged
+# rather than an empty field.
 log_field() {
-  ruby -e 'print(ARGV[0].b.gsub(/[\\\x00-\x1f\x7f]/n) { |c| { "\\" => "\\\\", "\n" => "\\n", "\r" => "\\r", "\t" => "\\t" }[c] || format("\\x%02X", c.ord) })' -- "$1"
+  ruby --disable-gems -e '
+    s = ARGV[0].dup.force_encoding("UTF-8")
+    re = s.valid_encoding? ? /[\\\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/ : (s = s.b; /[\\\x00-\x1f\x7f-\xff]/n)
+    esc = { "\\" => "\\\\", "\n" => "\\n", "\r" => "\\r", "\t" => "\\t" }
+    print s.gsub(re) { |c| esc[c] || c.bytes.map { |b| format("\\x%02X", b) }.join }' -- "$1" || printf '%s' '<log_field failed>'
 }
 
 cmd_say() {

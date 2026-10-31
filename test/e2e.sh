@@ -238,6 +238,14 @@ logged w2 NOT-DELIVERED $'cr\r and a literal \\n, \\t and \\\\' 'cr\r and a lite
 # terminal); UTF-8 is left as it is. w2 is down, so nothing reaches a pane.
 logged w2 NOT-DELIVERED $'title \e]0;x\a, del \x7f, utf-8 é ✓' 'title \x1B]0;x\x07, del \x7F, utf-8 é ✓' "a message with ESC, BEL and DEL"
 logged all delivered $'to all,\nfrom em' 'to all,\nfrom em' "a multi-line say all"
+# C1 controls (CSI, OSC, ST) and bidi overrides are escaped by code point, as their UTF-8 bytes.
+logged w2 NOT-DELIVERED $'csi \xc2\x9b31m osc \xc2\x9d0;x\xc2\x9c rlo \xe2\x80\xae isolate \xe2\x81\xa6.' 'csi \xC2\x9B31m osc \xC2\x9D0;x\xC2\x9C rlo \xE2\x80\xAE isolate \xE2\x81\xA6.' "a message with C1 controls and bidi overrides"
+logged w2 NOT-DELIVERED $'not utf-8: \x9b, \xff' 'not utf-8: \x9B, \xFF' "a message that is not valid UTF-8"
+# The sender comes from TEAM_ROLE, which nothing validates: it is escaped like the message.
+n=$(wc -l < $T/state/messages.log)
+TEAM_ROLE=$'e\tm\nx' $S -c $T/team.yaml say w2 "from an odd sender" >/dev/null 2>&1
+[ "$(wc -l < $T/state/messages.log)" -eq $((n + 1)) ] && [ "$(tail -1 $T/state/messages.log | cut -f2-5)" = 'e\tm\nx	w2	NOT-DELIVERED	from an odd sender' ] &&
+  ok "log: a TEAM_ROLE with a tab and a newline is escaped, one line" || { bad "log: odd TEAM_ROLE"; tail -2 $T/state/messages.log | od -c | head -6; }
 echo "--- migrate then up w2"
 $S -c $T/team.yaml migrate w2 2>&1 | grep -E "moved|REFUSE|skip" | cut -c1-150
 $S -c $T/team.yaml up w2 2>&1 | grep -E "start|error" | cut -c1-150
