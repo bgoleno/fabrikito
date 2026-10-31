@@ -56,7 +56,8 @@ about to lose its context. It does not restate them. Where the two differ, the r
    upstream. Then, under `push.default=upstream`, a bare `git push`, and even
    `git push origin <branch>`, would go to the base branch. The `<branch>:<branch>` form goes to
    your branch whatever the configuration. If any condition fails, leave the commit local, and say
-   so in the note.
+   so in the note. A local-only WIP commit is a normal handoff, not a gap: your worktree survives a
+   restart, and a rule to push only when asked or when opening a PR is a reason not to push.
 4. **Rewrite the progress note** last, with the Write or Edit tool. A fresh session must be able
    to carry on from it alone, so include:
    - the task (issue or PR URL), the branch, and the WIP commit (short SHA, pushed or local only);
