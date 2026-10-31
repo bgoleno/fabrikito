@@ -764,6 +764,32 @@ rm -rf $VOL/$ROOT/team-w1.tmp 2>/dev/null
 git -C $T/repo worktree remove --force $VOL/$ROOT/team-w1 && git -C $T/repo worktree add -q --detach $T/repo/.claude/worktrees/team-w1 origin/main && echo scratch > $T/repo/.claude/worktrees/team-w1/untracked.txt
 mig=$($S -c $T/team.yaml migrate w1 2>&1); echo "$mig" | grep -E "REFUSE|moved" | cut -c1-140
 echo "$mig" | grep -q "REFUSE w1" && [ -f $T/repo/.claude/worktrees/team-w1/untracked.txt ] && ok "dirty worktree refused and untouched" || bad "dirty worktree refused and untouched"
+# A worktree that a running process works in is never removed (#121), whatever tmux server migrate
+# reaches. w1 is down here, so `alive` sees no seat, as a copy of the team file on another server
+# would see a real one. A stand-in "running seat" (a process whose working folder is inside the
+# worktree) must keep it whole, git-ignored files included (.env.local and conf/ are excluded).
+LW=$T/repo/.claude/worktrees/team-w1
+rm $LW/untracked.txt && mkdir -p $LW/conf && echo "SEAT=1" > $LW/.env.local && echo '{"seat":1}' > $LW/conf/local.json
+[ -z "$(git -C $LW status --porcelain)" ] || bad "test setup: the legacy w1 worktree is not clean"
+(cd $LW/conf && exec sleep 600) & seatpid=$!
+sleep 1
+tree() { (cd $LW 2>/dev/null && find . -path ./.git -prune -o -type f -print | LC_ALL=C sort | while IFS= read -r f; do cksum "$f"; done); }
+t0=$(tree)
+mig=$($S -c $T/team.yaml migrate w1 2>&1)
+[ -d $LW ] && [ -n "$t0" ] && [ "$(tree)" = "$t0" ] && echo "$t0" | grep -qF ".env.local" && echo "$mig" | grep -qE "REFUSE w1: .*/worktrees/team-w1 is the working folder of a running process" && echo "$mig" | grep -qF "removed 0 worktree(s)" \
+  && ok "migrate keeps a clean worktree that a running process works in (its folder, ignored files and all, byte-identical)" || { bad "migrate removed or changed a worktree in use"; echo "$mig" | head -4; }
+kill $seatpid 2>/dev/null; wait $seatpid 2>/dev/null
+mig=$($S -c $T/team.yaml migrate w1 2>&1)
+[ ! -e $LW ] && echo "$mig" | grep -qE "moved  w1: removed .*/worktrees/team-w1;" && ok "the same worktree, idle once the process is gone, is migrated" || { bad "idle worktree not migrated"; echo "$mig" | head -4; }
+# A backslash in the path must not hide the process working there: lsof prints it escaped, so the
+# path cannot be matched, and migrate refuses the worktree rather than guess.
+BW="$T/back\\tslash/team-w1"; mkdir -p "$T/back\\tslash" && git -C $T/repo worktree add -q --detach "$BW" origin/main
+(cd "$BW" && exec sleep 600) & seatpid=$!
+sleep 1
+mig=$($S -c $T/team.yaml migrate w1 2>&1)
+[ -d "$BW" ] && echo "$mig" | grep -qF 'tslash/team-w1: lsof escapes characters in its path' && echo "$mig" | grep -qF "removed 0 worktree(s)" && ok "migrate keeps a worktree in use whose path has a backslash in it (refused: lsof escapes it)" || { bad "worktree in use with a backslash in its path"; echo "$mig" | head -4; }
+kill $seatpid 2>/dev/null; wait $seatpid 2>/dev/null
+git -C $T/repo worktree remove --force "$BW" 2>/dev/null
 echo "--- unmounted volume"
 sed "s#volume: $VOL#volume: /Volumes/NotMounted#" $T/team.yaml > $T/team2.yaml
 $S -c $T/team.yaml down --yes w2 >/dev/null
@@ -1366,9 +1392,15 @@ mkdir -p $T/g && git -C $T/g init -q && git -C $T/g commit -q --allow-empty -m i
 printf '#!/bin/sh\necho ran >> %s/gate-runs\n[ -f %s/g-pass ] && { echo all green; exit 0; }\necho "FAKE FAILURE: 1 test failed"\nexit 1\n' $T $T > $T/gate.sh; chmod +x $T/gate.sh
 # gate <session> [workdir] [gate] [timeout]: runs the hook with max blocks 2; sets rc, out, err.
 # ACTIVE=true marks a stop in a turn the hook has already sent back (stop_hook_active).
+# Every send-back (exit 2) must say how to stop on purpose and give the limit: the text moved there
+# from the shared prompt (#117), and the let-through stopReason is shown to the user, not to Claude.
+# gate() records each send-back that lacks it in nopurp, and counts send-backs in bounces.
+purp='If you are stopping on purpose (waiting for an answer or a review, or with a test red on purpose), say so in your report: the gate lets you stop after it has failed 2 times in a row in one turn.'
+nopurp=""; bounces=0
 gate() {
   printf '{"session_id":"%s","stop_hook_active":%s,"cwd":"/"}' "$1" "${ACTIVE:-false}" | $SRC/lib/stop_gate.sh $T/gstate w9 "${2:-$T/g}" "${3:-$T/gate.sh}" "${4:-30}" 2 >$T/gout 2>$T/gerr; rc=$?
   out=$(cat $T/gout); err=$(cat $T/gerr)
+  if [ $rc = 2 ]; then bounces=$((bounces + 1)); echo "$err" | grep -qF "$purp" || nopurp="$nopurp $1"; fi
 }
 runs() { [ -f $T/gate-runs ] && wc -l < $T/gate-runs | tr -d ' ' || echo 0; }
 gate s1; [ $rc = 0 ] && [ "$(runs)" = 0 ] && ok "clean tree: the stop goes through and the gate does not run" || bad "clean tree (rc=$rc, runs=$(runs))"
@@ -1428,9 +1460,18 @@ before=$(runs); gate s7 $T/gwt
 mkdir -p $T/plain/sub && echo x > $T/plain/sub/file.txt
 before=$(runs); gate s8 $T/plain/sub
 [ $rc = 0 ] && [ "$(runs)" = "$before" ] && [ -z "$err" ] && ok "a plain folder with files and no .git anywhere above it: still ungated" || { bad "plain folder (rc=$rc, gate runs $before -> $(runs))"; echo "$err"; }
+# Every send-back above (first, last, new turn, new session, timeout, failed status, unreadable
+# repository and worktree) carried it.
+[ "$bounces" -ge 10 ] && [ -z "$nopurp" ] && ok "every send-back ($bounces) says how to stop on purpose and gives the limit (2)" || bad "send-backs without the stop-on-purpose sentence and limit (sessions:$nopurp; $bounces send-backs)"
 echo "--- session start hook (lib/session_start.sh, run directly with hook input on stdin)"
 # sst <workdir>: runs the hook for role w9 with state $T/sstate; sets rc, out, err.
-sst() { printf '{"session_id":"s1","source":"%s"}' "${SRC_KIND:-startup}" | $SRC/lib/session_start.sh $T/sstate w9 "$1" >$T/sout 2>$T/serr; rc=$?; out=$(cat $T/sout); err=$(cat $T/serr); }
+# The hook also prints what a seat does with what it starts with (moved there from the shared prompt,
+# #117), on every path: sst records each run whose output lacks it in nostart, and counts runs in ssts.
+sp1='Name the task and next step in your first reply, then follow your kickoff (it may say to wait).'
+sp2='If the note and the repository disagree, trust the repository and fix the note.'
+nostart=""; ssts=0
+sst() { printf '{"session_id":"s1","source":"%s"}' "${SRC_KIND:-startup}" | $SRC/lib/session_start.sh $T/sstate w9 "$1" >$T/sout 2>$T/serr; rc=$?; out=$(cat $T/sout); err=$(cat $T/serr)
+  ssts=$((ssts + 1)); { echo "$out" | grep -qF "$sp1" && echo "$out" | grep -qF "$sp2"; } || nostart="$nostart $ssts:$(basename "$1")"; }
 mkdir -p $T/s && git -C $T/s init -q && git -C $T/s switch -q -c work && git -C $T/s commit -q --allow-empty -m "first commit" && git -C $T/s commit -q --allow-empty -m "second: the latest"
 sst $T/s; [ $rc = 0 ] && [ -z "$err" ] && echo "$out" | grep -qF "no progress note yet" && echo "$out" | grep -qF "$T/sstate/notes/w9.md" \
   && ok "no note yet: exit 0, says so and names the file to write" || { bad "no note (rc=$rc)"; echo "$out$err"; }
@@ -1460,6 +1501,14 @@ mkdir -p $T/slowgit && printf '#!/bin/sh\ncase " $* " in *" status "*) exec slee
 t0=$(date +%s); PATH=$T/slowgit:$PATH sst $T/s; t1=$(date +%s)
 [ $rc = 0 ] && [ $((t1 - t0)) -lt 9 ] && echo "$out" | grep -qF "clip" && echo "$out" | grep -qF "git status did not finish within 4s" && echo "$out" | grep -qF "subject" \
   && ok "a git status that hangs is cut at 4s (the hook took $((t1 - t0))s): the note and recent commits still print" || { bad "slow git status (rc=$rc, $((t1 - t0))s)"; echo "$out"; }
+# The early paths: an empty note, a note that cannot be read, and no note with a missing workdir.
+: > $T/sstate/notes/w9.md; sst $T/s; [ $rc = 0 ] && echo "$out" | grep -qF "no progress note yet" && ok "an empty note counts as no note" || { bad "empty note (rc=$rc)"; echo "$out"; }
+printf 'Task: secret\n' > $T/sstate/notes/w9.md && chmod 000 $T/sstate/notes/w9.md
+sst $T/s; chmod 600 $T/sstate/notes/w9.md
+[ $rc = 0 ] && echo "$out" | grep -qF "(could not read $T/sstate/notes/w9.md)" && ok "a note that cannot be read: says so, exit 0" || { bad "unreadable note (rc=$rc)"; echo "$out"; }
+rm -f $T/sstate/notes/w9.md; sst $T/no-such-dir; [ $rc = 0 ] && echo "$out" | grep -qF "does not exist" && ok "no note and a missing workdir: exit 0, says the folder does not exist" || { bad "no note, missing workdir (rc=$rc)"; echo "$out"; }
+[ "$ssts" -ge 13 ] && [ -z "$nostart" ] && ok "every session-start run ($ssts, early paths included) says to name the task and next step, follow the kickoff, and trust the repository over the note" \
+  || { bad "session-start runs without the start instructions (run:workdir$nostart; $ssts runs)"; echo "$out"; }
 echo "--- SendMessage log hook (lib/log_message.sh, run directly with hook input on stdin)"
 # smlog <to> <message> [event] [tool_response JSON]: runs the hook as seat w9 of a roster whose
 # sessions are tt-em, tt-w1 and tt-w2; sets rc, out (stdout and stderr) and line (what it appended).
@@ -1550,12 +1599,20 @@ for r in $(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml ids); do
   n=$(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render "$r" 2>/dev/null | wc -l | tr -d ' ')
   [ "${n:-0}" -gt 0 ] && [ "$n" -lt 200 ] && ok "example seat $r renders a prompt under 200 lines ($n)" || bad "example seat $r renders a prompt of ${n:-?} lines (limit 199)"
 done
+# em's prompt is the longest and the one most often added to: #117 brought it to 180 lines or fewer,
+# so the next change to it has room. Make room by moving procedure out, not by raising this.
+n=$(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render em 2>/dev/null | wc -l | tr -d ' ')
+[ "${n:-0}" -gt 0 ] && [ "$n" -le 180 ] && ok "example seat em renders at most 180 lines ($n)" || bad "example seat em renders ${n:-?} lines (limit 180, #117)"
 # A push chained with other commands can be matched as one text, when Claude Code cannot split it
 # (an expansion or heredoc in a later part): `git push origin <feature>; gh pr create --base main
 # --body "$(cat <<EOF ...)"` then hits the base-branch ask through the later `main` (#91, #103).
 flat=$(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render fs1 2>&1 | tr '\n' ' ' | tr -s ' ')
-echo "$flat" | grep -qF 'run `git push` as a command of its own, never chained' && echo "$flat" | grep -qF '`gh pr create --base <base>`' \
-  && ok "the shared prompt says to run git push alone, never chained (gh pr create named)" || bad "the shared prompt does not say to run git push alone"
+# The push names its refspec, and the branch is cut without tracking: a branch cut with
+# `git switch -c <b> origin/main` has the base as its upstream, so under push.default=upstream a bare
+# `git push` (or `git push origin <b>`) would go to the base branch (sec, #117).
+echo "$flat" | grep -qF 'run `git push origin <branch>:<branch>` as a command of its own, never chained' && echo "$flat" | grep -qF '`gh pr create --base <base>`' \
+  && echo "$flat" | grep -qF '`git switch --no-track -c <branch> origin/main`' \
+  && ok "the shared prompt says to run git push origin <branch>:<branch> alone, never chained (gh pr create named), on a branch cut with --no-track" || bad "the shared prompt does not say to run git push origin <branch>:<branch> alone, or to cut with --no-track"
 echo "--- the example team sets effort per role"
 # Effort is the main cost and depth control: the manager coordinates at medium, the seats that
 # write, test and review code run at high. Read from the flags each seat would be launched with.
@@ -1639,17 +1696,20 @@ PRIV=$T/tmux/tmux-$(id -u)/default
 printf 'team: fw\nrepo: { path: %s/repo, github: local/origin.git }\nproject: { name: B, url: "https://github.com/users/x/projects/9" }\nstorage: { volume: %s, root: %s }\nsessions: { prefix: fw, claude: { wrapper: %s/bin/wrap } }\nroles:\n  fa: { title: FA, workdir: { type: project, path: %s/proj }, prompt_text: "fa" }\n  fb: { title: FB, workdir: { type: project, path: %s/proj }, prompt_text: "fb" }\n' $T $VOL $ROOT $T $T $T > $T/fw.yaml
 TEAM_STATE_DIR=$T/fwstate TEAM_VIEW=0 $S -c $T/fw.yaml up --no-view >/dev/null 2>&1
 mkdir -p $T/fwdtmux; printf '#!/bin/sh\necho "$*" >> %s/fwd.log\nexec %s -S %s "$@"\n' $T "$(command -v tmux)" $PRIV > $T/fwdtmux/tmux; chmod +x $T/fwdtmux/tmux
-cp $T/fw.yaml $T/copy.yaml
+# The copy names its seats differently, so a titles call that is not refused would relabel them.
+cp $T/fw.yaml $T/copy.yaml && sed -i '' 's/title: FA,/title: COPY-A,/; s/title: FB,/title: COPY-B,/' $T/copy.yaml
 seats() { tmux -S $PRIV list-sessions -F '#{session_name} #{session_created} #{pane_pid}' 2>/dev/null | grep '^fw-' | sort; }
 keys() { cat $T/keys-fa.log $T/keys-fb.log 2>/dev/null | cksum; }
+ttl() { for s in fw-fa fw-fb; do tmux -S $PRIV show-options -v -t "=$s:" set-titles-string 2>/dev/null; done; }
 # fw <command...>: runs it on the stand-in default server; sets out, rc and calls (tmux calls made)
 fw() { : > $T/fwd.log; out=$(env -u TMUX -u TMUX_TMPDIR "PATH=$T/fwdtmux:$PATH" TEAM_STATE_DIR=$T/fwstate TEAM_ROLE=fa "$@" 2>&1 </dev/null); rc=$?; calls=$(wc -l < $T/fwd.log | tr -d ' '); }
-before=$(seats); kb=$(keys)
+before=$(seats); kb=$(keys); tb=$(ttl)
 echo "$before" | grep -q '^fw-fa ' && echo "$before" | grep -q '^fw-fb ' || bad "test setup: fw-fa and fw-fb did not start on the e2e's tmux server"
-for c in "down" "down fb" "say fb hello-from-a-copy" "say all hello-from-a-copy" "attach fa" "attach" "view" "view --print" "down --yes fb" "down --yes"; do
+echo "$tb" | grep -qxF "fa | FA | fw-fa" || bad "test setup: fw-fa's title is not set ($tb)"
+for c in "down" "down fb" "say fb hello-from-a-copy" "say all hello-from-a-copy" "attach fa" "attach" "view" "view --print" "titles" "down --yes fb" "down --yes"; do
   fw $S -c $T/copy.yaml $c
-  refused_default && echo "$out" | grep -qF "$T/copy.yaml" && [ "$(seats)" = "$before" ] && [ "$(keys)" = "$kb" ] \
-    && ok "$c, with a copy of the team file on the default server: refused before any tmux call, every seat as it was" || { bad "$c with a copy on the default server (rc=$rc, tmux calls=$calls)"; echo "$out" | head -3; }
+  refused_default && echo "$out" | grep -qF "$T/copy.yaml" && [ "$(seats)" = "$before" ] && [ "$(keys)" = "$kb" ] && [ "$(ttl)" = "$tb" ] \
+    && ok "$c, with a copy of the team file on the default server: refused before any tmux call, every seat as it was (titles too)" || { bad "$c with a copy on the default server (rc=$rc, tmux calls=$calls)"; echo "$out" | head -3; }
 done
 # The owner's real team file (in teams/) works on the default server as before, and --default-socket
 # lets a team that is meant to run there through. None of these kills a seat or opens iTerm.
@@ -1666,6 +1726,10 @@ fw $S -c $T/copy.yaml view --print --default-socket
 [ $rc = 0 ] && echo "$out" | grep -qF "fw-fa" && ok "view --print --default-socket goes ahead on the default server" || { bad "view --print --default-socket (rc=$rc)"; echo "$out" | head -3; }
 fw $S -c $T/copy.yaml say --default-socket fb hello-from-the-default-socket
 ! echo "$out" | grep -qF "default tmux server" && [ "$calls" -gt 0 ] && ok "say --default-socket goes ahead on the default server" || { bad "say --default-socket (rc=$rc, calls=$calls)"; echo "$out"; }
+fw $T/inst/factory.sh -c $T/inst/teams/fw.yaml titles
+[ $rc = 0 ] && echo "$out" | grep -qF "set the terminal title of 2 running seat(s)" && [ "$(ttl)" = "$tb" ] && ok "titles for a team file in teams/ goes ahead on the default server" || { bad "titles for a team file in teams/ (rc=$rc, calls=$calls)"; echo "$out"; }
+fw $S -c $T/copy.yaml titles --default-socket
+[ $rc = 0 ] && ttl | grep -qxF "fa | COPY-A | fw-fa" && ok "titles --default-socket goes ahead on the default server (the copy's titles are set)" || { bad "titles --default-socket (rc=$rc, calls=$calls)"; echo "$out"; ttl; }
 TEAM_STATE_DIR=$T/fwstate $S -c $T/fw.yaml down --yes >/dev/null 2>&1
 # test/live-env.sh: new makes a private environment, run runs a command in it, down removes it.
 LE=$SRC/test/live-env.sh

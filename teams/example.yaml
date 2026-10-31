@@ -194,6 +194,7 @@ roles:
     prompt: ../roles/tl.md
     skills:
       - "factory:handoff": before /clear, /compact, a restart or the end of a session
+      - "factory:review-pr": to review a PR at its exact head and post one verdict
       - "code-review": to review a PR's diff for correctness bugs
       - "superpowers:writing-plans": to turn an agreed design into steps an engineer can follow
     permissions:
@@ -265,6 +266,7 @@ roles:
     gate_on_stop: true
     skills:
       - "factory:handoff": before /clear, /compact, a restart or the end of a session
+      - "factory:verify-behavior": to verify a PR at its exact head and post one result
       - "superpowers:verification-before-completion": before reporting a result
       - "superpowers:systematic-debugging": when a behaviour is not what the issue says
       - "run": to start the app and see a change working
@@ -286,6 +288,7 @@ roles:
     prompt: ../roles/sec.md
     skills:
       - "factory:handoff": before /clear, /compact, a restart or the end of a session
+      - "factory:review-pr": to review a PR at its exact head and post one verdict
       - "security-review": to review a branch's pending changes for security issues
     permissions:
       deny:

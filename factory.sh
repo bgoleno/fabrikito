@@ -23,9 +23,10 @@
 #                              volume, so `up` recreates them there (stop the seat first)
 #   down --yes [role...]       kill seats (worktrees are kept)
 #
-# up, view, say, attach and down refuse a team file outside teams/ on the default tmux server, where
-# the real team runs: it looks like a throwaway copy. Run it on a private server (test/live-env.sh), or
-# pass --default-socket (say and attach: as the first argument) for a team meant to run there.
+# up, view, titles, say, attach and down refuse a team file outside teams/ on the default tmux
+# server, where the real team runs: it looks like a throwaway copy. Run it on a private server
+# (test/live-env.sh), or pass --default-socket (say and attach: as the first argument) for a team
+# meant to run there.
 #
 # The team file is -c, else $TEAM_CONFIG, else teams/team.yaml next to this script.
 #
@@ -135,9 +136,12 @@ real_path() {
 # A team file outside teams/ next to this script is taken for a throwaway one (a test), which must
 # not reach seats on the default tmux server, where the real team runs (#66). A copy of the real
 # team file shares its session prefix, so it would reach the real seats: up would start beside
-# them, down kill them, say type into them, attach and view show them. So every command that
-# reaches seats calls this first, before any tmux call (#105). --default-socket overrides it for a
-# team that is meant to run there. Usage: refuse_default_tmux <command> <what it would do>.
+# them, down kill them, say type into them, attach and view show them, titles relabel them. So
+# up, down, say, attach, view and titles call this first, before any tmux call (#105, #124).
+# Two commands that reach seats do not: status only reads, and migrate removes worktrees, not
+# sessions, and keeps any worktree a running process works in, whatever server it reaches (#121).
+# --default-socket overrides it for a team that is meant to run there.
+# Usage: refuse_default_tmux <command> <what it would do>.
 refuse_default_tmux() {
   local cmd=$1 what=$2 teams dir
   teams=$(CDPATH= cd -- "$HERE/teams" 2>/dev/null && pwd -P) || teams=$HERE/teams
@@ -461,6 +465,11 @@ apply_title() {
 
 cmd_titles() {
   local r n=0
+  case ${1:-} in
+    --default-socket) ;;
+    '') refuse_default_tmux titles "set the titles of seats" ;;
+    *) die "usage: titles [--default-socket]" ;;
+  esac
   for r in $ROLES; do
     alive "$r" || continue
     apply_title "$r"
@@ -1187,12 +1196,46 @@ cmd_attach() {
   if [ -n "${TMUX:-}" ]; then tmux switch-client -t "=$(session "$r")"; else tmux attach -t "=$(session "$r")"; fi
 }
 
+# The pids of the processes whose working folder is folder $1 or inside it, one line, from lsof
+# (macOS prints every process's cwd, physically resolved, in about half a second). Returns 2 when
+# lsof cannot answer: it lists itself at least, so an empty list means it failed. Returns 3 for a
+# path lsof would not print as it is: lsof escapes a backslash as two and, depending on the locale,
+# a tab as backslash-t, so such a path would never match and the process would be missed. A path
+# of printable ASCII without a backslash is printed unchanged, and so is that prefix of any folder
+# inside it, whatever that folder is named.
+cwd_users() {
+  local p out
+  p=$(CDPATH= cd -- "$1" 2>/dev/null && pwd -P) || return 2
+  # A newline too: grep reads lines, so it would never see one (lsof prints it as backslash-n).
+  case $p in *\\* | *$'\n'*) return 3 ;; esac
+  # A here-string, not a pipe: under pipefail, grep -q stopping early could fail the printf.
+  LC_ALL=C grep -q '[^ -~]' <<<"$p" && return 3
+  out=$(lsof -w -d cwd -F pn 2>/dev/null) || true
+  [ -n "$out" ] || return 2
+  # The path goes in through the environment: awk -v would read escapes in it ("\t" as a tab), and a
+  # path that no longer matches would hide the process.
+  printf '%s\n' "$out" | P=$p awk '
+    BEGIN { p = ENVIRON["P"] }
+    /^p/ { pid = substr($0, 2) }
+    /^n/ { n = substr($0, 2); if (n == p || index(n, p "/") == 1) printf "%s%s", (c++ ? " " : ""), pid }
+    END { if (c) print "" }'
+}
+
 # Remove worktrees that are registered under a team role's folder name but are not at the
 # configured location. Bounded by construction: only a clean worktree, with no branch checked
 # out and HEAD already contained in the base ref, is removed, so nothing it holds can be lost
-# except ignored files (node_modules, build output), which a fresh install recreates.
+# except ignored files (node_modules, build output), which a fresh install recreates. And never one
+# that a running process works in (#121): `alive` asks only the tmux server this command reaches,
+# so a seat started from another server (or from a copy of the team file with another prefix) looks
+# down. The working folders are checked last, right before the removal, so a seat started while
+# migrate ran is still seen. A process that enters the folder after that check is not.
+#
+# #105's rule (refuse a team file outside teams/ on the default tmux server) is not applied here: it
+# acts only on the default server, while the gap #121 found is on a private server, which that rule
+# lets through by design. The working-folder check holds on any server, and for a copy with another
+# session prefix too, whose `alive` misses the real seats even on the default server.
 cmd_migrate() {
-  local roles=${*:-$ROLES} r p dir name moved=0
+  local roles=${*:-$ROLES} r p dir name moved=0 users cu
   for r in $roles; do check_role "$r"; done
   for r in $roles; do
     [ "$(wtype "$r")" = worktree ] || continue
@@ -1205,6 +1248,14 @@ cmd_migrate() {
       if [ -n "$(git -C "$p" status --porcelain)" ]; then echo "REFUSE $r: $p has uncommitted or untracked files"; continue; fi
       if [ -n "$(git -C "$p" branch --show-current)" ]; then echo "REFUSE $r: $p has branch '$(git -C "$p" branch --show-current)' checked out; move that work by hand"; continue; fi
       if ! git -C "$p" merge-base --is-ancestor HEAD "$BASE"; then echo "REFUSE $r: $p HEAD is not contained in $BASE (unpushed commits)"; continue; fi
+      # set -e: a failing $(...) assignment would end the script, so its status is caught here.
+      cu=0; users=$(cwd_users "$p") || cu=$?
+      case $cu in
+        0) ;;
+        3) echo "REFUSE $r: cannot tell whether a running process works in $p: lsof escapes characters in its path (a backslash, a control or non-ASCII character); remove it by hand"; continue ;;
+        *) echo "REFUSE $r: cannot tell whether a running process works in $p (lsof gave no answer)"; continue ;;
+      esac
+      if [ -n "$users" ]; then echo "REFUSE $r: $p is the working folder of a running process (pid $users); stop it first"; continue; fi
       git -C "$REPO" worktree remove "$p"
       echo "moved  $r: removed $p; '$SELF up $r' recreates it at $dir"
       moved=$((moved + 1))
@@ -1248,10 +1299,10 @@ case "${1:-}" in
   up) shift; cmd_up "$@" ;;
   status) cmd_status ;;
   view) shift; cmd_view "$@" ;;
-  titles) cmd_titles ;;
+  titles) shift; cmd_titles "$@" ;;
   say) shift; cmd_say "$@" ;;
   attach) shift; cmd_attach "$@" ;;
   migrate) shift; cmd_migrate "$@" ;;
   down) shift; cmd_down "$@" ;;
-  *) sed -n '3,36p' "$0" | sed 's/^# \{0,1\}//'; exit 64 ;;
+  *) sed -n '3,37p' "$0" | sed 's/^# \{0,1\}//'; exit 64 ;;
 esac

@@ -24,4 +24,5 @@ You set technical direction and are the review gate before anything reaches the 
   the issue (options, recommendation, trade-offs, what stays out of scope).
 - Settle technical disagreements between engineers. Escalate through the EM only what is the owner's call.
 - Watch for semantic conflicts between PRs in flight; green on their own is not green together.
-- You implement only when the EM assigns it (a spike or a small fix); otherwise you review and unblock.
+- You implement only when the EM assigns it (a spike or a small fix, red-green like any fix);
+  otherwise you review and unblock.
