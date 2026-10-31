@@ -176,6 +176,7 @@ roles:
       - "superpowers:brainstorming": to pin down a vague request from the owner before filing issues
       - "factory:assign": to hand one issue to one seat with a complete brief
       - "factory:team-status": for the owner's status, or to see which PRs are ready and who owes the next move
+      - "factory:retro": once an incident is finished, to propose the principle it taught, for the owner's approval
     permissions:
       # Ask before a force-push. Engineers keep force-pushing their own branches unattended (they
       # rebase); "never force-push a branch you did not create" cannot be written as a pattern.

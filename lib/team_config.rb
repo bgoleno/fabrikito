@@ -146,6 +146,17 @@ HOOK_DIRS = %w[gate].freeze
 # every seat denied; the owner still reads the log directly.
 LOG_READER = 'em'.freeze
 
+# The one role that writes security-triage records (#138), in <state>/triage/ (TRIAGE_DIR). A record
+# can hold an unfixed medium-or-higher finding, which hard rule 5 keeps to sec and the EM. So that
+# role may edit and read the folder without a prompt in every mode (it is outside its working
+# directory), LOG_READER may read it (sec sends it a record's path), and every other seat is denied
+# both: an accident guard, like the log's, so a seat searching the state folder does not pull a
+# record into its context or change one the EM acts on. A team whose security seat has another id
+# gets no record folder, and every seat is denied it, but LOG_READER keeps its Read allow. up makes
+# the folder; nothing deletes it.
+TRIAGE_WRITER = 'sec'.freeze
+TRIAGE_DIR = 'triage'.freeze
+
 # Where each seat keeps its progress note, <state>/notes/<role>.md (#5). Outside the worktree, so it
 # survives the worktree being recreated, and in neither list above, so a seat may write it.
 NOTES_DIR = 'notes'.freeze
@@ -527,6 +538,23 @@ class TeamConfig
     [File.expand_path(note_path(id)), real_path(note_path(id))].uniq.map { |p| "Edit(/#{glob_escape(p)})" }
   end
 
+  # <state>/triage/** in both spellings (as configured and real): the folder glob-escaped, then an
+  # unescaped /** for everything in it.
+  def triage_paths
+    d = File.join(state_dir, TRIAGE_DIR)
+    [File.expand_path(d), real_path(d)].uniq.map { |p| "#{glob_escape(p)}/**" }
+  end
+
+  # The triage folder's rules for seat id, as { 'allow' => [...], 'deny' => [...] } (see TRIAGE_WRITER).
+  def triage_rules(id)
+    edit = triage_paths.map { |p| "Edit(/#{p})" }
+    read = triage_paths.map { |p| "Read(/#{p})" }
+    return { 'allow' => edit + read, 'deny' => [] } if id == TRIAGE_WRITER
+    return { 'allow' => read, 'deny' => edit } if id == LOG_READER
+
+    { 'allow' => [], 'deny' => edit + read }
+  end
+
   # The Read deny on messages.log for a seat other than LOG_READER, in both spellings.
   def log_read_rules(id)
     return [] if id == LOG_READER
@@ -717,8 +745,9 @@ class TeamConfig
     # deny the seat's own note, since deny wins over allow).
     own = note_rules(id)
     others = (roles.keys - [id]).flat_map { |r| note_rules(r) }
-    deny = protected_paths(id).map { |p| "Edit(/#{p})" } + others + log_read_rules(id) + memory_rules(id)
-    add.call({ 'deny' => deny, 'ask' => base_push_rules, 'allow' => own }, 'factory.sh')
+    tri = triage_rules(id)
+    deny = protected_paths(id).map { |p| "Edit(/#{p})" } + others + log_read_rules(id) + memory_rules(id) + tri['deny']
+    add.call({ 'deny' => deny, 'ask' => base_push_rules, 'allow' => own + tri['allow'] }, 'factory.sh')
     out
   end
 
@@ -865,12 +894,19 @@ class TeamConfig
       notes = (roles.keys - [id]).flat_map { |r| note_rules(r) }
       logs = log_read_rules(id)
       mem = memory_rules(id)
-      added = merged['deny'].count { |r| factory.include?(r) && !notes.include?(r) && !logs.include?(r) && !mem.include?(r) }
+      tri = triage_rules(id)
+      added = merged['deny'].count do |r|
+        factory.include?(r) && !notes.include?(r) && !logs.include?(r) && !mem.include?(r) && !tri['deny'].include?(r)
+      end
       asks = merged['ask'].count { |r| factory.include?(r) }
       note = merged['allow'].any? { |r| factory.include?(r) } ? ', Edit allow on its own progress note and deny on the other seats\'' : ''
       memo = mem.empty? ? '' : ", Edit deny on the repository's auto-memory folder (#{mem.size} spellings)"
       log = (merged['deny'] & logs).empty? ? '' : ', Read deny on the message log'
-      out << "    added: Edit deny on #{added} protected paths#{asks.positive? ? ", ask on #{asks} push-to-#{base_branch} patterns" : ''}#{note}#{memo}#{log}"
+      triage = if id == TRIAGE_WRITER then ', Edit and Read allow on the triage record folder'
+               elsif id == LOG_READER then ', Read allow and Edit deny on the triage record folder'
+               else ', Edit and Read deny on the triage record folder'
+               end
+      out << "    added: Edit deny on #{added} protected paths#{asks.positive? ? ", ask on #{asks} push-to-#{base_branch} patterns" : ''}#{note}#{memo}#{log}#{triage}"
       out << '    note : allow rules have no effect in bypassPermissions' if mode.start_with?('bypassPermissions') && !(merged['allow'] - factory).empty?
       out << '    note : ask rules are refused in dontAsk mode, not asked' if mode == 'dontAsk' && !merged['ask'].empty?
     end
@@ -942,7 +978,16 @@ class TeamConfig
 
   # What `check` warns about. Warnings do not stop a start.
   def warnings
-    held_message_warnings + merge_warnings
+    held_message_warnings + merge_warnings + triage_warnings
+  end
+
+  # A role other than TRIAGE_WRITER that lists the security-triage skill would write its records
+  # where its settings deny it (#138), so check says so before the seat meets the deny.
+  def triage_warnings
+    roles.keys.reject { |id| id == TRIAGE_WRITER }.select { |id| skills(id).any? { |n, _| n == 'factory:security-triage' } }.map do |id|
+      "warning: #{id} lists factory:security-triage, but only a role with id #{TRIAGE_WRITER} may write triage " \
+        "records (#{File.join(state_dir, TRIAGE_DIR)}/): every other seat may not write there."
+    end
   end
 
   # Under the default inbound rule a message between the two classes is held in either direction:
@@ -1108,6 +1153,7 @@ when 'get'
   when 'claude.config_dir' then puts cfg.claude_config_paths.first
   when 'state.generated_dirs' then puts GENERATED_DIRS
   when 'state.notes_dir' then puts File.join(cfg.state_dir, NOTES_DIR)
+  when 'state.triage_dir' then puts(cfg.roles.key?(TRIAGE_WRITER) ? File.join(cfg.state_dir, TRIAGE_DIR) : '')
   when 'hooks.note' then puts cfg.hooks_note.to_s
   when 'repo.bootstrap' then puts(cfg.bootstrap || '')
   when 'repo.copy' then puts cfg.copy_paths
