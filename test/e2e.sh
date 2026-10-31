@@ -705,13 +705,13 @@ mig=$($S -c $T/team.yaml migrate w1 2>&1)
 kill $seatpid 2>/dev/null; wait $seatpid 2>/dev/null
 mig=$($S -c $T/team.yaml migrate w1 2>&1)
 [ ! -e $LW ] && echo "$mig" | grep -qE "moved  w1: removed .*/worktrees/team-w1;" && ok "the same worktree, idle once the process is gone, is migrated" || { bad "idle worktree not migrated"; echo "$mig" | head -4; }
-# The path is matched literally: a backslash in it (awk -v would read "\t" as a tab) must not hide
-# the process working there.
+# A backslash in the path must not hide the process working there: lsof prints it escaped, so the
+# path cannot be matched, and migrate refuses the worktree rather than guess.
 BW="$T/back\\tslash/team-w1"; mkdir -p "$T/back\\tslash" && git -C $T/repo worktree add -q --detach "$BW" origin/main
 (cd "$BW" && exec sleep 600) & seatpid=$!
 sleep 1
 mig=$($S -c $T/team.yaml migrate w1 2>&1)
-[ -d "$BW" ] && echo "$mig" | grep -qF 'tslash/team-w1 is the working folder of a running process' && ok "migrate keeps a worktree in use whose path has a backslash in it" || { bad "worktree in use with a backslash in its path"; echo "$mig" | head -4; }
+[ -d "$BW" ] && echo "$mig" | grep -qF 'tslash/team-w1: lsof escapes characters in its path' && echo "$mig" | grep -qF "removed 0 worktree(s)" && ok "migrate keeps a worktree in use whose path has a backslash in it (refused: lsof escapes it)" || { bad "worktree in use with a backslash in its path"; echo "$mig" | head -4; }
 kill $seatpid 2>/dev/null; wait $seatpid 2>/dev/null
 git -C $T/repo worktree remove --force "$BW" 2>/dev/null
 echo "--- unmounted volume"

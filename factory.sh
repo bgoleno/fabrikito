@@ -1039,11 +1039,18 @@ cmd_attach() {
 
 # The pids of the processes whose working folder is folder $1 or inside it, one line, from lsof
 # (macOS prints every process's cwd, physically resolved, in about half a second). Returns 2 when
-# lsof cannot answer: it lists itself at least, so an empty list means it failed.
+# lsof cannot answer: it lists itself at least, so an empty list means it failed. Returns 3 for a
+# path lsof would not print as it is: lsof escapes a backslash as two and, depending on the locale,
+# a tab as backslash-t, so such a path would never match and the process would be missed. A path
+# of printable ASCII without a backslash is printed unchanged, and so is that prefix of any folder
+# inside it, whatever that folder is named.
 cwd_users() {
   local p out
   p=$(CDPATH= cd -- "$1" 2>/dev/null && pwd -P) || return 2
-  out=$(lsof -w -d cwd -F pn 2>/dev/null)
+  case $p in *\\*) return 3 ;; esac
+  # A here-string, not a pipe: under pipefail, grep -q stopping early could fail the printf.
+  LC_ALL=C grep -q '[^ -~]' <<<"$p" && return 3
+  out=$(lsof -w -d cwd -F pn 2>/dev/null) || true
   [ -n "$out" ] || return 2
   # The path goes in through the environment: awk -v would read escapes in it ("\t" as a tab), and a
   # path that no longer matches would hide the process.
@@ -1068,7 +1075,7 @@ cwd_users() {
 # lets through by design. The working-folder check holds on any server, and for a copy with another
 # session prefix too, whose `alive` misses the real seats even on the default server.
 cmd_migrate() {
-  local roles=${*:-$ROLES} r p dir name moved=0 users
+  local roles=${*:-$ROLES} r p dir name moved=0 users cu
   for r in $roles; do check_role "$r"; done
   for r in $roles; do
     [ "$(wtype "$r")" = worktree ] || continue
@@ -1081,7 +1088,13 @@ cmd_migrate() {
       if [ -n "$(git -C "$p" status --porcelain)" ]; then echo "REFUSE $r: $p has uncommitted or untracked files"; continue; fi
       if [ -n "$(git -C "$p" branch --show-current)" ]; then echo "REFUSE $r: $p has branch '$(git -C "$p" branch --show-current)' checked out; move that work by hand"; continue; fi
       if ! git -C "$p" merge-base --is-ancestor HEAD "$BASE"; then echo "REFUSE $r: $p HEAD is not contained in $BASE (unpushed commits)"; continue; fi
-      if ! users=$(cwd_users "$p"); then echo "REFUSE $r: cannot tell whether a running process works in $p (lsof gave no answer)"; continue; fi
+      # set -e: a failing $(...) assignment would end the script, so its status is caught here.
+      cu=0; users=$(cwd_users "$p") || cu=$?
+      case $cu in
+        0) ;;
+        3) echo "REFUSE $r: cannot tell whether a running process works in $p: lsof escapes characters in its path (a backslash, a control or non-ASCII character); remove it by hand"; continue ;;
+        *) echo "REFUSE $r: cannot tell whether a running process works in $p (lsof gave no answer)"; continue ;;
+      esac
       if [ -n "$users" ]; then echo "REFUSE $r: $p is the working folder of a running process (pid $users); stop it first"; continue; fi
       git -C "$REPO" worktree remove "$p"
       echo "moved  $r: removed $p; '$SELF up $r' recreates it at $dir"
