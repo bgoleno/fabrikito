@@ -871,28 +871,33 @@ EOF
 # Short panes (#84). The team view gives seats panes as small as 89x13 (10 seats) or 10 to 11 rows
 # (12 seats). Under 110 columns, a seat whose diff panel is open draws a notice above its input
 # box, and at 13 rows or fewer that pushes the box off the screen; under 12 rows a paste grows the
-# box past the bottom (both measured on 2.1.316, #95 and #73). So for the delivery say grows a seat
-# window under 110x12 to at least 220x50, the size seats run at detached, where every check here
-# was measured and verified live (the diff panel docks beside the transcript, no notice), and then
-# puts back exactly the size and window-size option it found. A window at 110x12 or more is never
-# touched. Meanwhile the owner's view of that seat shows a clipped part of the bigger window.
+# box past the bottom (both measured on 2.1.316, #95 and #73). Most messages still fit (qa on #132),
+# so say runs its checks at the pane's own size first. Only when one refuses in a window under
+# 110x12 does it grow the window to at least 220x50, the size seats run at detached, where every
+# check here was measured and verified live (the diff panel docks beside the transcript, no notice),
+# run that same check again, and at the end put back exactly the size and window-size option it
+# found (tl on #132). While grown, the owner's view of that seat shows a clipped part of the bigger
+# window, for about a second, so a seat whose checks pass is never grown. A window at 110x12 or
+# more is never touched.
 SAY_MIN_COLS=110 SAY_MIN_ROWS=12 SAY_COLS=220 SAY_ROWS=50
 GROWN_WIN="" GROWN_W="" GROWN_H="" GROWN_OPT="" LOCK_WHY=""
 
-# Grows seat $1's window if it is under SAY_MIN_COLS x SAY_MIN_ROWS, recording what to put back,
-# and waits for Claude Code to redraw at the new size. The traps put it back on every exit but
-# SIGKILL; the README names the recovery for that. Bash runs a trap once the command it is
+# Grows seat $1's window if it is under SAY_MIN_COLS x SAY_MIN_ROWS and not grown yet, recording
+# what to put back, and waits for Claude Code to redraw at the new size. True only when it grew the
+# window now, so the caller knows a check is worth running again. The traps put it back on every
+# exit but SIGKILL; the README names the recovery for that. Bash runs a trap once the command it is
 # waiting for returns, and every tmux call here returns at once.
 grow_window() {
   local win w h opt i
+  [ -z "$GROWN_WIN" ] || return 1
   # The window by its id, not =<session>:, which is whichever window is current when it is put
   # back (tl on #132).
   IFS=' x' read -r win w h <<EOF
 $(tmux display-message -p -t "=$(session "$1"):" '#{window_id} #{window_width}x#{window_height}' 2>/dev/null)
 EOF
-  case "$w$h" in '' | *[!0-9]*) return 0 ;; esac
-  case $win in @*) ;; *) return 0 ;; esac
-  [ "$w" -lt "$SAY_MIN_COLS" ] || [ "$h" -lt "$SAY_MIN_ROWS" ] || return 0
+  case "$w$h" in '' | *[!0-9]*) return 1 ;; esac
+  case $win in @*) ;; *) return 1 ;; esac
+  [ "$w" -lt "$SAY_MIN_COLS" ] || [ "$h" -lt "$SAY_MIN_ROWS" ] || return 1
   # The window's own window-size (empty: unset, so the global one applies). resize-window sets it
   # to manual, so it is put back as found, not unset.
   opt=$(tmux show-options -w -v -t "$win" window-size 2>/dev/null) || opt=""
@@ -903,12 +908,12 @@ EOF
   trap 'shrink_window; exit 143' TERM
   [ "$w" -ge "$SAY_COLS" ] || w=$SAY_COLS
   [ "$h" -ge "$SAY_ROWS" ] || h=$SAY_ROWS
-  tmux resize-window -t "$win" -x "$w" -y "$h" 2>/dev/null || return 0
+  tmux resize-window -t "$win" -x "$w" -y "$h" 2>/dev/null || return 1
   # Claude Code redraws on SIGWINCH. Until it has, the screen is the old frame, drawn small, which
   # can read as an empty box (tl on #132), so the wait ends only when the box's bottom rule, the
   # last plain rule on the screen, is as wide as the grown window (Claude Code draws it across the
   # pane), or after about 3 seconds. The last one, because growing a pane can bring older, wider
-  # lines back into view above the current frame. The checks that follow decide either way.
+  # lines back into view above the current frame. The check run again decides either way.
   for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
     sleep 0.2 9>&-
     tmux capture-pane -p -t "$win" 2>/dev/null | LC_ALL=C awk -v w="$w" '
@@ -982,18 +987,28 @@ send_one() {
     echo "not delivered: $LOCK_WHY" >&2
     return 1
   fi
-  grow_window "$to"
   deliver_one "$to" "$text" "$sess"; rc=$?
   shrink_window
   seat_unlock
   return "$rc"
 }
 
-# The checks, the paste and the Enter, for send_one, which holds the seat's lock and has grown its
-# window if it was small.
+# Whether a check that refused on box state $1 may pass in a bigger window: not when someone is
+# scrolling the pane or tmux cannot read it, where growing would only flash the owner's view.
+size_may_matter() {
+  case ${1%%	*} in copy-mode | unreadable) return 1 ;; esac
+}
+
+# The checks, the paste and the Enter, for send_one, which holds the seat's lock. A check that
+# refuses in a small window grows it (grow_window, at most once per say) and runs again; only its
+# second answer counts, and send_one puts the window back (#84, tl on #132). In #84's own case the
+# box is whole before the paste and it is the check after the paste that refuses.
 deliver_one() {
-  local to=$1 text=$2 sess=$3 buf st why
-  why=$(box_refusal "$to" "$(box_state "$to")")
+  local to=$1 text=$2 sess=$3 buf st why ok
+  st=$(box_state "$to"); why=$(box_refusal "$to" "$st")
+  if [ -n "$why" ] && size_may_matter "$st" && grow_window "$to"; then
+    st=$(box_state "$to"); why=$(box_refusal "$to" "$st")
+  fi
   if [ -n "$why" ]; then
     echo "not delivered: $why" >&2
     return 1
@@ -1003,11 +1018,16 @@ deliver_one() {
   tmux paste-buffer -p -d -b "$buf" -t "=$sess:"
   sleep 0.5 9>&-
   # Enter only when the box now holds just this message (box_has_message), so the Enter can only
-  # submit the message. Otherwise a dialog came up, or the paste went nowhere. Still open: a dialog that appears between the first check and
-  # the paste (the paste then lands in it; this check sees no box and sends no Enter), and one
-  # that appears after this check, before the Enter.
-  st=$(box_state "$to")
-  if ! why=$(box_has_message "$to" "$st" "$text"); then
+  # submit the message. Otherwise a dialog came up, or the paste went nowhere. Still open: a dialog
+  # that appears between the first check and the paste (the paste then lands in it; this check sees
+  # no box and sends no Enter), and one that appears after this check, before the Enter. When this
+  # check refuses in a small window, the text is already in the box: the window is grown and the
+  # check runs again on the screen as redrawn, and only a pass there sends the Enter.
+  st=$(box_state "$to"); ok=1; why=$(box_has_message "$to" "$st" "$text") || ok=0
+  if [ "$ok" = 0 ] && size_may_matter "$st" && grow_window "$to"; then
+    st=$(box_state "$to"); ok=1; why=$(box_has_message "$to" "$st" "$text") || ok=0
+  fi
+  if [ "$ok" = 0 ]; then
     echo "not delivered: the input box of $to does not show the message after the paste${why:+ ($why)}; text left in input box: it goes out with the next Enter" >&2
     return 1
   fi

@@ -257,7 +257,7 @@ message. Anything else fails closed, with a reason:
 - a pane in copy mode (someone scrolling);
 - Claude Code's diff panel notice ("Resize your terminal to at least 110 columns to show the diff
   panel") in a pane of 13 rows or fewer, where it pushes the end of the input box off the screen.
-  `say` grows such a pane for the delivery (below), so this shows only if that fails. With 16 rows
+  `say` grows such a pane and checks again (below), so this shows only if that fails. With 16 rows
   or more the notice is harmless (at 14 or 15 only a one-line message fits). Widen the pane to 110
   columns, give it 16 rows or more, or close the diff panel in the seat;
 - a screen tmux cannot read;
@@ -277,13 +277,16 @@ the message.
 it, and the team view makes them small: 89x13 with ten seats on a 77-row display, about 10 rows with
 twelve. Under 110 columns a seat whose diff panel is open draws the notice above its box, which at 13
 rows or fewer pushes the box off the screen; under 12 rows a paste grows the box past the bottom, and
-even a 3-line paste collapses to a placeholder (all measured on 2.1.316). So when a seat's window is
-under 110 columns or under 12 rows, `say` grows it to 220x50 (the size seats run at detached, where the
-checks above were measured and verified live) for the delivery, then puts back exactly the size and the
-window's `window-size` option it found. A window of 110x12 or more is never resized. While it is grown,
-the seat's pane in the view shows a clipped part of the bigger window and Claude Code redraws twice,
-for about a second. The traps put the window back however `say` ends, except SIGKILL; a `say` killed
-that way can leave the window at 220x50 with `window-size` set to `manual`, and
+even a multi-line paste collapses to a placeholder (all measured on 2.1.316). Most messages still fit,
+so `say` runs its checks at the pane's own size. Only when one refuses (before the paste, or after it,
+with the text already in the box) in a window under 110 columns or under 12 rows does `say` grow the
+window to 220x50 (the size seats run at detached, where the checks above were measured and verified
+live), run that check again there, and go on only if it passes; then it puts back exactly the size and
+the window's `window-size` option it found. A window is grown at most once per message, and a window of
+110x12 or more is never resized. So the view flashes only for a `say` that would otherwise be refused:
+while the window is grown, the seat's pane shows a clipped part of the bigger window and Claude Code
+redraws twice, for about a second. The traps put the window back however `say` ends, except SIGKILL;
+a `say` killed that way can leave the window at 220x50 with `window-size` set to `manual`, and
 `tmux set-option -w -u -t '=<session>:' window-size` puts it back to following the iTerm pane.
 A message taller than the box (up to 800 characters and 3 lines; a longer paste shows as a `[Pasted
 text #N]` placeholder) scrolls it, so only the message's end is visible. `say` then sends it only when
