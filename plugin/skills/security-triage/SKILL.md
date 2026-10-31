@@ -33,7 +33,8 @@ one finding, and does not restate them. Where the two differ, the role prompt wi
    tell the EM now (step 6), then go on with the triage.
 2. **Read the security policy** the project names (for example `SECURITY.md`, or the contribution
    guide), with its documented deviations. If the finding is a documented deviation, it is a
-   decision, not a finding: record it as ruled out (step 7), naming where it is documented.
+   decision, not a finding: route and record it as ruled out (steps 6 and 8), naming where it is
+   documented.
 3. **Pin what it is about,** without touching your worktree's own state:
    - `git remote -v` must show the repository your role prompt names. Then `git fetch origin`.
    - Name the exact commit: `origin/<base>` (its SHA from `git rev-parse`) for code on the base, or
@@ -63,15 +64,19 @@ one finding, and does not restate them. Where the two differ, the role prompt wi
      not shown, and say what would show it), or **ruled out** (not reachable: name the guard that
      stops it). A described exploit the code cannot reach is ruled out.
 5. **Rate the severity** by what a reachable failure does here, using the project's own scale if
-   its security policy has one. Otherwise:
+   its security policy has one. Count only impact beyond what the party can already do on purpose:
+   a seat already runs code and changes its own worktree, and permission rules guard against
+   accidents, not attacks. Otherwise:
    - **high:** reachable from outside the trusted set (anyone, or an outside contributor), or any
      exposed credential; leads to running code, or to reading or changing the owner's data,
      credentials, server or repository.
-   - **medium:** reachable by a trusted party (a seat, a script, the shared account) through one
-     mistake or one crafted input, with that same impact; or reachable from outside with contained
-     impact.
-   - **low:** needs an unlikely precondition, or its impact stays in a throwaway folder or the
-     seat's own state; or hardening with no reachable path in any supported setup.
+   - **medium:** reachable by a trusted party (a seat, a script, the shared account) with that
+     impact beyond what that party can already do on purpose, through one crafted input or one
+     plausible mistake (for example a copied team file, or a wrong working folder) that reaches the
+     live team, the owner's data or the repository; or reachable from outside with contained impact.
+   - **low:** needs several uncommon conditions at once, or an unlikely precondition; or its impact
+     stays in a throwaway folder or the seat's own state; or hardening with no reachable path in
+     any supported setup.
    - Rate this deployment, and say separately when a supported setup the project is written for
      (a public repository, fork PRs, another team's project) would rate higher. Routing in step 6
      follows the higher of the two. Between two levels, take the higher until you have shown the
@@ -94,9 +99,16 @@ one finding, and does not restate them. Where the two differ, the role prompt wi
      it can be (hard rule 8).
 7. **Propose the fix as a test first:** a test that fails on the current code because of the
    weakness (what it sets up, what it asserts), then the smallest change that makes it pass. You
-   implement only when the EM assigns it. For a medium or higher, the test is a reproduction, so
-   it lives only on the private fix path below, and is described only in the private record.
-   - **The private fix path (hard rule 8's exemption):** propose to the EM where the fix is tracked
+   implement only when the EM assigns it. For a medium or higher, a test written as the weakness
+   is a reproduction, so it lives only on the private fix path below, and is described only in
+   the private record.
+   - **A weakness only in an open PR's unmerged commits:** that PR is the private fix path. The
+     author fixes it on the PR's branch, with a commit message that names the behaviour, not the
+     weakness, and a regression test under a neutral name that asserts the correct behaviour (for
+     example "a title with shell characters is printed as data"). Such a test is an ordinary
+     regression test, not a reproduction.
+   - **The private fix path (hard rule 8's exemption)** for a medium or higher already on the base
+     or released: propose to the EM where the fix is tracked
      and reviewed, for example a draft GitHub security advisory and its private fork, and record
      what you agree: the place (an advisory id or link, or the EM's private record), who
      implements, who reviews, a branch name and commit messages that do not describe the finding,
