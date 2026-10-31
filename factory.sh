@@ -924,6 +924,7 @@ log_field() {
 #
 # It fails closed (status 1, the reason on stdout) whenever it cannot tell (#97):
 # - ps cannot read this process or any of its ancestors;
+# - the walk reads 100 processes without reaching pid 1 (#130), so it has not seen them all;
 # - an ancestor has a tty but tmux cannot list its panes (only a process with no tty and no tmux
 #   server above it is taken to be outside tmux);
 # - the tty is a pane of a seat of another team on this server (its session sets TEAM_ROLE, as up
@@ -966,6 +967,12 @@ caller_seat() {
     case ${comm##*/} in tmux|tmux:*|"tmux "*) srvs="$srvs $pid" ;; esac
     pid=$ppid; n=$((n + 1))
   done
+  # The walk stopped at its cap, not at pid 1 (#130): the processes above were never read, and any of
+  # them could hold a seat's tty or be another tmux server, so refuse rather than take this for owner.
+  if [ "$pid" -gt 1 ]; then
+    echo "the walk up this process's ancestors stopped at its cap of 100 processes (at pid $pid) before reaching pid 1, so say cannot tell whether it runs inside a seat; $adv"
+    return 1
+  fi
   [ -n "$ttys$srvs" ] || return 0
   # Each line is "<server pid> <pane tty> <session name>". #{pid} is the pid of the server this
   # list comes from, the one say addresses, so no other tmux command is needed to learn it.
