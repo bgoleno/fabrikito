@@ -16,18 +16,90 @@ pass=0; fail=0; ok(){ echo "PASS $1"; pass=$((pass+1)); }; bad(){ echo "FAIL $1"
 git init -q --bare $T/local/origin.git; git clone -q $T/local/origin.git $T/repo 2>/dev/null
 (cd $T/repo && git commit -q --allow-empty -m init && git branch -M main && git push -q origin main)
 # fake claude: a real binary named claude (the process check looks at the process name). It
-# prints the file $FAKE_PROMPT if there is one (a stand-in for a permission prompt) and logs every
-# byte it reads to $FAKE_KEYLOG. The tty is in line mode, so a byte arrives only with an Enter.
+# draws Claude Code 2.1.316's input box as captured on 2026-10-30 (a rule naming the session from
+# -n, cursor and no-break space, a plain rule, then a status line and the mode line; an empty box
+# shows a dim hint) and redraws it after
+# every key. Bracketed paste is on, so a pasted newline stays in the box and only a typed Enter
+# submits. Every byte read goes to $FAKE_KEYLOG. Optional files per seat, named by $FAKE_FILES-*:
+#   prompt  a dialog, drawn instead of the box     output  lines drawn above the box
+#   mode    swallow (input never shows), below (a list under the box), prefill (text left in the box),
+#           suggest (a dim suggested prompt in the empty box), sticky (that suggestion stays drawn after
+#           any text), mixed (typed text and the dim suggestion)
 cat > $T/c.c <<'C'
 #include <stdio.h>
 #include <stdlib.h>
-int main(int n,char**v){printf("FAKE-CLAUDE");for(int i=1;i<n;i++)printf(" [%.50s]",v[i]);printf("\n");
-char*p=getenv("FAKE_PROMPT"),*k=getenv("FAKE_KEYLOG");FILE*f=p?fopen(p,"r"):0,*kl=k?fopen(k,"a"):0;int c;
-if(f){while((c=fgetc(f))!=EOF)putchar(c);fclose(f);}fflush(stdout);
-while((c=getchar())!=EOF){putchar(c);fflush(stdout);if(kl){fputc(c,kl);fflush(kl);}}return 0;}
+#include <string.h>
+#include <termios.h>
+#include <unistd.h>
+static char buf[65536], hist[65536], head[4096], mode[64], name[256];
+static size_t blen, hlen;
+static const char *base;
+static void cat(const char *what) {
+  char path[4096]; snprintf(path, sizeof path, "%s-%s.txt", base, what);
+  FILE *f = fopen(path, "r"); int c; if (!f) return;
+  while ((c = fgetc(f)) != EOF) { if (c == '\n') putchar('\r'); putchar(c); }
+  fclose(f);
+}
+static int has(const char *what) {
+  char path[4096]; snprintf(path, sizeof path, "%s-%s.txt", base, what);
+  return access(path, R_OK) == 0;
+}
+static const char *RULE = "────────────────────────────────────────────────────────────";
+static void draw(void) {
+  printf("\033[H\033[2J%s\r\n", head);
+  fwrite(hist, 1, hlen, stdout);
+  if (has("prompt")) { cat("prompt"); fflush(stdout); return; }
+  cat("output");
+  if (name[0]) printf("────────────────────────────────────────── %s ──\r\n\xe2\x9d\xaf\xc2\xa0", name);
+  else printf("%s\r\n\xe2\x9d\xaf\xc2\xa0", RULE);
+  int sticky = !strcmp(mode, "sticky") || !strcmp(mode, "mixed");
+  if (blen == 0) printf(sticky || !strcmp(mode, "suggest") ? "\033[2mrun the tests\033[0m" : "\033[2mTry \"something\"\033[0m");
+  for (size_t i = 0; i < blen; i++) { if (buf[i] == '\n') printf("\r\n  "); else putchar(buf[i]); }
+  if (blen && sticky) printf(" \033[2mrun the tests\033[0m");
+  printf("\r\n%s\r\n", RULE);
+  if (!strcmp(mode, "below")) printf("  \xe2\x9d\xaf suggestion one\r\n    suggestion two\r\n");
+  printf("  SL line one\r\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle)\r\n");
+  fflush(stdout);
+}
+int main(int n, char **v) {
+  struct termios t; char *k = getenv("FAKE_KEYLOG"); FILE *kl = k ? fopen(k, "a") : 0, *mf;
+  base = getenv("FAKE_FILES"); if (!base) base = "/nonexistent";
+  char path[4096]; snprintf(path, sizeof path, "%s-mode.txt", base);
+  if ((mf = fopen(path, "r"))) { if (fscanf(mf, "%63s", mode) != 1) mode[0] = 0; fclose(mf); }
+  if (!strcmp(mode, "prefill")) blen = (size_t)snprintf(buf, sizeof buf, "leftover draft text");
+  if (!strcmp(mode, "mixed")) blen = (size_t)snprintf(buf, sizeof buf, "typed text");
+  size_t h = (size_t)snprintf(head, sizeof head, "FAKE-CLAUDE");
+  for (int i = 1; i < n && h < sizeof head - 60; i++) h += (size_t)snprintf(head + h, sizeof head - h, " [%.50s]", v[i]);
+  for (int i = 1; i + 1 < n; i++) if (!strcmp(v[i], "-n")) snprintf(name, sizeof name, "%s", v[i + 1]);
+  tcgetattr(0, &t); cfmakeraw(&t); tcsetattr(0, TCSANOW, &t);
+  printf("\033[?2004h"); draw();
+  int c, esc = 0, paste = 0; char seq[8]; int sl = 0;
+  while (read(0, &c, 1) == 1) {
+    unsigned char b = (unsigned char)c;
+    if (kl) { fputc(b, kl); fflush(kl); }
+    if (esc) {                                   /* ESC [ 2 0 0 ~ and ESC [ 2 0 1 ~ mark a paste */
+      seq[sl++] = (char)b;
+      if (b == '~' || sl >= 7) { seq[sl] = 0; if (!strcmp(seq, "[200~")) paste = 1; if (!strcmp(seq, "[201~")) paste = 0; esc = 0; }
+      continue;
+    }
+    if (b == 27) { esc = 1; sl = 0; continue; }
+    if (!strcmp(mode, "swallow")) continue;
+    if (b == '\r' || b == '\n') {
+      if (paste) { if (blen < sizeof buf - 1) buf[blen++] = '\n'; }
+      else {                                      /* submit: the transcript echoes it, the box empties */
+        hlen += (size_t)snprintf(hist + hlen, sizeof hist - hlen, "\xe2\x9d\xaf %.*s\r\n", (int)blen, buf);
+        if (hlen > sizeof hist - 8192) hlen = 0;
+        blen = 0;
+      }
+    } else if (b == 21) blen = 0;                 /* ctrl-u clears the box */
+    else if (blen < sizeof buf - 1) buf[blen++] = (char)b;
+    draw();
+  }
+  return 0;
+}
 C
 cc -o $T/bin/claude $T/c.c || { echo "no compiler"; exit 2; }
-printf '#!/bin/sh\nshift\necho "$TEAM_ROLE $*" >> %s/args.log\nexport FAKE_KEYLOG=%s/keys-$TEAM_ROLE.log FAKE_PROMPT=%s/prompt-$TEAM_ROLE.txt\nexec %s/bin/claude "$@"\n' $T $T $T $T > $T/bin/wrap; chmod +x $T/bin/wrap
+printf '#!/bin/sh\nshift\necho "$TEAM_ROLE $*" >> %s/args.log\nexport FAKE_KEYLOG=%s/keys-$TEAM_ROLE.log FAKE_FILES=%s/fake-$TEAM_ROLE\nexec %s/bin/claude "$@"\n' $T $T $T $T > $T/bin/wrap; chmod +x $T/bin/wrap
 mkdir -p $T/proj
 cat > $T/team.yaml <<Y
 team: tt
@@ -156,11 +228,15 @@ sed 's#^storage:#display: { primary: w2 }\nstorage:#' $T/team.yaml > $T/team3.ya
 $S -c $T/team3.yaml view --print | grep "tell s0 to write text" | grep -q "tt-w2" && ok "view: display.primary moves w2 to the left" || bad "view: display.primary"
 sed 's#^storage:#display: { primary: nobody }\nstorage:#' $T/team.yaml > $T/team4.yaml
 $S -c $T/team4.yaml check 2>&1 | grep -q "not a role id" && ok "view: unknown display.primary rejected" || bad "view: unknown primary"
-echo "--- say refuses a seat at a permission prompt"
-# pp shows a permission prompt at the bottom of its screen and pm an AskUserQuestion menu: both
-# texts are copied from Claude Code 2.1.316 (captured 2026-10-30), so a later CLI that words them
-# differently shows up as a mismatch with these. pq showed the prompt once, but it has scrolled up
-# out of the bottom lines, so pq takes messages.
+echo "--- say delivers only to a seat showing its input box"
+# The stand-in draws Claude Code 2.1.316's input box unless a seat has a dialog file, which it draws
+# instead (a dialog replaces the box). pp, pm, pd and ph show dialogs copied from 2.1.316 screens
+# captured on 2026-10-30 (permission prompt, question menu, folder trust, held message), so a later
+# CLI that draws them differently shows up as a mismatch here. pu shows an invented select list
+# with no numbers and no key hint: any dialog say does not know must fail closed too.
+roles=""
+for r in pp pm pd ph pu pb pf ps pg px pk pq po; do roles="$roles  $r: { title: Seat $r, workdir: { type: project, path: $T/proj }, prompt_text: \"$r\" }
+"; done
 cat > $T/tp.yaml <<Y
 team: tp
 repo: { path: $T/repo, github: local/origin.git }
@@ -168,9 +244,7 @@ project: { name: TestBoard, url: "https://github.com/users/x/projects/9" }
 storage: { volume: $VOL, root: $ROOT }
 sessions: { prefix: tp, claude: { wrapper: $T/bin/wrap } }
 roles:
-  pp: { title: Prompted, workdir: { type: project, path: $T/proj }, prompt_text: "pp" }
-  pm: { title: Menu, workdir: { type: project, path: $T/proj }, prompt_text: "pm" }
-  pq: { title: Scrolled, workdir: { type: project, path: $T/proj }, prompt_text: "pq" }
+$roles
 Y
 fake_prompt='────────────────────────────────────────────────────────────
  Bash command
@@ -184,8 +258,8 @@ fake_prompt='──────────────────────�
  ❯ 1. Yes
    2. No
  Esc to cancel · Tab to amend'
-printf '%s\n' "$fake_prompt" > $T/prompt-pp.txt
-cat > $T/prompt-pm.txt <<'M'
+printf '%s\n' "$fake_prompt" > $T/fake-pp-prompt.txt
+cat > $T/fake-pm-prompt.txt <<'M'
 ────────────────────────────────────────────────────────────
  ☐ Color
 Which color do you prefer, red or blue?
@@ -198,15 +272,85 @@ Which color do you prefer, red or blue?
   4. Chat about this
 Enter to select · ↑/↓ to navigate · Esc to cancel
 M
-{ printf '%s\n' "$fake_prompt"; for i in $(seq 1 25); do echo "later output line $i"; done; } > $T/prompt-pq.txt
+cat > $T/fake-pd-prompt.txt <<'M'
+────────────────────────────────────────────────────────────
+ Accessing workspace:
+ /tmp/some/folder
+ Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open source project, or work from your team). If not, take a moment to review what's in this
+ folder first.
+ Claude Code'll be able to read, edit, and execute files here.
+ Security guide
+ ❯ No, exit
+   Yes, I trust this folder
+ Enter to confirm · Esc to cancel
+M
+cat > $T/fake-ph-prompt.txt <<'M'
+────────────────────────────────────────────────────────────
+ Held message from another session
+ Another Claude session sent a message: from uds:/tmp/cc-socks/1234.sock [verified pid 1234] (peer claims name: other)
+ The sending session's permission mode class doesn't match this session's, so it wasn't delivered automatically.
+ Message body (this is what will be delivered):
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ probe from other
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ ❯ Deny - drop it and tell the sender it was declined
+   Deliver this message to Claude
+M
+cat > $T/fake-pu-prompt.txt <<'M'
+────────────────────────────────────────────────────────────
+ Pick what happens next
+ ❯ Leave it as it is
+   Change it
+M
+echo below > $T/fake-pb-mode.txt; echo prefill > $T/fake-pf-mode.txt; echo swallow > $T/fake-ps-mode.txt
+echo suggest > $T/fake-pg-mode.txt; echo mixed > $T/fake-px-mode.txt; echo sticky > $T/fake-pk-mode.txt
+{ printf '%s\n' "$fake_prompt"; for i in $(seq 1 5); do echo "later output line $i"; done; } > $T/fake-pq-output.txt
+cat > $T/fake-po-output.txt <<'M'
+⏺ The permission prompt asked "Do you want to proceed?" and the cursor sat on "❯ 1. Yes".
+  The key hint read "Esc to cancel · Tab to amend", and the trust dialog offered "No, exit".
+ Do you want to proceed?
+ ❯ 1. Yes
+ Esc to cancel · Tab to amend
+M
 TEAM_VIEW=0 $S -c $T/tp.yaml up --no-view >/dev/null 2>&1; sleep 2
-sp=$(TEAM_ROLE=em $S -c $T/tp.yaml say pp "routine message" 2>&1); rc=$?
-[ $rc -ne 0 ] && echo "$sp" | grep -q "permission prompt" && ok "say to a seat at a permission prompt fails and says why" || { bad "say at a permission prompt (rc=$rc)"; echo "$sp"; }
-sleep 1
-[ ! -s $T/keys-pp.log ] && ok "the seat at the prompt received no Enter" || { bad "the seat at the prompt received keys"; od -c $T/keys-pp.log | head -3; }
-tail -1 $T/state/messages.log | grep -q "	pp	NOT-DELIVERED	routine message" && ok "log records the refused message as NOT-DELIVERED" || { bad "log NOT-DELIVERED"; tail -1 $T/state/messages.log; }
-TEAM_ROLE=em $S -c $T/tp.yaml say pm "routine message" >/dev/null 2>&1 && bad "say to a seat at a question menu was delivered" || { sleep 1; [ ! -s $T/keys-pm.log ] && ok "say to a seat at a question menu fails, and the seat received no Enter" || bad "the seat at the menu received keys"; }
-TEAM_ROLE=em $S -c $T/tp.yaml say pq "after the prompt scrolled away" >/dev/null 2>&1 && sleep 1 && grep -q "after the prompt scrolled away" $T/keys-pq.log 2>/dev/null && ok "prompt text above the bottom of the screen does not block delivery" || bad "scrolled-away prompt blocked delivery"
+# refused <role> <expected reason> <what>: say fails with that reason, the log says NOT-DELIVERED,
+# and no Enter reached the seat during the call.
+refused() {
+  local out rc n
+  touch $T/keys-$1.log; n=$(wc -c < $T/keys-$1.log)
+  out=$(TEAM_ROLE=em $S -c $T/tp.yaml say "$1" "routine message to $1" 2>&1); rc=$?; sleep 1
+  if [ $rc -ne 0 ] && echo "$out" | grep -qF -- "$2" && tail -1 $T/state/messages.log | grep -q "	$1	NOT-DELIVERED	" &&
+    ! tail -c +$((n + 1)) $T/keys-$1.log | LC_ALL=C grep -q $'\r'; then ok "say refuses $3"; else bad "say refuses $3 (rc=$rc)"; echo "$out"; fi
+}
+# delivered <role> <what>: the message was submitted (the stand-in's transcript echoes a submitted
+# message after "❯ " with a plain space; its input box uses a no-break space).
+delivered() {
+  TEAM_ROLE=em $S -c $T/tp.yaml say "$1" "hello $1 ($2)" >/dev/null 2>&1; sleep 1
+  tmux capture-pane -p -t "=tp-$1:" | grep -qF "❯ [from em] hello $1 ($2)" && ok "say delivers $2" || { bad "say delivers $2"; tail -1 $T/state/messages.log; }
+}
+refused pp "screen not recognised as ready" "a seat at a permission prompt"
+[ ! -s $T/keys-pp.log ] && ok "the seat at the prompt received no keys at all" || bad "keys reached the seat at the prompt"
+tmux capture-pane -p -t '=tp-pp:' | grep -q "routine message" && bad "the refused message was left on pp's screen" || ok "a refused message leaves nothing on the seat's screen"
+refused pm "screen not recognised as ready" "a seat at a question menu"
+refused pd "screen not recognised as ready" "a seat at the folder-trust dialog"
+refused ph "screen not recognised as ready" "a seat at the held-message dialog"
+refused pu "screen not recognised as ready" "a seat at an unknown select list (no numbers, no key hint, no input box)"
+refused pb "screen not recognised as ready" "a seat with a list below its input box"
+refused pf "input box" "a seat whose input box holds text (an unsent draft)"
+refused ps "text left in input box" "a seat whose input box does not show the pasted text"
+delivered pg "a seat whose empty box shows a dim suggested prompt"
+refused px "input box" "a seat whose box holds typed text next to a dim suggestion"
+refused pk "text left in input box" "a seat whose box keeps dim text next to the pasted message"
+delivered pq "prompt text in the transcript above the box"
+delivered po "the seat's own output quoting prompt lines"
+TEAM_ROLE=em $S -c $T/tp.yaml say po "qa result: it asked 'Do you want to proceed?' with '❯ 1. Yes' and 'Esc to cancel · Tab to amend'" >/dev/null 2>&1; sleep 1
+delivered po "the message after one that quotes prompt text"
+tmux copy-mode -t '=tp-pq:'; refused pq "copy mode" "a seat whose pane is in copy mode"; tmux send-keys -t '=tp-pq:' -X cancel
+# When tmux cannot read the seat's screen, say cannot tell what is up: it refuses.
+mkdir -p $T/shim && printf '#!/bin/sh\n[ "$1" = capture-pane ] && exit 1\nexec %s "$@"\n' "$(command -v tmux)" > $T/shim/tmux && chmod +x $T/shim/tmux
+before=$(wc -c < $T/keys-pq.log)
+cf=$(PATH=$T/shim:$PATH TEAM_ROLE=em $S -c $T/tp.yaml say pq "capture fails" 2>&1); rc=$?; sleep 1
+[ $rc -ne 0 ] && echo "$cf" | grep -q "could not read" && [ "$(wc -c < $T/keys-pq.log)" = "$before" ] && tail -1 $T/state/messages.log | grep -q "	pq	NOT-DELIVERED	capture fails" && ok "a failed screen capture refuses delivery, logs NOT-DELIVERED, sends no keys" || { bad "failed capture (rc=$rc)"; echo "$cf"; tail -1 $T/state/messages.log; }
 $S -c $T/tp.yaml down --yes >/dev/null 2>&1
 echo "--- permission validation (check must refuse each file)"
 # A minimal valid team file; $1 is the sessions.claude body, $2 extra top-level lines, $3 extra keys for role em.

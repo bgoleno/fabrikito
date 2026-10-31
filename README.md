@@ -124,12 +124,24 @@ settings.
 ### `say`
 
 `say` is how the owner and scripts reach a seat, and the seats' fallback for a seat that `SendMessage`
-cannot reach. It types a message into the seat's tmux pane by bracketed paste. It refuses a seat that is
-not running claude (the text would run as a shell command), one waiting at a startup dialog (the Enter
-would pick "No, exit"), and one waiting at a permission prompt or a menu that it recognises (the Enter
-would pick an answer). A refused message is logged as NOT-DELIVERED. Messages are labelled `[from
-<role>]`, and the owner's are `[from owner]`. The label is set by the sender (from `TEAM_ROLE`, or
-`owner` when it is unset) and is not authenticated.
+cannot reach. It types a message into the seat's tmux pane by bracketed paste, then presses Enter. It
+types only when the bottom of the seat's screen is Claude Code's input box, empty or showing only one
+dim line (a hint or a suggested prompt), and presses Enter only when the box then holds just the
+message. Anything else fails closed, with a reason:
+
+- a seat that is not running claude (the text would run as a shell command);
+- any dialog, prompt or menu, known or not, the held-message approval dialog included ("screen not
+  recognised as ready"), where the Enter would pick an answer;
+- an input box that already holds text (someone typing, or an earlier message that was not sent);
+- a pane in copy mode (someone scrolling);
+- a screen tmux cannot read.
+
+Attach to the seat, deal with it, and send again. If the box does not show the message after the paste,
+no Enter is sent and the text stays in the box, where it goes out with the next Enter; `say` says so.
+The input box is recognised as Claude Code 2.1.316 draws it, so a CLI update that changes it makes `say`
+refuse every seat until `factory.sh` is updated. A refused message is logged as NOT-DELIVERED. Messages
+are labelled `[from <role>]`, and the owner's are `[from owner]`. The label is set by the sender (from
+`TEAM_ROLE`, or `owner` when it is unset) and is not authenticated.
 
 ### The message log
 
@@ -159,8 +171,8 @@ role's (team first; a role can add or tighten a rule, never loosen one), plus tw
 `permission_mode` (in `sessions.claude`, or per role) picks the mode; the example uses `auto`.
 `bypassPermissions` skips every prompt and is meant for an isolated machine only. Deny rules hold in
 every mode, bypass included, and ask rules still prompt there, so a seat that hits one waits until
-someone answers. `say` will not deliver to a seat at a permission prompt or menu, where its Enter would
-pick an answer: attach and answer it yourself. These rules add to the ones in `~/.claude/settings.json`
+someone answers. `say` will not deliver to a seat at a permission prompt or any other dialog (see
+[`say`](#say)): attach and answer it yourself. These rules add to the ones in `~/.claude/settings.json`
 and the repo's `.claude/` settings, which still apply. `check` shows each seat's mode and rules, and is
 where load-time errors (unknown modes, malformed rules, a permission flag in `args`) are reported.
 
@@ -202,4 +214,5 @@ human answers it once; `up` reports which seats those are.
 effort, message delivery, migrating a legacy worktree (clean and dirty), and refusing to run when the
 volume is not mounted. It also covers the generated settings files (merged rules, protected paths,
 base-branch rules, permission mode and launch flags), the load-time checks on modes, rules and `args`,
-and `say` refusing a seat at a permission prompt.
+and `say` delivering only to a seat whose input box is showing (dialogs captured from Claude Code
+2.1.316, an unknown dialog, text in the box, copy mode, an unreadable screen).
