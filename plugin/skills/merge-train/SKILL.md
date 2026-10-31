@@ -49,7 +49,8 @@ nothing outside its scratch clone. Use it to see what a real run would do.
    - Find the repository's whole gate (every check it defines: its contribution guide, `CLAUDE.md`
      or `AGENTS.md`). If a check needs a setting the repository names (for example a test volume)
      and it is not set, stop. Never drop a check from the gate.
-3. **For each PR in the order given, run steps 4 to 9,** then go on to the next. Stop the train at
+3. **For each PR in the order given, run steps 4 to 9,** one PR at a time: finish step 9 before
+   any command about the next PR, since its result decides whether there is a next. Stop the train at
    the first PR that fails any check, and report as below. A new commit on a PR, or a base that
    moved by anything other than this run's own checked merge, starts that PR's bar again: stop, and
    say so.
@@ -117,7 +118,9 @@ nothing outside its scratch clone. Use it to see what a real run would do.
 In your session, and to the owner as your role prompt says (a dry run only in your session):
 - One line per PR: number, `H` (7 characters), the clearances counted at `H`, the gate's result
   line, `T`, and one of `merged <merge commit>`, `would merge` or `stopped: <reason>`.
-- If the train stopped, the PRs it did not reach: they need another typed command.
+- If the train stopped, the PRs it did not reach: they need another typed command. Name them, but
+  do not write out a command line for the owner to copy: Claude Code can offer your text as its
+  suggested next prompt, which Tab and Enter would send as typed.
 - After a real run: what merged, at which head, the gated tree, the issues it closed (or did not),
   and whether the owner's checkout was fast-forwarded.
 
