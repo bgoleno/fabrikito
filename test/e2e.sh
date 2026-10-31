@@ -54,7 +54,9 @@ git init -q --bare $T/local/origin.git; git clone -q $T/local/origin.git $T/repo
 #   prompt  a dialog, drawn instead of the box     output  lines drawn above the box
 #   mode    swallow (input never shows), below (a list under the box), prefill (text left in the box),
 #           suggest (a dim suggested prompt in the empty box), sticky (that suggestion stays drawn after
-#           any text), mixed (typed text and the dim suggestion)
+#           any text), mixed (typed text and the dim suggestion), mention (the @-mention list drawn
+#           above the box while its last word starts with @, no row highlighted, as after a paste),
+#           mentionsel (text "sel @sr" with the list's first row highlighted: Enter completes it)
 # A submitted line that starts with ! is run by /bin/sh the way Claude Code's Bash tool runs a
 # command: in a child that leaves the pane's terminal (setsid), so the child has no tty of its own
 # and only the stand-in, its parent, holds the pane's tty.
@@ -82,6 +84,21 @@ static int has(const char *what) {
   return access(path, R_OK) == 0;
 }
 static const char *RULE = "────────────────────────────────────────────────────────────";
+/* Claude Code 2.1.316's @-mention list, captured on 2026-10-30: drawn above the box's top rule,
+   each row indented two spaces in colour 246; a row picked with the arrow keys gets a ❯ in colour
+   153, and only then does Enter complete the mention instead of submitting. */
+static int mention_open(void) {
+  size_t i = blen;
+  if (strcmp(mode, "mention") && strcmp(mode, "mentionsel")) return 0;
+  while (i > 0 && buf[i - 1] != ' ' && buf[i - 1] != '\n') i--;
+  return i < blen && buf[i] == '@';
+}
+static void mention_list(void) {
+  const char *rows[] = { "+ src/", "+ src/beta.txt", "+ src/alpha.txt", "\xe2\x97\x87 example:skill:\xe2\x80\xa6 \xe2\x80\x93 requirements.txt" };
+  for (int i = 0; i < 4; i++)
+    if (i == 0 && !strcmp(mode, "mentionsel")) printf("  \033[38;5;153m\xe2\x9d\xaf %s\033[39m\r\n", rows[i]);
+    else printf("  \033[38;5;246m  %s\033[39m\r\n", rows[i]);
+}
 /* mode tall*: the input box as Claude Code 2.1.316 draws long text. Rows wrap at word boundaries
    with a 2-space indent; the box shows at most max(3, (terminal rows - 10) / 2) rows and scrolls to
    keep the end in view, with the prompt on the first VISIBLE row and no scroll marker. tall-dim
@@ -115,6 +132,7 @@ static void draw(void) {
   fwrite(hist, 1, hlen, stdout);
   if (has("prompt")) { cat("prompt"); fflush(stdout); return; }
   cat("output");
+  if (mention_open()) mention_list();
   if (name[0]) printf("────────────────────────────────────────── %s ──\r\n\xe2\x9d\xaf\xc2\xa0", name);
   else printf("%s\r\n\xe2\x9d\xaf\xc2\xa0", RULE);
   if (!strncmp(mode, "tall", 4)) {
@@ -152,6 +170,7 @@ int main(int n, char **v) {
   if ((mf = fopen(path, "r"))) { if (fscanf(mf, "%63s", mode) != 1) mode[0] = 0; fclose(mf); }
   if (!strcmp(mode, "prefill")) blen = (size_t)snprintf(buf, sizeof buf, "leftover draft text");
   if (!strcmp(mode, "mixed")) blen = (size_t)snprintf(buf, sizeof buf, "typed text");
+  if (!strcmp(mode, "mentionsel")) blen = (size_t)snprintf(buf, sizeof buf, "sel @sr");
   size_t h = (size_t)snprintf(head, sizeof head, "FAKE-CLAUDE");
   for (int i = 1; i < n && h < sizeof head - 60; i++) h += (size_t)snprintf(head + h, sizeof head - h, " [%.50s]", v[i]);
   for (int i = 1; i + 1 < n; i++) if (!strcmp(v[i], "-n")) snprintf(name, sizeof name, "%s", v[i + 1]);
@@ -171,6 +190,10 @@ int main(int n, char **v) {
     if (!strcmp(mode, "swallow")) continue;
     if (b == '\r' || b == '\n') {
       if (paste) { if (blen < sizeof buf - 1) buf[blen++] = '\n'; }
+      else if (!strcmp(mode, "mentionsel") && mention_open()) {   /* Enter picks the highlighted row */
+        while (blen > 0 && buf[blen - 1] != '@') blen--;
+        blen += (size_t)snprintf(buf + blen, sizeof buf - blen, "src/");
+      }
       else {                                      /* submit: the transcript echoes it, the box empties */
         if (blen && buf[0] == '!' && fork() == 0) {
           int fd = open("/dev/null", O_RDWR);
@@ -521,7 +544,7 @@ echo "--- say delivers only to a seat showing its input box"
 # CLI that draws them differently shows up as a mismatch here. pu shows an invented select list
 # with no numbers and no key hint: any dialog say does not know must fail closed too.
 roles=""
-for r in pp pm pd ph pu pb pf ps pg px pk pq po ta tb tc td te; do roles="$roles  $r: { title: Seat $r, workdir: { type: project, path: $T/proj }, prompt_text: \"$r\" }
+for r in pp pm pd ph pu pb pf ps pg px pk pq po pn pz ta tb tc td te; do roles="$roles  $r: { title: Seat $r, workdir: { type: project, path: $T/proj }, prompt_text: \"$r\" }
 "; done
 cat > $T/tp.yaml <<Y
 team: tp
@@ -591,6 +614,7 @@ M
 echo tall > $T/fake-ta-mode.txt; echo tall > $T/fake-te-mode.txt; echo tall-dim > $T/fake-tb-mode.txt; echo tall-typed > $T/fake-tc-mode.txt; echo tall-short > $T/fake-td-mode.txt
 echo below > $T/fake-pb-mode.txt; echo prefill > $T/fake-pf-mode.txt; echo swallow > $T/fake-ps-mode.txt
 echo suggest > $T/fake-pg-mode.txt; echo mixed > $T/fake-px-mode.txt; echo sticky > $T/fake-pk-mode.txt
+echo mention > $T/fake-pn-mode.txt; echo mentionsel > $T/fake-pz-mode.txt
 { printf '%s\n' "$fake_prompt"; for i in $(seq 1 5); do echo "later output line $i"; done; } > $T/fake-pq-output.txt
 cat > $T/fake-po-output.txt <<'M'
 ⏺ The permission prompt asked "Do you want to proceed?" and the cursor sat on "❯ 1. Yes".
@@ -632,6 +656,17 @@ delivered pq "prompt text in the transcript above the box"
 delivered po "the seat's own output quoting prompt lines"
 TEAM_ROLE=em $S -c $T/tp.yaml say po "qa result: it asked 'Do you want to proceed?' with '❯ 1. Yes' and 'Esc to cancel · Tab to amend'" >/dev/null 2>&1; sleep 1
 delivered po "the message after one that quotes prompt text"
+# The @-mention list (#77). Claude Code 2.1.316 draws it above the box, and after a paste no row is
+# highlighted, so Enter submits the message as pasted; it completes the mention only when a row was
+# picked with the arrow keys, which leaves text in the box, and say refuses that before pasting.
+printf '%s' 'probe @src' | tmux load-buffer -b mn -; tmux paste-buffer -p -d -b mn -t '=tp-pn:'; sleep 1
+tmux capture-pane -p -t '=tp-pn:' | grep -qF '    + src/beta.txt' && ok "stand-in: a pasted message ending in an @ word opens the mention list above the box" || bad "stand-in: no mention list after the paste"
+tmux send-keys -t '=tp-pn:' C-u; sleep 1
+TEAM_ROLE=em $S -c $T/tp.yaml say pn "see @src" >/dev/null 2>&1; sleep 1
+mn=$(tmux capture-pane -p -t '=tp-pn:')
+echo "$mn" | grep -qF "❯ [from em] see @src" && ! echo "$mn" | grep -qF "see @src/" && tail -1 $T/state/messages.log | grep -q "	pn	delivered	see @src$" &&
+  ok "say delivers a message ending in an @ word whole (the mention list above the box is not read as footer)" || { bad "say to a seat with the mention list"; echo "$mn" | tail -8; tail -1 $T/state/messages.log; }
+refused pz "input box" "a seat whose box holds text with a highlighted @-mention row (Enter would complete it)"
 tmux copy-mode -t '=tp-pq:'; refused pq "copy mode" "a seat whose pane is in copy mode"; tmux send-keys -t '=tp-pq:' -X cancel
 # When tmux cannot read the seat's screen, say cannot tell what is up: it refuses.
 mkdir -p $T/shim && printf '#!/bin/sh\n[ "$1" = capture-pane ] && exit 1\nexec %s "$@"\n' "$(command -v tmux)" > $T/shim/tmux && chmod +x $T/shim/tmux
