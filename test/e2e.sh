@@ -1000,7 +1000,8 @@ else [ "$conc" = "whole 1" ] && grep -qhF "another say" $T/conc1.out $T/conc2.ou
 # up by a stand-in tmux; bash runs the trap once that command returns.
 mkdir -p $T/pshim && printf '#!/bin/sh\n[ "$1" = paste-buffer ] && sleep 3\nexec %s "$@"\n' "$(command -v tmux)" > $T/pshim/tmux && chmod +x $T/pshim/tmux
 : > $T/keys-sa.log; PATH=$T/pshim:$PATH TEAM_ROLE=em $S -c $T/tp.yaml say sa "stopped midway" >$T/term.out 2>&1 & tp=$!
-sleep 2; kill -TERM $tp; wait $tp; trc=$?; sleep 1
+for i in $(seq 1 100); do case "$(geo sa)" in 220x50*) break ;; esac; sleep 0.1; done; sleep 1   # grown, and into the held-up paste
+kill -TERM $tp; wait $tp; trc=$?; sleep 1
 [ $trc -ne 0 ] && grep -qF "stopped midway" $T/keys-sa.log && [ "$(geo sa)" = "$ga" ] && [ "$(tail -c 1 $T/keys-sa.log | od -An -c | tr -d ' \n')" != '\r' ] && ok "a say stopped with TERM mid-delivery puts sa's size and window-size back, and sends no Enter" || { bad "say stopped mid-delivery (rc=$trc, $(geo sa), was $ga)"; cat $T/term.out; }
 tmux send-keys -t '=tp-sa:' C-u; sleep 0.5
 $S -c $T/tp.yaml down --yes >/dev/null 2>&1
