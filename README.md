@@ -55,7 +55,8 @@ iTerm.
   another disk.
 - `sessions`: tmux name prefix, an optional claude `wrapper`, `args`, and an optional default `model`,
   `effort` and `permission_mode`. Unset means the flag is omitted and the seat inherits
-  `~/.claude/settings.json`.
+  `~/.claude/settings.json`. `sessions.claude.plugin` (default `true`) loads the factory plugin into
+  every seat: see [The factory plugin](#the-factory-plugin).
 - `permissions` (`deny`, `ask`, `allow`), at the top level and per role: see [Safety](#safety).
 - `prompts.common` and a per-role `prompt` (file) or `prompt_text` (inline). Placeholders such as
   `@@ROSTER@@`, `@@GITHUB_REPO@@`, `@@PROJECT_URL@@` and `@@WORKTREE_ROOT@@` are filled in per seat.
@@ -64,6 +65,27 @@ iTerm.
 
 Unknown keys, missing prompt files, duplicate session names and unknown placeholders are errors at load
 time, before anything starts.
+
+## The factory plugin
+
+`plugin/` is a Claude Code [plugin](https://code.claude.com/docs/en/plugins) (`.claude-plugin/plugin.json`
+and `skills/`) that `up` loads into every seat with `--plugin-dir <this checkout>/plugin`. Seats work in
+the target project's folders, where this repository's own `.claude/` is never read, so this is how the
+factory's skills reach them. Nothing is installed into your settings: a session the factory did not start
+does not have the plugin. Its skills are namespaced by the plugin name and show as `/factory:<skill>`. For
+now it holds one placeholder, `/factory:ping`, which only proves the plugin loaded.
+
+- It is on by default. A team file without `sessions.claude.plugin` gets the plugin at its next `up`, and
+  with it every skill (and, later, every hook or agent) added to `plugin/` after that. Set
+  `sessions.claude.plugin: false` to leave the flag out. `check` shows the plugin's path, or `off`.
+- A `--plugin-dir` of your own in `sessions.claude.args` is allowed: the flag repeats, so both load. Your
+  installed plugins load as usual alongside it.
+- Seats get an `Edit` deny on `plugin/`, like `lib/` and `roles/` (see [Safety](#safety)), since it is
+  code every seat runs at its next start.
+- A plugin hook runs in every seat, and a skill steers every seat, so every pull request that adds or
+  changes a skill, agent or hook in `plugin/` gets a security review as well as the usual one.
+- Managed settings can turn `--plugin-dir` off (Claude Code's docs say so; not tried here), and then the
+  seats have no factory skills.
 
 ## Issues first
 
@@ -157,8 +179,8 @@ role's (team first; a role can add or tighten a rule, never loosen one), plus tw
 
 - an `Edit` deny on the files that would change a seat's next start or its live rules: the generated
   settings, launchers and prompts, the message log and the gate's state, the team file and its
-  prompts, the launcher (`factory.sh`, `lib/`, `roles/`) and the claude `wrapper` (its whole `.app`
-  bundle, if it is in one), the main checkout's `.mcp.json`, `.claude/settings.json`,
+  prompts, the launcher (`factory.sh`, `lib/`, `roles/`, `plugin/`) and the claude `wrapper` (its whole
+  `.app` bundle, if it is in one), the main checkout's `.mcp.json`, `.claude/settings.json`,
   `.claude/settings.local.json`, `.claude/CLAUDE.md`, and `.claude/hooks/`, `rules/`, `skills/`,
   `agents/` and `commands/` (not the root `CLAUDE.md`, which is project work), the
   seat's own `.claude/settings.json` and `settings.local.json`, and Claude Code's user settings, MCP
@@ -264,7 +286,9 @@ Roles without the switch never run it. The example gives it to the engineers and
 `claude` on a private tmux server. It covers worktree placement on the volume, per-role model and
 effort, message delivery, migrating a legacy worktree (clean and dirty), and refusing to run when the
 volume is not mounted. It also covers the generated settings files (merged rules, protected paths,
-base-branch rules, permission mode and launch flags), the load-time checks on modes, rules and `args`,
+base-branch rules, permission mode and launch flags), the factory plugin (its manifest, `--plugin-dir`
+with the plugin's real path, `sessions.claude.plugin: false`, a bad value, a missing manifest, a team's
+own `--plugin-dir` in `args`), the load-time checks on modes, rules and `args`,
 `say` delivering only to a seat whose input box is showing (dialogs captured from Claude Code
 2.1.316, an unknown dialog, text in the box, copy mode, an unreadable screen), and the gate: the
 generated Stop hook, its load-time checks, and `lib/stop_gate.sh` itself (clean tree, failure, the

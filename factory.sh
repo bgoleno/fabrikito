@@ -150,6 +150,9 @@ cmd_check() {
   echo "project   : $PROJECT_NAME $PROJECT_URL"
   echo "worktrees : $WT_ROOT   [volume $VOLUME: $on]"
   echo "wrapper   : ${WRAPPER:-none (claude runs directly)}"
+  local plugin
+  plugin=$(cfg get sessions.plugin)
+  if [ -n "$plugin" ]; then echo "plugin    : $plugin (skills as /factory:<skill>)"; else echo "plugin    : off (sessions.claude.plugin: false)"; fi
   echo "gate      : $(cfg get repo.gate_summary)"
   echo "state     : $STATE"
   printf '%-5s %-36s %-18s %-12s %-9s %-24s %-7s %s\n' ROLE SEAT SESSION MODEL EFFORT MODE GATE WORKDIR
