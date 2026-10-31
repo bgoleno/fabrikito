@@ -175,6 +175,18 @@ are labelled `[from <role>]`, and the owner's are `[from owner]`. The label is s
 logs `SendMessage` too), it records `say` traffic only: read `SendMessage` traffic in each session's
 transcript (`ctrl+o` in an attached seat).
 
+Each `say` (`say all` included) appends exactly one line of five tab-separated fields: the local time
+(`2026-10-30T14:05:09`), the sender (`TEAM_ROLE`, or `owner`), the recipient (a role id or `all`),
+`delivered` or `NOT-DELIVERED`, and the message as typed, without its `[from <role>]` label. The
+sender and the message are escaped so the record stays on one line and holds no terminal control
+codes: a backslash is written `\\`, a newline `\n`, a carriage return `\r`, a tab `\t`. Every other C0
+control (below U+0020), DEL, C1 control (U+0080 to U+009F) and bidi embedding, override or isolate
+(U+202A to U+202E, U+2066 to U+2069) is written as its UTF-8 bytes, each as `\xHH` (two upper-case hex
+digits): U+009B is `\xC2\x9B`. Other text, such as `é` or `✓`, is written as it is. A message that is
+not valid UTF-8 has every byte from 0x80 up written as `\xHH`. If the escaping itself fails, the field
+reads `<log_field failed>`. The escaping is reversible: `printf '%b' "<field>"` in bash gives back
+the original text. The hook that will log `SendMessage` traffic (#39) is to write this same format.
+
 ## Safety
 
 Each seat starts with a generated settings file, `.state/<team>/settings/<role>.json`, passed with
