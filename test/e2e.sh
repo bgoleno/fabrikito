@@ -10,7 +10,13 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 S=$SRC/factory.sh
 T=$(mktemp -d "${TMPDIR:-/tmp}/team-e2e.XXXX"); T=$(cd "$T" && pwd); mkdir -p $T/bin $T/tmux $T/local
 ROOT="Projects/_teamtest-$$"; VOL=${TEST_VOLUME:-}
-unset TMUX; export TMUX_TMPDIR=$T/tmux TEAM_STATE_DIR=$T/state
+# Start from a clean environment. Run from a seat, this shell inherits what the seat's launcher
+# and claude set there (DISABLE_AUTOUPDATER, TEAM_*, CLAUDE*, TMUX*), and the test's tmux server
+# and everything it starts would inherit it in turn: the leak check on DISABLE_AUTOUPDATER below
+# would fail only when run from a seat, and a stand-in seat could reach the real seat's tmux or
+# messaging socket (#75). This is the one list of what is cleared; add any new launcher variable here.
+for v in $(compgen -e); do case $v in DISABLE_AUTOUPDATER|TEAM_*|CLAUDE*|TMUX*) unset "$v" ;; esac; done
+export TMUX_TMPDIR=$T/tmux TEAM_STATE_DIR=$T/state
 # Stopped early (a gate timeout kills this test's process group): stop the private tmux server,
 # which has left that group, and remove what the test made, as the cleanup at the end does.
 on_signal() {
