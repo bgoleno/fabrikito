@@ -847,6 +847,18 @@ out=$($LE down $T/le-plain 2>&1); rc=$?
 out=$($LE down "$le2" 2>&1); rc=$?
 [ $rc -ne 0 ] && [ -L "$le2/tmux" ] && ok "live-env down refuses a folder whose tmux/ resolves to /tmp, and leaves it" || { bad "live-env down with tmux -> /tmp (rc=$rc)"; echo "$out"; }
 rm "$le2/tmux"; mkdir "$le2/tmux"; $LE down "$le2" >/dev/null 2>&1
+# down must not follow a link inside the folder: tmux -S would reach whatever server it points at, and
+# a link to /tmp/tmux-<uid> would stop the default one. The links here point at $le's private server only.
+le3=$(env -u TMUX $LE new 2>/dev/null); [ -d "$le3/tmux" ] || { le3=$T/le3-none; mkdir -p $le3/tmux; }   # never act on an empty path
+ledir="$(cd "$le/tmux" && pwd -P)/tmux-$(id -u)"
+ln -s "$ledir" "$le3/tmux/tmux-$(id -u)"
+out=$($LE down "$le3" 2>&1); rc=$?
+[ $rc -ne 0 ] && [ -d "$le3" ] && tmux -S "$ledir/default" has-session -t '=le-probe' 2>/dev/null && ok "live-env down refuses a folder whose tmux-<uid> is a link, and the server it points at keeps running" || { bad "live-env down with a linked tmux-<uid> (rc=$rc)"; echo "$out"; }
+rm "$le3/tmux/tmux-$(id -u)"; mkdir -m 700 "$le3/tmux/tmux-$(id -u)"; ln -s "$ledir/default" "$le3/tmux/tmux-$(id -u)/default"
+leref "$le3" "is a link" && ok "live-env run refuses a folder whose socket is a link (the command does not run)" || { bad "live-env run with a linked socket (rc=$rc)"; echo "$out"; }
+out=$($LE down "$le3" 2>&1); rc=$?
+[ $rc -ne 0 ] && [ -d "$le3" ] && tmux -S "$ledir/default" has-session -t '=le-probe' 2>/dev/null && ok "live-env down refuses a folder whose socket is a link, and the server it points at keeps running" || { bad "live-env down with a linked socket (rc=$rc)"; echo "$out"; }
+rm -f "$le3/tmux/tmux-$(id -u)/default"; $LE down "$le3" >/dev/null 2>&1
 srvsock="$(cd "$le/tmux" && pwd -P)/tmux-$(id -u)/default"
 out=$($LE down "$le" 2>&1); rc=$?
 [ $rc = 0 ] && [ ! -e "$le" ] && [ ! -e "$le2" ] && ! tmux -S "$srvsock" has-session 2>/dev/null && ok "live-env down stops the private server and removes the folder" || { bad "live-env down (rc=$rc)"; echo "$out"; ls -la "$le" 2>&1 | head -3; }

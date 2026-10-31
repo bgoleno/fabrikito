@@ -42,7 +42,23 @@ private_tmux() {
   [ -f "$d/$MARK" ] || die "$d was not made by $0 new"
   t=$(cd "$d/tmux" 2>/dev/null && pwd -P) || die "$d/tmux does not exist"
   [ "$t" != "$tmp" ] || die "$d/tmux resolves to $tmp, where tmux keeps the default tmux server"
+  own_socket_dir "$t" >/dev/null
   echo "$t"
+}
+
+# Print the socket folder tmux uses under $1 (tmux-<uid>), or stop if it could lead elsewhere. tmux
+# connects through links, so a linked folder or socket file could reach another server, the default
+# one included. The folder may not exist yet (no server started).
+own_socket_dir() {
+  local u=$1/tmux-$(id -u)
+  if [ -L "$u" ]; then die "$u is a link: refusing, as tmux would follow it to another server"; fi
+  if [ -e "$u" ]; then
+    [ -d "$u" ] || die "$u is not a folder"
+    [ -O "$u" ] || die "$u is not owned by you"
+    [ "$(cd "$u" && pwd -P)" = "$1/tmux-$(id -u)" ] || die "$u resolves outside $1"
+    [ ! -L "$u/default" ] || die "$u/default is a link: refusing, as tmux would follow it to another server"
+  fi
+  echo "$u"
 }
 
 case ${1:-} in
@@ -69,8 +85,10 @@ case ${1:-} in
     [ $# -eq 2 ] || usage
     d=$2
     t=$(private_tmux "$d")
-    # -S names the socket outright, so this can only reach this environment's server.
-    tmux -S "$t/tmux-$(id -u)/default" kill-server 2>/dev/null || true
+    # Checked again right before the kill (own_socket_dir: a real folder of yours, no links), then -S
+    # names that socket outright, so only this environment's own server can be reached.
+    u=$(own_socket_dir "$t")
+    if [ -S "$u/default" ]; then tmux -S "$u/default" kill-server 2>/dev/null || true; fi
     rm -rf "$d"
     ;;
   *) usage ;;
