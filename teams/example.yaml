@@ -38,8 +38,18 @@ sessions:
     # called as: <wrapper> <path to claude> <args...>. Leave unset to run claude directly. If it
     # is set but the file is missing, claude runs directly.
     # wrapper: ~/Applications/SomeWrapper.app/Contents/MacOS/SomeWrapper
-    args:
-      - --dangerously-skip-permissions   # no permission prompts: the prompts' hard rules are the guardrail
+    # Extra claude flags, one per list item. Flags factory.sh sets itself (--settings,
+    # --setting-sources, --permission-prompt-tool) are refused here, and so are permission flags
+    # when permission_mode is set.
+    # args: []
+    # Permission mode for every seat (a role can override it): default (alias manual) |
+    # acceptEdits | plan | auto | dontAsk | bypassPermissions. auto runs without routine prompts
+    # and has a classifier check risky actions. bypassPermissions skips every prompt and is meant
+    # for an isolated machine only; the deny and ask rules below still hold in it, and an ask rule
+    # leaves the seat waiting until someone answers. Unset: the flag is omitted and the seat uses
+    # permissions.defaultMode from ~/.claude/settings.json.
+    permission_mode: auto
+    # permission_mode: bypassPermissions
     # Model and effort for every seat (a role can override either). Left unset, the flag is
     # omitted and each seat inherits `model` and `effortLevel` from ~/.claude/settings.json.
     # model takes an alias or a full id; effort is low | medium | high | xhigh | max.
@@ -70,10 +80,35 @@ kickoff: >-
   directory, then wait for a message from the EM or @@OWNER@@. Do not start any work until you
   receive one.
 
+# Permission rules for every seat, merged with each role's own `permissions:` (team first). Each
+# seat gets them in a generated settings file (<state>/settings/<role>.json, passed with
+# --settings), on top of the rules in ~/.claude/settings.json and the repo's .claude/ settings.
+# Claude Code checks deny, then ask, then allow, and the first match wins, so a role can add or
+# tighten a rule but never loosen a team one. Syntax: https://code.claude.com/docs/en/permissions
+# - Bash rules match the command text: another spelling (`git -C . push`, a script, `sh -c`) is
+#   not caught. The sandbox is the real boundary; these rules guard against accidents.
+# - Paths: //absolute, ~/home, ./relative or a bare name. A single leading / would anchor at the
+#   state folder that holds the generated file, so it is refused.
+# factory.sh adds two sets itself: an Edit deny on the files that change a seat's next start (team
+# file, prompts, launcher, generated state, Claude Code's own settings), and an ask on any push to
+# the base branch (from repo.base). `./factory.sh check` lists what each seat gets.
+permissions:
+  deny:
+    # Every .env on the machine, the main checkout's included. This also blocks .env.example: a
+    # ! pattern cannot carve an exception out of a // rule.
+    - Read(//**/.env)
+    - Read(//**/.env.*)
+  ask:
+    # Merging a PR is the owner's (or, when told, the EM's) step. Every role but em denies it
+    # outright below; this ask covers a role added later without rules of its own.
+    - Bash(gh pr merge *)
+    - Bash(gh api *pulls/*/merge*)
+    - Bash(gh api graphql*mergePullRequest*)
+
 # Seats start in this order. Each needs: title, workdir, and one of `prompt` (a file) or
 # `prompt_text` (inline). `summary` is the line shown in the roster every seat sees.
-# Optional per role: `model:` and `effort:` (override sessions.claude), `session:` (tmux name),
-# `kickoff:` (first message).
+# Optional per role: `model:`, `effort:` and `permission_mode:` (override sessions.claude),
+# `permissions:` (added to the team's), `session:` (tmux name), `kickoff:` (first message).
 #   workdir.type: project   an existing folder: path: ...
 #   workdir.type: worktree  a git worktree under storage (optional: name: folder-name)
 roles:
@@ -82,6 +117,10 @@ roles:
     summary: owns the board, assigns work, the owner's single contact
     workdir: { type: project, path: /path/to/your/checkout }
     prompt: ../roles/em.md
+    permissions:
+      # Ask before a force-push. Engineers keep force-pushing their own branches unattended (they
+      # rebase); "never force-push a branch you did not create" cannot be written as a pattern.
+      ask: ["Bash(git push --force*)", "Bash(git push -f*)", "Bash(git push * --force*)", "Bash(git push * -f*)", "Bash(git push * +*)"]
     kickoff: >-
       Team session started: you are the @@TITLE@@ (session @@SESSION@@). Your full role
       instructions are in your system prompt. Reply with one line confirming your role and
@@ -92,23 +131,28 @@ roles:
     summary: design direction, reviews every PR
     workdir: { type: worktree }
     prompt: ../roles/tl.md
+    permissions: { deny: ["Bash(gh pr merge *)", "Bash(gh api *pulls/*/merge*)", "Bash(gh api graphql*mergePullRequest*)"] }
   fs1:
     title: Senior Full-Stack Software Engineer
     summary: implements assigned issues
     workdir: { type: worktree }
     prompt: ../roles/fs.md
+    permissions: { deny: ["Bash(gh pr merge *)", "Bash(gh api *pulls/*/merge*)", "Bash(gh api graphql*mergePullRequest*)"] }
   fs2:
     title: Senior Full-Stack Software Engineer
     summary: implements assigned issues
     workdir: { type: worktree }
     prompt: ../roles/fs.md
+    permissions: { deny: ["Bash(gh pr merge *)", "Bash(gh api *pulls/*/merge*)", "Bash(gh api graphql*mergePullRequest*)"] }
   qa:
     title: QA Engineer
     summary: verifies behaviour, owns regression coverage
     workdir: { type: worktree }
     prompt: ../roles/qa.md
+    permissions: { deny: ["Bash(gh pr merge *)", "Bash(gh api *pulls/*/merge*)", "Bash(gh api graphql*mergePullRequest*)"] }
   sec:
     title: Security Engineer
     summary: security review and triage
     workdir: { type: worktree }
     prompt: ../roles/sec.md
+    permissions: { deny: ["Bash(gh pr merge *)", "Bash(gh api *pulls/*/merge*)", "Bash(gh api graphql*mergePullRequest*)"] }

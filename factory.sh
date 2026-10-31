@@ -24,15 +24,17 @@
 #
 # The team file is -c, else $TEAM_CONFIG, else teams/team.yaml next to this script.
 #
-# With `--dangerously-skip-permissions` in the file's claude args there are no permission
-# prompts, so the hard rules in the shared prompt are the only guardrail. A seat's role is
-# delivered as an appended system prompt (it survives compaction) plus a short first message.
+# Each seat starts with a generated settings file (--settings): the team's and its role's
+# permission rules, plus Edit denies on the files that would change its next start. Deny and ask
+# rules hold in every permission mode, bypassPermissions included; they match command text, so
+# they guard against accidents, not against a determined process. A seat's role is delivered as an
+# appended system prompt (it survives compaction) plus a short first message.
 #
 # A tmux session is a shell that runs claude, so quitting claude leaves the shell and the
 # session alive; `up` after that skips the seat. Run `down` first to start it fresh.
 #
-# Environment: TEAM_CONFIG (team file), TEAM_STATE_DIR (generated prompts, launchers and the
-# message log; default .state/<team>/ next to this script).
+# Environment: TEAM_CONFIG (team file), TEAM_STATE_DIR (generated prompts, launchers, settings
+# and the message log; default .state/<team>/ next to this script).
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -77,7 +79,7 @@ VIEW_ITERM=$(cfg get display.iterm)
 VIEW_PRIMARY=$(cfg get display.primary)
 VIEW_WINDOW=$(cfg get display.window)
 ROLES=$(cfg ids | tr '\n' ' ')
-STATE=${TEAM_STATE_DIR:-$HERE/.state/$TEAM}
+STATE=$(cfg get state.dir)
 LOG="$STATE/messages.log"
 
 title() { cfg role "$1" title; }
@@ -149,16 +151,19 @@ cmd_check() {
   echo "worktrees : $WT_ROOT   [volume $VOLUME: $on]"
   echo "wrapper   : ${WRAPPER:-none (claude runs directly)}"
   echo "state     : $STATE"
-  printf '%-5s %-36s %-18s %-12s %-9s %s\n' ROLE SEAT SESSION MODEL EFFORT WORKDIR
+  printf '%-5s %-36s %-18s %-12s %-9s %-24s %s\n' ROLE SEAT SESSION MODEL EFFORT MODE WORKDIR
   for r in $ROLES; do
-    printf '%-5s %-36s %-18s %-12s %-9s %s\n' "$r" "$(title "$r")" "$(session "$r")" "$(cfg role "$r" model)" "$(cfg role "$r" effort)" "$(workdir "$r")"
+    printf '%-5s %-36s %-18s %-12s %-9s %-24s %s\n' "$r" "$(title "$r")" "$(session "$r")" "$(cfg role "$r" model)" \
+      "$(cfg role "$r" effort)" "$(cfg role "$r" permission_mode)" "$(workdir "$r")"
   done
-  echo "(inherit = flag omitted; the seat uses the model and effortLevel in ~/.claude/settings.json)"
+  echo "(inherit = flag omitted; the seat uses model, effortLevel and permissions.defaultMode from ~/.claude/settings.json)"
+  echo
+  cfg permissions_report
   echo "valid."
 }
 
 cmd_up() {
-  local want_view=1 started=0 args="" roles r sess dir launch a args_q
+  local want_view=1 started=0 args="" roles r sess dir launch a args_q settings
   for a in "$@"; do
     if [ "$a" = --no-view ]; then want_view=0; else args="$args $a"; fi
   done
@@ -166,7 +171,7 @@ cmd_up() {
   command -v tmux >/dev/null || die "tmux not found"
   command -v claude >/dev/null || die "claude not found"
   for r in $roles; do check_role "$r"; done
-  mkdir -p "$STATE/prompts" "$STATE/launch"
+  for a in $(cfg get state.generated_dirs); do mkdir -p "$STATE/$a"; done
   # Roles start in the order given (file order by default).
   for r in $roles; do
     sess=$(session "$r")
@@ -180,6 +185,12 @@ cmd_up() {
     args_q=""
     while IFS= read -r a; do args_q="$args_q $(printf '%q' "$a")"; done < <(cfg claude_args "$r")
 
+    # Rewritten on every start and left read-only. The old file is removed by its exact path.
+    settings="$STATE/settings/$r.json"
+    rm -f "$settings"
+    cfg settings "$r" >"$settings" || die "could not write $settings"
+    chmod 0444 "$settings"
+
     TEAM_SCRIPT=$SELF TEAM_LOG=$LOG cfg render "$r" >"$STATE/prompts/$r.md"
     TEAM_SCRIPT=$SELF TEAM_LOG=$LOG cfg kickoff "$r" >"$STATE/prompts/$r.kickoff"
     launch="$STATE/launch/$r.sh"
@@ -192,7 +203,7 @@ cmd_up() {
       printf 'wrapper=%q\n' "$WRAPPER"
       echo 'claude_bin="$(command -v claude)"'
       echo 'if [ -n "$wrapper" ] && [ -x "$wrapper" ]; then run=("$wrapper" "$claude_bin"); else run=("$claude_bin"); fi'
-      printf '"${run[@]}"%s -n %q \\\n' "$args_q" "$sess"
+      printf '"${run[@]}"%s --settings %q -n %q \\\n' "$args_q" "$settings" "$sess"
       printf '  --append-system-prompt "$(cat %q)" \\\n' "$STATE/prompts/$r.md"
       printf '  "$(cat %q)"\n' "$STATE/prompts/$r.kickoff"
     } >"$launch"
@@ -400,6 +411,15 @@ pane_blocked() {
     grep -qE 'Is this a project you created|Yes, I trust this folder|No, exit|Bypass Permissions mode|Enter to confirm'
 }
 
+# True when the bottom of the seat's screen shows a permission prompt or a menu, where the Enter
+# that `say` sends would pick the highlighted answer. Only the last 15 non-blank lines are read, so
+# a transcript that quotes such text further up does not block delivery for good. A false match
+# fails safe: the message is not delivered.
+pane_at_prompt() {
+  tmux capture-pane -p -t "=$(session "$1"):" | awk 'NF' | tail -n 15 |
+    grep -qE 'Do you want to (proceed|make this edit|create|allow)|❯ *[0-9]+\. |Enter to select'
+}
+
 # Deliver one message by bracketed paste (safe for multi-line text), then Enter. If the seat is
 # mid-turn the text queues in its input box and is submitted by the Enter all the same.
 send_one() {
@@ -420,10 +440,21 @@ send_one() {
     echo "not delivered: $to is waiting at a startup prompt; attach and answer it first" >&2
     return 1
   fi
+  if pane_at_prompt "$to"; then
+    echo "not delivered: $to is waiting at a permission prompt or menu; answer it yourself ($SELF attach $to)" >&2
+    return 1
+  fi
   buf="team-$$-$to"
   printf '%s' "$text" | tmux load-buffer -b "$buf" -
   tmux paste-buffer -p -d -b "$buf" -t "=$sess:"
   sleep 0.5
+  # A prompt can appear while the text is pasted: check again, and leave the Enter unsent if one
+  # has. Still open: a prompt that appears after this check, and digits in a message picking an
+  # option of a menu.
+  if pane_at_prompt "$to"; then
+    echo "not delivered: $to showed a permission prompt or menu while the message was pasted; it is in the input box, not sent ($SELF attach $to)" >&2
+    return 1
+  fi
   tmux send-keys -t "=$sess:" Enter
 }
 

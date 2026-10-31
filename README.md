@@ -53,8 +53,10 @@ iTerm.
 - `storage`: `volume` and `root`. Every worktree is created under `<volume>/<root>/`. The volume must be
   mounted, checked from the mount table when a worktree is created; the launcher never falls back to
   another disk.
-- `sessions`: tmux name prefix, an optional claude `wrapper`, `args`, and an optional default `model` and
-  `effort`. Unset means the flag is omitted and the seat inherits `~/.claude/settings.json`.
+- `sessions`: tmux name prefix, an optional claude `wrapper`, `args`, and an optional default `model`,
+  `effort` and `permission_mode`. Unset means the flag is omitted and the seat inherits
+  `~/.claude/settings.json`.
+- `permissions` (`deny`, `ask`, `allow`), at the top level and per role: see [Safety](#safety).
 - `prompts.common` and a per-role `prompt` (file) or `prompt_text` (inline). Placeholders such as
   `@@ROSTER@@`, `@@GITHUB_REPO@@`, `@@PROJECT_URL@@` and `@@WORKTREE_ROOT@@` are filled in per seat.
 - `roles`: ordered; each has `title`, `workdir` (`project` folder or `worktree`), a prompt, and
@@ -80,14 +82,60 @@ dialog (the Enter would pick "No, exit"). Every message is logged with its deliv
 
 ## Safety
 
-The example team runs `claude --dangerously-skip-permissions`: there are no permission prompts, so the
-hard rules in the shared prompt (`roles/common.md`) are the only guardrail. Read them before changing
-them. A seat started in a folder Claude Code has not seen stops at a trust dialog until a human answers
-it once; `up` reports which seats those are.
+Each seat starts with a generated settings file, `.state/<team>/settings/<role>.json`, passed with
+`--settings` and rewritten read-only on every `up`. It holds the team's `permissions` merged with the
+role's (team first; a role can add or tighten a rule, never loosen one), plus two sets factory.sh adds:
+
+- an `Edit` deny on the files that would change a seat's next start or its live rules: the generated
+  settings, launchers and prompts, the message log, the team file and its prompts, the launcher
+  (`factory.sh`, `lib/`, `roles/`), the main checkout's `.claude/`, the seat's own
+  `.claude/settings.json` and `settings.local.json`, and Claude Code's user settings, MCP config,
+  instructions and extensions under `~/.claude`;
+- an `ask` on any push to the base branch (from `repo.base`), forced or not, since changes land through
+  PRs. It is an early warning for a project whose base branch has no protection. The real control is a
+  ruleset on the base branch that blocks force-push and deletion and requires a PR; where one exists,
+  this ask is redundant.
+
+`permission_mode` (in `sessions.claude`, or per role) picks the mode; the example uses `auto`.
+`bypassPermissions` skips every prompt and is meant for an isolated machine only. Deny rules hold in
+every mode, bypass included, and ask rules still prompt there, so a seat that hits one waits until
+someone answers. `say` will not deliver to a seat at a permission prompt or menu, where its Enter would
+pick an answer: attach and answer it yourself. These rules add to the ones in `~/.claude/settings.json`
+and the repo's `.claude/` settings, which still apply. `check` shows each seat's mode and rules, and is
+where load-time errors (unknown modes, malformed rules, a permission flag in `args`) are reported.
+
+What the rules cannot do:
+
+- A Bash rule matches the command text. The same program under another path (`/usr/bin/gh`), inside
+  `sh -c`, in a script, or reached another way is not matched: for example `git -C <dir> push`, a bare
+  `git push` while on the base branch, or `gh api` with a PATCH or DELETE on `git/refs/heads/<base>`.
+- A `Read` deny covers Claude's file tools and the file commands it recognises in Bash (`cat`, `head`,
+  `tail`, `sed`, `tee`, redirects). It does not cover `grep -r` over a folder, or a Python or Node
+  script that opens the file itself.
+- The protected-path `Edit` denies stop the file tools and redirects, not a script that writes the file.
+- "Never force-push a branch you did not create" cannot be written as a pattern. Engineers keep
+  force-pushing their own branches; only the EM is asked.
+- Any process running as this user can type into a seat's pane, so an ask rule guards against
+  accidents. It is not a gate that only the owner can pass.
+- Seats act with the owner's GitHub rights, so they can change a ruleset or branch protection through
+  the API. No rule here stops that (an ask that matched it would also stall seats reading the
+  settings); #29 tracks the fix.
+- Settings above these files apply as well: managed settings, and, depending on the account, installed
+  mods, which can approve calls these rules would stop.
+- Paths in Read and Edit rules: `//path` is absolute, `~/path` is under the home folder, `./path` or a
+  bare name is relative to the seat's folder. A single leading `/` anchors at the folder that holds the
+  generated file, so it is refused.
+
+The [sandbox](https://code.claude.com/docs/en/sandboxing) is the boundary that holds whatever the
+command text. The hard rules in the shared prompt (`roles/common.md`) still apply; read them before
+changing them. A seat started in a folder Claude Code has not seen stops at a trust dialog until a
+human answers it once; `up` reports which seats those are.
 
 ## Tests
 
 `TEST_VOLUME=/Volumes/YourDrive test/e2e.sh` runs the launcher against a throwaway repo with a stand-in
 `claude` on a private tmux server. It covers worktree placement on the volume, per-role model and
 effort, message delivery, migrating a legacy worktree (clean and dirty), and refusing to run when the
-volume is not mounted.
+volume is not mounted. It also covers the generated settings files (merged rules, protected paths,
+base-branch rules, permission mode and launch flags), the load-time checks on modes, rules and `args`,
+and `say` refusing a seat at a permission prompt.
