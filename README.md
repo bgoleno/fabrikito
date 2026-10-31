@@ -104,6 +104,47 @@ values the launcher fills in from outside them (`TEAM_SCRIPT`, `TEAM_LOG`, `TEAM
 `CLAUDE_CONFIG_DIR`, the home folder, the team file's own path), so non-ASCII paths and names work in
 prompts, kickoffs and settings. Invalid UTF-8 in any of them is an error that names where it came from.
 
+## New worktrees
+
+A worktree `up` creates is a fresh checkout of `repo.base`: none of the main checkout's git-ignored
+files are there (an `.env`, local config), and nothing is installed. Two optional `repo` keys set it up
+before its seat starts, the way Claude Code's own worktrees use `.worktreeinclude` and an install
+command ([docs](https://code.claude.com/docs/en/worktrees)):
+
+- `repo.copy`: paths relative to the main checkout, copied into the new worktree (files or folders;
+  meant for small files). A path that does not exist is a warning; a file the worktree already has is
+  left as it is. Paths must stay inside the checkout. Only real files and folders are copied: a path
+  that is or contains a symlink, or that a symlinked folder would lead out of the checkout or out of
+  the worktree, stops the setup.
+- `repo.bootstrap`: a command run with bash in the new worktree after the copy, with no terminal input
+  and with `TEAM_ROLE` (the seat's role id) and `TEAM_REPO` (the main checkout) set, for example
+  `npm ci` or `uv sync`. Its output is shown, indented, as it runs. It runs without the messaging and
+  tmux variables of a seat that runs `up` (`CLAUDE_CODE_MESSAGING_*`, `CLAUDECODE`, `TMUX`,
+  `TMUX_PANE`), so a seat's messaging token does not reach an install script. There is no time limit.
+  If it fails, or `up` is interrupted meanwhile (Ctrl-C, TERM, HUP), `up` stops the bootstrap and
+  stops before starting the seat; a worktree it has just made is removed (by that exact path), so the
+  next `up` starts over.
+
+When both have finished, `up` marks the setup done (`<state>/setup/<role>`, with the worktree's path).
+Every later `up` checks that mark for a worktree it finds, and redoes the copy and the bootstrap
+before the seat starts when the mark is missing: after a start that was killed or crashed midway, or
+when `repo.copy` or `repo.bootstrap` was added after the worktree was made. A failure there leaves
+that existing worktree as it is (it may hold work). Neither runs for a `project` workdir. `check`
+shows them.
+
+`up` starts the roles in file order and stops at the first one it cannot start, this setup included:
+the seats started before it keep running, and the next `up` starts the rest (it skips running seats).
+
+Do not list real credentials in `repo.copy`: each copy is another file on the worktree volume that a
+seat works in. Use development values, or have the bootstrap fetch what it needs. The team's `Read`
+deny on `.env` files covers a copied `.env` like the original.
+
+Package stores when worktrees are on another volume: tools that hard-link from a shared store
+(pnpm, uv) can only link within one volume, so with the store on the internal disk and the worktrees
+elsewhere each worktree gets full copies instead. Point the store at the worktree volume from the
+bootstrap, for example `pnpm install --store-dir /Volumes/<drive>/.pnpm-store` or
+`UV_CACHE_DIR=/Volumes/<drive>/.uv-cache uv sync`. A plain download cache (npm's) works from either disk.
+
 ## The factory plugin
 
 `plugin/` is a Claude Code [plugin](https://code.claude.com/docs/en/plugins) (`.claude-plugin/plugin.json`
@@ -207,6 +248,11 @@ message. Anything else fails closed, with a reason:
   recognised as ready"), where the Enter would pick an answer;
 - an input box that already holds text (someone typing, or an earlier message that was not sent);
 - a pane in copy mode (someone scrolling);
+- Claude Code's diff panel notice ("Resize your terminal to at least 110 columns to show the diff
+  panel") in a pane of 13 rows or fewer, where it pushes the end of the input box off the screen.
+  With 16 rows or more the notice is harmless and `say` delivers (at 14 or 15 only a one-line
+  message fits). Widen the pane to 110 columns, give it 16 rows or more, or close the diff panel in
+  the seat;
 - a screen tmux cannot read.
 
 Attach to the seat, deal with it, and send again. If the box does not show the message after the paste,
@@ -364,6 +410,14 @@ What the rules cannot do:
 - Paths in Read and Edit rules: `//path` is absolute, `~/path` is under the home folder, `./path` or a
   bare name is relative to the seat's folder. A single leading `/` anchors at the folder that holds the
   generated file, so it is refused.
+- Claude Code matches permission rules against each part of a compound command (`;`, `&&`, `|`), but
+  against the whole command text when it can't parse the command (for example `"$(...)"` in an
+  argument, or `${...}` next to quotes). In default mode, a subshell `( ... )` or a command it can't
+  parse prompts even when no rule matches (the reason varies: "can't be checked before it runs",
+  "shell operators that require approval"); in bypass mode it prompts only when a rule matches
+  (measured on 2.1.316, [#103](../../issues/103); other modes not measured). So seats run `git push`
+  as its own simple command: chained with an unparseable part, a `main` elsewhere in the command makes
+  it match the base-branch ask.
 
 The [sandbox](https://code.claude.com/docs/en/sandboxing) is the OS-level control that would hold
 whatever the command text, but the launcher does not turn it on: seats run without one unless settings
