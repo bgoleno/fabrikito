@@ -32,30 +32,37 @@ MARK=.live-env
 die() { echo "live-env: $*" >&2; exit 1; }
 usage() { sed -n '7,10p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64; }
 
-# Print the resolved tmux folder of environment $1, or stop with the reason it is not private.
-private_tmux() {
-  local d=$1 t tmp
+# Print environment $1's folder, resolved once and physically (cd -P: as the kernel and rm see it, so
+# <link>/.. is the parent of where the link leads), or stop with the reason it is not a private one.
+# Only that path is used from here on: its mark, its tmux/ and, in down, rm -rf. Below it nothing may
+# be a link: tmux connects through links, and a linked tmux/, tmux-<uid> or socket could reach another
+# server, the default one included.
+env_dir() {
+  local d=$1 r tmp
   [ -n "$d" ] && [ -d "$d" ] || die "$d does not exist (make one with: $0 new)"
-  tmp=$(cd /tmp && pwd -P)
+  tmp=$(cd -P -- /tmp && pwd -P)
+  r=$(cd -P -- "$d" && pwd -P) || die "$d cannot be resolved"
   # down removes the folder, so only one shaped like new's, holding its mark, is accepted
-  case $(cd "$d" && pwd -P) in "$tmp"/sf-live.??????) ;; *) die "$d was not made by $0 new" ;; esac
-  [ -f "$d/$MARK" ] || die "$d was not made by $0 new"
-  t=$(cd "$d/tmux" 2>/dev/null && pwd -P) || die "$d/tmux does not exist"
-  [ "$t" != "$tmp" ] || die "$d/tmux resolves to $tmp, where tmux keeps the default tmux server"
-  own_socket_dir "$t" >/dev/null
-  echo "$t"
+  case $r in "$tmp"/sf-live.??????) ;; *) die "$d was not made by $0 new" ;; esac
+  [ -f "$r/$MARK" ] && [ ! -L "$r/$MARK" ] || die "$d was not made by $0 new"
+  if [ -L "$r/tmux" ]; then
+    [ "$(cd -P -- "$r/tmux" 2>/dev/null && pwd -P)" != "$tmp" ] || die "$r/tmux resolves to $tmp, where tmux keeps the default tmux server"
+    die "$r/tmux is a link: refusing, as tmux would follow it to another server"
+  fi
+  [ -d "$r/tmux" ] || die "$r/tmux does not exist"
+  [ -O "$r/tmux" ] || die "$r/tmux is not owned by you"
+  own_socket_dir "$r/tmux" >/dev/null
+  echo "$r"
 }
 
-# Print the socket folder tmux uses under $1 (tmux-<uid>), or stop if it could lead elsewhere. tmux
-# connects through links, so a linked folder or socket file could reach another server, the default
-# one included. The folder may not exist yet (no server started).
+# Print the socket folder tmux uses under tmux folder $1 (tmux-<uid>), or stop if it could lead
+# elsewhere. The folder may not exist yet (no server started).
 own_socket_dir() {
   local u=$1/tmux-$(id -u)
   if [ -L "$u" ]; then die "$u is a link: refusing, as tmux would follow it to another server"; fi
   if [ -e "$u" ]; then
     [ -d "$u" ] || die "$u is not a folder"
     [ -O "$u" ] || die "$u is not owned by you"
-    [ "$(cd "$u" && pwd -P)" = "$1/tmux-$(id -u)" ] || die "$u resolves outside $1"
     [ ! -L "$u/default" ] || die "$u/default is a link: refusing, as tmux would follow it to another server"
   fi
   echo "$u"
@@ -72,24 +79,24 @@ case ${1:-} in
   run)
     [ $# -ge 3 ] || usage
     d=$2; shift 2
-    t=$(private_tmux "$d")
+    r=$(env_dir "$d")
     # Absolute, resolved folders: a relative one would point elsewhere once the command changes
     # directory, and tmux would then fall back to /tmp. A seat's own TEAM_CONFIG is dropped too, or
     # factory.sh without -c would start the seat's real team (on this private server).
-    s=$(cd "$d/state" && pwd -P)
+    s=$(cd -P -- "$r/state" && pwd -P) || die "$r/state does not exist"
     unset TMUX TEAM_CONFIG TEAM_ROLE TEAM_SCRIPT
-    export TMUX_TMPDIR=$t TEAM_STATE_DIR=$s TEAM_VIEW=0
+    export TMUX_TMPDIR=$r/tmux TEAM_STATE_DIR=$s TEAM_VIEW=0
     exec "$@"
     ;;
   down)
     [ $# -eq 2 ] || usage
     d=$2
-    t=$(private_tmux "$d")
+    r=$(env_dir "$d")
     # Checked again right before the kill (own_socket_dir: a real folder of yours, no links), then -S
     # names that socket outright, so only this environment's own server can be reached.
-    u=$(own_socket_dir "$t")
+    u=$(own_socket_dir "$r/tmux")
     if [ -S "$u/default" ]; then tmux -S "$u/default" kill-server 2>/dev/null || true; fi
-    rm -rf "$d"
+    rm -rf "$r"
     ;;
   *) usage ;;
 esac

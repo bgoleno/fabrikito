@@ -930,6 +930,20 @@ lt TMUX_TMPDIR=$T/no-such-dir $S -c $T/lt.yaml up --no-view
 refused_default && ok "up refuses a TMUX_TMPDIR that does not exist (tmux falls back to /tmp)" || { bad "up with a missing TMUX_TMPDIR (rc=$rc, calls=$calls)"; echo "$out"; }
 lt TMUX_TMPDIR=$T/tmux TMUX=$DEFSOCK,1,0 $S -c $T/lt.yaml up --no-view
 refused_default && ok "up refuses TMUX naming the default socket, even with a private TMUX_TMPDIR (tmux follows TMUX)" || { bad "up with TMUX on the default socket (rc=$rc, calls=$calls)"; echo "$out"; }
+# Links in the socket path: tmux connects through them, so up must judge where they lead.
+if [ -d /tmp/tmux-$(id -u) ]; then
+  mkdir -p $T/lnk1; ln -s /tmp/tmux-$(id -u) $T/lnk1/tmux-$(id -u)
+  lt TMUX_TMPDIR=$T/lnk1 $S -c $T/lt.yaml up --no-view
+  refused_default && ok "up refuses a private TMUX_TMPDIR whose tmux-<uid> links to the default one" || { bad "up with a linked tmux-<uid> (rc=$rc, calls=$calls)"; echo "$out"; }
+else
+  ok "up and a linked tmux-<uid>: no /tmp/tmux-$(id -u) here, so not checked"
+fi
+mkdir -p -m 700 $T/lnk2/tmux-$(id -u); ln -s $DEFSOCK $T/lnk2/tmux-$(id -u)/default
+lt TMUX_TMPDIR=$T/lnk2 $S -c $T/lt.yaml up --no-view
+refused_default && ok "up refuses a private TMUX_TMPDIR whose socket links to the default one" || { bad "up with a linked socket (rc=$rc, calls=$calls)"; echo "$out"; }
+ln -s $DEFSOCK $T/lnk3
+lt TMUX_TMPDIR=$T/tmux TMUX=$T/lnk3,1,0 $S -c $T/lt.yaml up --no-view
+refused_default && ok "up refuses TMUX naming a link to the default socket" || { bad "up with TMUX through a link (rc=$rc, calls=$calls)"; echo "$out"; }
 lt TMUX_TMPDIR=$T/tmux $S -c $T/lt.yaml up --no-view
 [ "$calls" -gt 0 ] && ! echo "$out" | grep -qF "default tmux server" && ok "up goes ahead on a private TMUX_TMPDIR" || { bad "up on a private server was refused (rc=$rc, calls=$calls)"; echo "$out"; }
 lt CDPATH=/ TMUX_TMPDIR=tmp sh -c 'cd / && exec "$@"' sh $S -c $T/lt.yaml up --no-view
@@ -980,6 +994,19 @@ leref "$le3" "is a link" && ok "live-env run refuses a folder whose socket is a 
 out=$($LE down "$le3" 2>&1); rc=$?
 [ $rc -ne 0 ] && [ -d "$le3" ] && tmux -S "$ledir/default" has-session -t '=le-probe' 2>/dev/null && ok "live-env down refuses a folder whose socket is a link, and the server it points at keeps running" || { bad "live-env down with a linked socket (rc=$rc)"; echo "$out"; }
 rm -f "$le3/tmux/tmux-$(id -u)/default"; $LE down "$le3" >/dev/null 2>&1
+# ... and a tmux/ that links into another environment's tmux/ (the socket folder then looks like its own)
+le5=$(env -u TMUX $LE new 2>/dev/null); [ -d "$le5/tmux" ] || { le5=$T/le5-none; mkdir -p $le5/tmux; }   # never act on an empty path
+rmdir "$le5/tmux"; ln -s "$le/tmux" "$le5/tmux"
+out=$($LE down "$le5" 2>&1); rc=$?
+[ $rc -ne 0 ] && [ -d "$le5" ] && tmux -S "$ledir/default" has-session -t '=le-probe' 2>/dev/null && ok "live-env down refuses a folder whose tmux/ links into another one, and that server keeps running" || { bad "live-env down with tmux/ linked elsewhere (rc=$rc)"; echo "$out"; }
+rm "$le5/tmux"; mkdir "$le5/tmux"; $LE down "$le5" >/dev/null 2>&1
+# The folder is resolved physically, once: <link>/.. is the parent of where the link leads (as the
+# kernel and rm see it), not the folder that holds the link (as a logical cd sees it).
+le4=$(env -u TMUX $LE new 2>/dev/null); [ -d "$le4/tmux" ] || { le4=$T/le4-none; mkdir -p $le4/tmux; }   # never act on an empty path
+ln -s "$le4/tmux" $T/le4link
+out=$($LE down "$T/le4link/.." 2>&1); rc=$?
+[ $rc = 0 ] && [ ! -e "$le4" ] && [ -d $T ] && [ -L $T/le4link ] && ok "live-env down resolves <link>/.. physically: it removes the folder the link leads into, and nothing else" || { bad "live-env down with <link>/.. (rc=$rc)"; echo "$out"; }
+rm -f $T/le4link; [ -e "$le4" ] && $LE down "$le4" >/dev/null 2>&1
 srvsock="$(cd "$le/tmux" && pwd -P)/tmux-$(id -u)/default"
 out=$($LE down "$le" 2>&1); rc=$?
 [ $rc = 0 ] && [ ! -e "$le" ] && [ ! -e "$le2" ] && ! tmux -S "$srvsock" has-session 2>/dev/null && ok "live-env down stops the private server and removes the folder" || { bad "live-env down (rc=$rc)"; echo "$out"; ls -la "$le" 2>&1 | head -3; }

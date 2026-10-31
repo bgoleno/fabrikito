@@ -100,23 +100,31 @@ alive() { tmux has-session -t "=$(session "$1")" 2>/dev/null; }
 # one named in $TMUX when that is set, else tmux-<uid>/default under TMUX_TMPDIR. tmux falls back to
 # /tmp, silently, when TMUX_TMPDIR is empty or names a folder that does not exist (seen 2026-10-30),
 # so those count as /tmp. A value with a colon is taken as /tmp too, since it cannot be told apart.
-# CDPATH is cleared for each cd: with it set, cd prints the folder and the comparison would fail open.
+# tmux connects through links, so the whole path is resolved (real_path): a private-looking
+# TMUX_TMPDIR whose tmux-<uid> folder or socket links to the default one is the default one.
 tmux_socket() {
   local d s
   if [ -n "${TMUX:-}" ]; then
     s=${TMUX%%,*}
-    # its tmux-<uid> folder may not exist yet, so resolve the folder above it if need be (/tmp)
-    if d=$(CDPATH= cd -- "$(dirname "$s")" 2>/dev/null && pwd -P); then s=$d/$(basename "$s")
-    elif d=$(CDPATH= cd -- "$(dirname "$(dirname "$s")")" 2>/dev/null && pwd -P); then s=$d/$(basename "$(dirname "$s")")/$(basename "$s"); fi
-    echo "$s"
-    return
+  else
+    d=${TMUX_TMPDIR:-}
+    case $d in "" | *:*) d=/tmp ;; esac
+    [ -d "$d" ] || d=/tmp
+    s=$d/tmux-$(id -u)/default
   fi
-  d=${TMUX_TMPDIR:-}
-  case $d in "" | *:*) d=/tmp ;; esac
-  d=$(CDPATH= cd -- "$d" 2>/dev/null && pwd -P) || d=$(CDPATH= cd -- /tmp && pwd -P)
-  echo "$d/tmux-$(id -u)/default"
+  real_path "$s"
 }
-default_tmux_socket() { echo "$(CDPATH= cd -- /tmp && pwd -P)/tmux-$(id -u)/default"; }
+default_tmux_socket() { real_path "/tmp/tmux-$(id -u)/default"; }
+
+# Path $1 with every link in it resolved, as far as it exists (the socket or its folder may not exist
+# yet); the rest is appended as written. A relative path is taken from the current folder, as tmux does.
+real_path() {
+  ruby -e 'p = ARGV[0]; rest = []
+    until File.exist?(p) || p == File.dirname(p)
+      rest.unshift(File.basename(p)); p = File.dirname(p)
+    end
+    puts File.join(File.realpath(p), *rest)' -- "$1"
+}
 
 # A team file outside teams/ next to this script is taken for a throwaway one (a test), which must
 # not start seats on the default tmux server, where the real team runs (#66). `up --default-socket`
