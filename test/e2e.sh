@@ -744,6 +744,11 @@ for r in $(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml ids); do
   n=$(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render "$r" 2>/dev/null | wc -l | tr -d ' ')
   [ "${n:-0}" -gt 0 ] && [ "$n" -lt 200 ] && ok "example seat $r renders a prompt under 200 lines ($n)" || bad "example seat $r renders a prompt of ${n:-?} lines (limit 199)"
 done
+# A push chained with other commands is matched as one text: `git push origin <feature>; gh pr
+# create --base main` hits the base-branch ask through the later `main` and stalls the seat (#91).
+flat=$(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render fs1 2>&1 | tr '\n' ' ' | tr -s ' ')
+echo "$flat" | grep -qF 'run `git push` as a command of its own, never chained' && echo "$flat" | grep -qF '`gh pr create --base <base>`' \
+  && ok "the shared prompt says to run git push alone, never chained (gh pr create named)" || bad "the shared prompt does not say to run git push alone"
 echo "--- prompts render the same whatever the locale"
 # Under LC_ALL=C, or with no locale at all (cron, env -i), ruby would read files as US-ASCII and the
 # first non-ASCII byte in a prompt would stop the render (#72). The output must not depend on it.
