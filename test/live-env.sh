@@ -6,7 +6,7 @@
 #
 #   test/live-env.sh new                 make one; prints its folder (/tmp/sf-live.XXXXXX)
 #   test/live-env.sh run <dir> <cmd...>  run cmd in it: TMUX_TMPDIR=<dir>/tmux, TEAM_STATE_DIR=<dir>/state
-#                                        (both absolute), TEAM_VIEW=0; TMUX, TEAM_CONFIG/ROLE/SCRIPT unset
+#                                        (both absolute), TEAM_VIEW=0, TEAM_ROLE=live-test; TMUX, TEAM_CONFIG/SCRIPT unset
 #   test/live-env.sh down <dir>          stop its tmux server and remove the folder
 #
 # For example:
@@ -20,6 +20,12 @@
 # are). run and down refuse a folder that new did not make, or whose tmux folder resolves to /tmp,
 # where tmux keeps the default server. Two things are outside its reach: a command that sets its own
 # TMUX_TMPDIR, -L or -S, and worktrees a throwaway team made on a volume (down --yes keeps them).
+#
+# run sets TEAM_ROLE=live-test, the driver label (#115): say run through it sends as [from live-test],
+# whichever seat drives the test, and never as [from owner]. say refuses that label on the default
+# tmux server. The private server inherits it from the up run under it, so say from a plain pane on
+# that server (not a seat: up gives each seat its own TEAM_ROLE) also sends as [from live-test].
+# That is expected, not a bug: to check the owner label from such a pane, run say with env -u TEAM_ROLE.
 #
 # Why the folder is checked and not just exported: tmux 3.7 uses $TMUX when it is set, and falls back to
 # /tmp, silently, when TMUX_TMPDIR is empty or names a folder that does not exist. A typo then reaches
@@ -82,10 +88,11 @@ case ${1:-} in
     r=$(env_dir "$d")
     # Absolute, resolved folders: a relative one would point elsewhere once the command changes
     # directory, and tmux would then fall back to /tmp. A seat's own TEAM_CONFIG is dropped too, or
-    # factory.sh without -c would start the seat's real team (on this private server).
+    # factory.sh without -c would start the seat's real team (on this private server). A seat's own
+    # role gives way to the driver label (see the top).
     s=$(cd -P -- "$r/state" && pwd -P) || die "$r/state does not exist"
-    unset TMUX TEAM_CONFIG TEAM_ROLE TEAM_SCRIPT
-    export TMUX_TMPDIR=$r/tmux TEAM_STATE_DIR=$s TEAM_VIEW=0
+    unset TMUX TEAM_CONFIG TEAM_SCRIPT
+    export TMUX_TMPDIR=$r/tmux TEAM_STATE_DIR=$s TEAM_VIEW=0 TEAM_ROLE=live-test
     exec "$@"
     ;;
   down)
