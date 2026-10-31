@@ -49,7 +49,7 @@ iTerm.
 
 - `repo`, `project`, `owner`: the local checkout, its GitHub repo (`owner/name`), the GitHub Project the
   team tracks work on, and the human it works for. The prompts name them, so this is the only edit to
-  retarget a team.
+  retarget a team. `repo.gate` is the repo's pass/fail command: see [The gate](#the-gate).
 - `storage`: `volume` and `root`. Every worktree is created under `<volume>/<root>/`. The volume must be
   mounted, checked from the mount table when a worktree is created; the launcher never falls back to
   another disk.
@@ -207,6 +207,33 @@ command text. The hard rules in the shared prompt (`roles/common.md`) still appl
 changing them. A seat started in a folder Claude Code has not seen stops at a trust dialog until a
 human answers it once; `up` reports which seats those are.
 
+## The gate
+
+`repo.gate` is the repository's pass/fail command. A role with `gate_on_stop: true` gets a Stop hook in
+its generated settings (`lib/stop_gate.sh`): whenever the seat ends a turn with uncommitted changes in
+its working tree, the hook runs the gate there, and if it fails the seat is sent back to work with the
+command, the last 60 lines of its output and the path of the full log (`.state/<team>/gate/<role>.log`).
+Roles without the switch never run it. The example gives it to the engineers and qa.
+
+- Only uncommitted work is gated at a stop: a clean tree, including committed but unpushed work, ends
+  the turn normally. Committed work is gated again when the reviewer runs the gate on the PR.
+- A seat also stops on purpose: to wait for an answer or a review, or with a test red before the fix.
+  After `repo.gate_max_blocks` (default 3) failed gates in a row in one session, the stop goes through
+  with a note that the gate is still failing, and the seat is told to say so in its report. The count
+  is in the state folder, which seats cannot edit, and a passing gate or a clean tree resets it. Claude
+  Code also ends such a loop itself after 8 continuations with no tool call in between (raise it with
+  `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`).
+- The gate runs with a time limit (`repo.gate_timeout`, default 600 s) in a process group of its own,
+  which is killed whole when the time is up. A program that detaches from that group (a daemon, a tmux
+  server) is not killed.
+- The hook inherits the seat's environment, which runs inside tmux: a gate that must not touch the
+  team's tmux server unsets `TMUX` itself, as this repository's does.
+- The gate runs at every such stop, so a slow gate (this repository's e2e takes over a minute) makes
+  those stops slow.
+- A gated seat's settings set `disableAllHooks: false`, so a `.claude/settings.json` in the project
+  cannot switch the gate off. That also turns the user's own hooks back on for that seat if
+  `~/.claude/settings.json` had switched them all off.
+
 ## Tests
 
 `TEST_VOLUME=/Volumes/YourDrive test/e2e.sh` runs the launcher against a throwaway repo with a stand-in
@@ -214,5 +241,7 @@ human answers it once; `up` reports which seats those are.
 effort, message delivery, migrating a legacy worktree (clean and dirty), and refusing to run when the
 volume is not mounted. It also covers the generated settings files (merged rules, protected paths,
 base-branch rules, permission mode and launch flags), the load-time checks on modes, rules and `args`,
-and `say` delivering only to a seat whose input box is showing (dialogs captured from Claude Code
-2.1.316, an unknown dialog, text in the box, copy mode, an unreadable screen).
+`say` delivering only to a seat whose input box is showing (dialogs captured from Claude Code
+2.1.316, an unknown dialog, text in the box, copy mode, an unreadable screen), and the gate: the
+generated Stop hook, its load-time checks, and `lib/stop_gate.sh` itself (clean tree, failure, the
+limit, a new turn or session, a pass, a timeout that kills the gate's process group).

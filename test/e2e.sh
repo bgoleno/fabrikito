@@ -11,6 +11,14 @@ S=$SRC/factory.sh
 T=$(mktemp -d "${TMPDIR:-/tmp}/team-e2e.XXXX"); T=$(cd "$T" && pwd); mkdir -p $T/bin $T/tmux $T/local
 ROOT="Projects/_teamtest-$$"; VOL=${TEST_VOLUME:-}
 unset TMUX; export TMUX_TMPDIR=$T/tmux TEAM_STATE_DIR=$T/state
+# Stopped early (a gate timeout kills this test's process group): stop the private tmux server,
+# which has left that group, and remove what the test made, as the cleanup at the end does.
+on_signal() {
+  tmux kill-server 2>/dev/null
+  for w in "$VOL/$ROOT"/*; do [ -d "$w" ] && git -C $T/repo worktree remove --force "$w" 2>/dev/null; done
+  rmdir "$VOL/$ROOT" 2>/dev/null; rm -rf "$T"; exit 143
+}
+trap on_signal TERM INT
 pass=0; fail=0; ok(){ echo "PASS $1"; pass=$((pass+1)); }; bad(){ echo "FAIL $1"; fail=$((fail+1)); }
 # throwaway repo with a "github" slug the origin URL contains
 git init -q --bare $T/local/origin.git; git clone -q $T/local/origin.git $T/repo 2>/dev/null
@@ -103,7 +111,7 @@ printf '#!/bin/sh\nshift\necho "$TEAM_ROLE $*" >> %s/args.log\nexport FAKE_KEYLO
 mkdir -p $T/proj
 cat > $T/team.yaml <<Y
 team: tt
-repo: { path: $T/repo, github: local/origin.git, base: origin/main }
+repo: { path: $T/repo, github: local/origin.git, base: origin/main, gate: "make check", gate_timeout: 120, gate_max_blocks: 2 }
 project: { name: TestBoard, url: "https://github.com/users/x/projects/9" }
 storage: { volume: $VOL, root: $ROOT }
 sessions:
@@ -116,7 +124,7 @@ permissions:
 prompts: { common: $SRC/roles/common.md }
 roles:
   em: { title: Manager, workdir: { type: project, path: $T/proj }, prompt_text: "em prompt" }
-  w1: { title: Worker One, model: sonnet, effort: low, permission_mode: default, workdir: { type: worktree }, prompt_text: "w1 prompt",
+  w1: { title: Worker One, model: sonnet, effort: low, permission_mode: default, gate_on_stop: true, workdir: { type: worktree }, prompt_text: "w1 prompt",
         permissions: { deny: ["Bash(gh pr merge *)", "Read(//**/.env)"], allow: ["Bash(make *)"] } }
   w2: { title: Worker Two, workdir: { type: worktree }, prompt_text: "w2 prompt" }
 Y
@@ -184,6 +192,15 @@ sect() { echo "$chk" | sed -n "/^\[$1\]/,/^\[/p"; }
 sect w1 | grep -qF "deny : Read(//**/.env), Bash(touch tt-deny*), Bash(gh pr merge *)" && ok "check: w1's merged deny list" || { bad "check w1 deny"; sect w1; }
 sect em | grep -qF "allow rules have no effect in bypassPermissions" && ! sect w1 | grep -qF "no effect in bypassPermissions" && ok "check: bypass note on em only" || { bad "check bypass note"; sect em; }
 echo "$chk" | grep -qF "add to" && ok "check: says the rules add to the user's and the repo's own settings" || bad "check: add-to note"
+# The gate runs as a Stop hook for roles with gate_on_stop (w1) and for no other role.
+hook=$(ruby -rjson -e 'j = JSON.parse(File.read(ARGV[0])); h = j.dig("hooks", "Stop", 0, "hooks", 0) || {}; puts [j["hooks"]["Stop"].size, h["type"], h["command"], *h["args"], h["timeout"], j["disableAllHooks"].inspect].join(" | ")' $T/state/settings/w1.json 2>&1)
+[ "$hook" = "1 | command | $SRC/lib/stop_gate.sh | $T/state | w1 | $VOL/$ROOT/team-w1 | make check | 120 | 2 | 150 | false" ] && ok "w1.json: one Stop hook running stop_gate.sh with state, role, workdir, gate, timeout, max blocks; disableAllHooks false" || { bad "w1 Stop hook"; echo "$hook"; }
+# w2 has not started yet at this point (its legacy worktree is refused above): ask the builder.
+nohooks() { ruby -rjson -e 'j = JSON.parse(STDIN.read); exit(j.key?("hooks") || j.key?("disableAllHooks") ? 1 : 0)'; }
+nohooks < $T/state/settings/em.json && TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml settings w2 | nohooks && ok "roles without gate_on_stop (em, w2) get no hooks and no disableAllHooks" || bad "a role without gate_on_stop got hooks"
+rules $T/state/settings/w1.json deny | grep -qxF "Edit(/$RT/state/gate/**)" && ok "the gate's own state (its failure counter) is Edit-protected" || bad "gate state not protected"
+echo "$chk" | grep -qE "^w1 .* on-stop " && echo "$chk" | grep -qE "^em .* - +[^ ]" && ok "check: GATE column (on-stop for w1 only)" || { bad "check GATE column"; echo "$chk" | head -14; }
+echo "$chk" | grep -qF "make check (timeout 120s; a seat may stop after 2 failed gates in a row)" && ok "check: gate command, timeout and limit in the header" || bad "check: gate header"
 # Each start rewrites the file: a stale or edited one is replaced, not reused.
 chmod u+w $T/state/settings/em.json && echo '{"permissions":{}}' > $T/state/settings/em.json && chmod 444 $T/state/settings/em.json
 $S -c $T/team.yaml down --yes em >/dev/null; TEAM_VIEW=0 $S -c $T/team.yaml up --no-view em >/dev/null 2>&1
@@ -357,7 +374,7 @@ echo "--- permission validation (check must refuse each file)"
 mk() {
   cat > $T/v.yaml <<Y
 team: tv
-repo: { path: $T/repo, github: local/origin.git }
+repo: { path: $T/repo, github: local/origin.git${REPO_EXTRA:+, $REPO_EXTRA} }
 project: { name: B, url: "https://github.com/users/x/projects/9" }
 storage: { volume: $VOL, root: $ROOT }
 sessions: { prefix: tv, claude: { ${1:-} } }
@@ -415,6 +432,12 @@ accept "a glob tool name in deny" "" "$(rule deny '"*", "mcp__*"')"
 accept "an mcp server-scoped glob in allow" "" "$(rule allow '"mcp__puppeteer__*"')"
 accept "a parameter rule on a non-main field" "" "$(rule deny '"Agent(model:opus)", "Bash(command -v *)", "Bash(ls:*)"')"
 accept "the manual alias" "permission_mode: manual"
+reject "gate_on_stop without repo.gate" "gate_on_stop needs repo.gate" "" "" ", gate_on_stop: true"
+REPO_EXTRA='gate: "true"' reject "a non-boolean gate_on_stop" "gate_on_stop must be true or false" "" "" ", gate_on_stop: yes please"
+REPO_EXTRA='gate: ""' reject "an empty gate" "repo.gate must be a non-empty command" ""
+REPO_EXTRA='gate: "true", gate_timeout: 0' reject "a zero gate_timeout" "repo.gate_timeout must be a positive whole number of seconds" ""
+REPO_EXTRA='gate: "true", gate_max_blocks: two' reject "a non-integer gate_max_blocks" "repo.gate_max_blocks must be a positive whole number" ""
+REPO_EXTRA='gate: "true"' accept "a gate that no role runs" ""
 # The wrapper claude runs through is protected like factory.sh: a file, or its whole .app bundle.
 mk; ws=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml settings em)
 echo "$ws" | grep -q "wrap\|\.app" && bad "no wrapper configured, but a wrapper deny was added" || ok "no wrapper configured: no wrapper deny"
@@ -426,6 +449,30 @@ mk; sed -i '' 's#github: local/origin.git }#github: local/origin.git, base: main
 nb=$($S -c $T/v.yaml check 2>&1); TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml settings em | grep -q "git push" && bad "base without a remote still produced push rules" || { echo "$nb" | grep -qF "no base-branch push rules" && ok "repo.base without a remote: no push rules, and check says so" || { bad "check: no base-branch note"; echo "$nb" | tail -3; }; }
 mk "args: [--dangerously-skip-permissions]"
 lg=$($S -c $T/v.yaml check 2>&1) && echo "$lg" | grep -qE "^em .* bypassPermissions \(args\)" && ok "legacy: --dangerously-skip-permissions in args with no mode still loads; check shows bypassPermissions (args)" || { bad "legacy args file"; echo "$lg" | tail -4; }
+echo "--- stop gate hook (lib/stop_gate.sh, run directly with hook input on stdin)"
+# A throwaway repo and a stand-in gate that records each run and passes only once g-pass exists.
+mkdir -p $T/g && git -C $T/g init -q && git -C $T/g commit -q --allow-empty -m init
+printf '#!/bin/sh\necho ran >> %s/gate-runs\n[ -f %s/g-pass ] && { echo all green; exit 0; }\necho "FAKE FAILURE: 1 test failed"\nexit 1\n' $T $T > $T/gate.sh; chmod +x $T/gate.sh
+# gate <session> [workdir] [gate] [timeout]: runs the hook with max blocks 2; sets rc, out, err.
+gate() {
+  printf '{"session_id":"%s","stop_hook_active":false,"cwd":"/"}' "$1" | $SRC/lib/stop_gate.sh $T/gstate w9 "${2:-$T/g}" "${3:-$T/gate.sh}" "${4:-30}" 2 >$T/gout 2>$T/gerr; rc=$?
+  out=$(cat $T/gout); err=$(cat $T/gerr)
+}
+runs() { [ -f $T/gate-runs ] && wc -l < $T/gate-runs | tr -d ' ' || echo 0; }
+gate s1; [ $rc = 0 ] && [ "$(runs)" = 0 ] && ok "clean tree: the stop goes through and the gate does not run" || bad "clean tree (rc=$rc, runs=$(runs))"
+gate s1 $T/proj; [ $rc = 0 ] && [ "$(runs)" = 0 ] && ok "not a git work tree: the stop goes through, no gate" || bad "not a repo (rc=$rc)"
+touch $T/g/new.txt
+gate s1; [ $rc = 2 ] && [ "$(runs)" = 1 ] && echo "$err" | grep -qF "gate failed (exit 1): $T/gate.sh" && echo "$err" | grep -qF "FAKE FAILURE: 1 test failed" && echo "$err" | grep -qF "$T/gstate/gate/w9.log" && ok "dirty tree, failing gate: exit 2 with the command, its output and the log path on stderr" || { bad "failing gate (rc=$rc)"; echo "$err"; }
+grep -qF "FAKE FAILURE" $T/gstate/gate/w9.log && ok "the gate's full output is in the log" || bad "gate log"
+gate s1; [ $rc = 2 ] && echo "$err" | grep -q "last time" && ok "second failure in a row (the limit, 2): still sent back, told it is the last time" || { bad "second failure (rc=$rc)"; echo "$err"; }
+gate s1; [ $rc = 0 ] && echo "$out" | ruby -rjson -e 'j = JSON.parse(STDIN.read); exit(j["continue"] == false && j["stopReason"].include?("still failing") ? 0 : 1)' && ok "past the limit: the stop goes through, with a stopReason saying the gate is still failing" || { bad "past the limit (rc=$rc)"; echo "$out"; }
+gate s2; [ $rc = 2 ] && ! echo "$err" | grep -q "last time" && ok "a new session starts counting again" || bad "new session (rc=$rc)"
+touch $T/g-pass; gate s2; [ $rc = 0 ] && [ ! -e $T/gstate/gate/w9.count ] && ok "a passing gate lets the stop through and resets the count" || bad "passing gate (rc=$rc)"
+rm $T/g-pass; gate s2; [ $rc = 2 ] && ! echo "$err" | grep -q "last time" && ok "after a pass, a failure counts from one again" || bad "count after a pass (rc=$rc)"
+# A gate that runs past its time is killed with everything it started (its process group).
+printf '#!/bin/sh\nsleep 60 &\necho $! > %s/bgpid\nsleep 60\n' $T > $T/slow.sh; chmod +x $T/slow.sh
+t0=$(date +%s); gate s3 $T/g $T/slow.sh 2; t1=$(date +%s); sleep 1
+[ $rc = 2 ] && echo "$err" | grep -q "timed out after 2s" && ! echo "$err" | grep -q "Terminated" && [ $((t1 - t0)) -lt 15 ] && ! kill -0 "$(cat $T/bgpid)" 2>/dev/null && ok "a gate past its timeout is killed with its children, and the stop is sent back" || { bad "gate timeout (rc=$rc, $((t1 - t0))s)"; echo "$err"; }
 echo "--- cleanup"
 $S -c $T/team.yaml down --yes >/dev/null 2>&1; tmux kill-server 2>/dev/null
 for w in team-w1 team-w2; do git -C $T/repo worktree remove --force $VOL/$ROOT/$w 2>/dev/null; git -C $T/repo worktree remove --force $T/repo/.claude/worktrees/$w 2>/dev/null; done

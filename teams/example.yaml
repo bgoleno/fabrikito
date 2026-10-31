@@ -18,6 +18,15 @@ repo:
   path: /path/to/your/checkout
   github: owner/name            # origin must contain this before a worktree is created
   base: origin/main             # new worktrees start detached here
+  # The repo's pass/fail command (run with bash in the seat's working tree). A role with
+  # `gate_on_stop: true` runs it as a Stop hook whenever it ends a turn with uncommitted changes,
+  # and is sent back to work with the failure. After gate_max_blocks failed gates in a row the stop
+  # goes through (a seat also stops to wait for an answer or a review). The hook runs inside the
+  # seat's tmux session, so a gate that must not touch tmux unsets TMUX itself. It runs at every
+  # such stop, so a slow gate makes those stops slow.
+  gate: "make test"
+  # gate_timeout: 600           # seconds; the gate and everything it started are then killed
+  # gate_max_blocks: 3
 
 project:
   name: Your Project Board
@@ -71,7 +80,7 @@ prompts:
   common: ../roles/common.md   # prepended to every seat's prompt. Placeholders: @@TEAM@@ @@OWNER@@
                                # @@TITLE@@ @@ROLE@@ @@SESSION@@ @@PREFIX@@ @@SCRIPT@@ @@LOG@@ @@REPO@@
                                # @@GITHUB_REPO@@ @@GITHUB_URL@@ @@PROJECT_NAME@@ @@PROJECT_URL@@
-                               # @@WORKDIR@@ @@WORKTREE_ROOT@@ @@VOLUME@@ @@ROSTER@@
+                               # @@WORKDIR@@ @@WORKTREE_ROOT@@ @@VOLUME@@ @@ROSTER@@ @@GATE_MAX_BLOCKS@@
 
 # First message typed into a seat at startup (a role can override it with its own `kickoff`).
 kickoff: >-
@@ -107,7 +116,7 @@ permissions:
 
 # Seats start in this order. Each needs: title, workdir, and one of `prompt` (a file) or
 # `prompt_text` (inline). `summary` is the line shown in the roster every seat sees.
-# Optional per role: `model:`, `effort:` and `permission_mode:` (override sessions.claude),
+# Optional per role: `gate_on_stop:` (see repo.gate), `model:`, `effort:` and `permission_mode:` (override sessions.claude),
 # `permissions:` (added to the team's), `session:` (tmux name), `kickoff:` (first message).
 #   workdir.type: project   an existing folder: path: ...
 #   workdir.type: worktree  a git worktree under storage (optional: name: folder-name)
@@ -137,18 +146,21 @@ roles:
     summary: implements assigned issues
     workdir: { type: worktree }
     prompt: ../roles/fs.md
+    gate_on_stop: true
     permissions: { deny: ["Bash(gh pr merge *)", "Bash(gh api *pulls/*/merge*)", "Bash(gh api graphql*mergePullRequest*)"] }
   fs2:
     title: Senior Full-Stack Software Engineer
     summary: implements assigned issues
     workdir: { type: worktree }
     prompt: ../roles/fs.md
+    gate_on_stop: true
     permissions: { deny: ["Bash(gh pr merge *)", "Bash(gh api *pulls/*/merge*)", "Bash(gh api graphql*mergePullRequest*)"] }
   qa:
     title: QA Engineer
     summary: verifies behaviour, owns regression coverage
     workdir: { type: worktree }
     prompt: ../roles/qa.md
+    gate_on_stop: true
     permissions: { deny: ["Bash(gh pr merge *)", "Bash(gh api *pulls/*/merge*)", "Bash(gh api graphql*mergePullRequest*)"] }
   sec:
     title: Security Engineer
