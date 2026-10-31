@@ -215,7 +215,7 @@ int main(int n, char **v) {
 }
 C
 cc -o $T/bin/claude $T/c.c || { echo "no compiler"; exit 2; }
-printf '#!/bin/sh\necho "$TEAM_ROLE $1" >> %s/bin.log\nc=$1\nshift\necho "$TEAM_ROLE $*" >> %s/args.log\necho "$TEAM_ROLE DISABLE_AUTOUPDATER=${DISABLE_AUTOUPDATER-unset}" >> %s/env.log\nexport FAKE_KEYLOG=%s/keys-$TEAM_ROLE.log FAKE_FILES=%s/fake-$TEAM_ROLE\nexec "$c" "$@"\n' $T $T $T $T $T > $T/bin/wrap; chmod +x $T/bin/wrap
+printf '#!/bin/sh\necho "$TEAM_ROLE $1" >> %s/bin.log\nc=$1\nshift\necho "$TEAM_ROLE $*" >> %s/args.log\necho "$TEAM_ROLE DISABLE_AUTOUPDATER=${DISABLE_AUTOUPDATER-unset}" >> %s/env.log\necho "$TEAM_ROLE CLAUDE_CODE_DISABLE_AUTO_MEMORY=${CLAUDE_CODE_DISABLE_AUTO_MEMORY-unset}" >> %s/env.log\nexport FAKE_KEYLOG=%s/keys-$TEAM_ROLE.log FAKE_FILES=%s/fake-$TEAM_ROLE\nexec "$c" "$@"\n' $T $T $T $T $T $T > $T/bin/wrap; chmod +x $T/bin/wrap
 mkdir -p $T/proj
 cat > $T/team.yaml <<Y
 team: tt
@@ -234,7 +234,7 @@ roles:
   em: { title: Manager, workdir: { type: project, path: $T/proj }, prompt_text: "em prompt" }
   w1: { title: Worker One, model: sonnet, effort: low, permission_mode: default, gate_on_stop: true, workdir: { type: worktree }, prompt_text: "w1 prompt",
         permissions: { deny: ["Bash(gh pr merge *)", "Read(//**/.env)"], allow: ["Bash(make *)"] } }
-  w2: { title: Worker Two, workdir: { type: worktree }, prompt_text: "w2 prompt" }
+  w2: { title: Worker Two, auto_memory: true, workdir: { type: worktree }, prompt_text: "w2 prompt" }
 Y
 export PATH=$T/bin:$PATH
 # legacy worktree for w2, internal disk
@@ -354,6 +354,14 @@ grep -qx "em DISABLE_AUTOUPDATER=1" $T/env.log && grep -qx "w1 DISABLE_AUTOUPDAT
 noenv=""; for r in em w1; do ruby -rjson -e 'exit(JSON.parse(File.read(ARGV[0])).dig("env", "DISABLE_AUTOUPDATER") == "1" ? 0 : 1)' $T/state/settings/$r.json || noenv="$noenv $r"; done
 [ -z "$noenv" ] && ok "every seat's settings set env DISABLE_AUTOUPDATER=1" || bad "settings without env DISABLE_AUTOUPDATER=1:$noenv"
 ! tmux show-environment -g DISABLE_AUTOUPDATER >/dev/null 2>&1 && ! tmux show-environment -t '=tt-em:' DISABLE_AUTOUPDATER >/dev/null 2>&1 && ok "the variable is not in the tmux server's or the session's environment (other programs there are unaffected)" || bad "DISABLE_AUTOUPDATER leaked into tmux's environment"
+# Auto memory is shared by every worktree of the repo and loads into every session there (#71): it
+# is off in every seat unless the team file turns it on (w2 has auto_memory: true).
+grep -qx "em CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" $T/env.log && grep -qx "w1 CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" $T/env.log && ok "auto memory: em and w1 run with CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" || { bad "auto memory: seat environment"; grep AUTO_MEMORY $T/env.log; }
+am() { ruby -rjson -e 's = JSON.parse(STDIN.read); puts [s["autoMemoryEnabled"].inspect, s.dig("env", "CLAUDE_CODE_DISABLE_AUTO_MEMORY").inspect].join(" ")'; }
+[ "$(am < $T/state/settings/em.json)" = 'false "1"' ] && [ "$(am < $T/state/settings/w1.json)" = 'false "1"' ] && ok "auto memory: off by default in the generated settings (autoMemoryEnabled false, env CLAUDE_CODE_DISABLE_AUTO_MEMORY=1)" || { bad "auto memory: default settings"; am < $T/state/settings/em.json; am < $T/state/settings/w1.json; }
+$S -c $T/team.yaml check >/dev/null 2>&1 && [ "$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml settings w2 | am)" = 'nil nil' ] && ok "auto memory: auto_memory: true leaves both unset, so Claude Code's own settings decide" || { bad "auto memory: w2 settings"; TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml settings w2; }
+grep -qx "export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" $T/state/launch/em.sh && grep -qx "export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" $T/state/launch/w1.sh && ok "auto memory: the launch script exports the variable" || { bad "auto memory: launch scripts"; grep -H AUTO_MEMORY $T/state/launch/*.sh; }
+echo "$chk" | grep -qE "^em .* off +- " && echo "$chk" | grep -qE "^w1 .* off +on-stop " && echo "$chk" | grep -qE "^w2 .* \(inherit\) +- " && ok "check: MEMORY column (off for em and w1, (inherit) for w2)" || { bad "check MEMORY column"; echo "$chk" | grep -E "^(ROLE|em|w1|w2) "; }
 # Seats run the team's own copy of claude, made by up, never the shared install (#50).
 CP=$T/state/bin/claude-9.9.9/claude
 [ -x $CP ] && grep -qx "em $CP" $T/bin.log && grep -qx "w1 $CP" $T/bin.log && ok "seats run the team's copy of claude ($CP), made by up" || { bad "seats' claude copy"; cat $T/bin.log; ls -la $T/state/bin 2>&1; }
@@ -508,6 +516,8 @@ $S -c $T/team.yaml migrate w2 2>&1 | grep -E "moved|REFUSE|skip" | cut -c1-150
 $S -c $T/team.yaml up --no-view w2 2>&1 | grep -E "start|error" | cut -c1-150
 case "$(git -C $T/repo worktree list)" in *"$VOL/$ROOT/team-w2"*) ok "w2 recreated on the volume";; *) bad "w2 recreated on the volume";; esac
 [ ! -d $T/repo/.claude/worktrees/team-w2 ] && ok "legacy w2 folder gone" || bad "legacy w2 folder gone"
+# w2 (auto_memory: true) starts only now: its launch script and environment leave auto memory alone.
+[ -f $T/state/launch/w2.sh ] && ! grep -q "export CLAUDE_CODE_DISABLE_AUTO_MEMORY" $T/state/launch/w2.sh && grep -qx "unset CLAUDE_CODE_DISABLE_AUTO_MEMORY" $T/state/launch/w2.sh && grep -qx "w2 CLAUDE_CODE_DISABLE_AUTO_MEMORY=unset" $T/env.log && ok "auto memory: w2 (auto_memory: true) runs without the variable: its launch script unsets it, whatever the tmux server holds" || { bad "auto memory: w2 launch"; grep AUTO_MEMORY $T/env.log; grep -H AUTO_MEMORY $T/state/launch/w2.sh 2>&1; }
 echo "--- status"; $S -c $T/team.yaml status | cut -c1-150
 echo "--- dirty legacy is refused"
 $S -c $T/team.yaml down --yes w1 >/dev/null; $S -c $T/team.yaml migrate w1 2>&1 | grep -c "removed 0" | grep -q 1 && true
@@ -764,6 +774,12 @@ accept "an mcp server-scoped glob in allow" "" "$(rule allow '"mcp__puppeteer__*
 accept "a parameter rule on a non-main field" "" "$(rule deny '"Agent(model:opus)", "Bash(command -v *)", "Bash(ls:*)"')"
 accept "the manual alias" "permission_mode: manual"
 reject "gate_on_stop without repo.gate" "gate_on_stop needs repo.gate" "" "" ", gate_on_stop: true"
+reject "a non-boolean sessions.claude.auto_memory" "sessions.claude.auto_memory must be true or false" "auto_memory: maybe"
+reject "a non-boolean roles.<id>.auto_memory" "roles.em.auto_memory must be true or false" "" "" ", auto_memory: 1"
+mk "auto_memory: true" "" ", auto_memory: false"
+[ "$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml settings em | am)" = 'false "1"' ] && ok "auto memory: a role's auto_memory: false wins over sessions.claude.auto_memory: true" || bad "auto memory: role override"
+mk "auto_memory: true"
+$S -c $T/v.yaml check >/dev/null 2>&1 && [ "$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml settings em | am)" = 'nil nil' ] && ok "auto memory: sessions.claude.auto_memory: true turns it back on for every seat" || bad "auto memory: team switch"
 REPO_EXTRA='gate: "true"' reject "a non-boolean gate_on_stop" "gate_on_stop must be true or false" "" "" ", gate_on_stop: yes please"
 REPO_EXTRA='gate: ""' reject "an empty gate" "repo.gate must be a non-empty command" ""
 REPO_EXTRA='gate: "true", gate_timeout: 0' reject "a zero gate_timeout" "repo.gate_timeout must be a positive whole number of seconds" ""

@@ -72,6 +72,11 @@ sessions:
     # problem a seat works on unattended, such as a security hunt. The roles below set their own.
     # model: opus
     # effort: high
+    # Claude Code's auto memory is off in every seat unless this is true (a role can override it).
+    # Its folder is shared by every worktree of the repo and loads into every session there, the
+    # owner's own included, so a seat's note would reach all of them without review. true: the
+    # factory sets nothing and Claude Code's own settings decide.
+    # auto_memory: false
 
 # What `up` shows once the seats are running, and what `./factory.sh view` shows any time: a new
 # iTerm tab with every running seat in a pane. The primary seat is on the left at the full height
