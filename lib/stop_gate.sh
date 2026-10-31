@@ -11,8 +11,8 @@
 # configured, not the hook's cwd, which follows Claude's current folder.
 #
 # A seat also stops for reasons other than "done": to wait for an answer or a review, or with a
-# test red on purpose. So after <max blocks> failed gates in a row in one turn the stop goes
-# through, with a stopReason saying the gate is still failing, and without running the gate again.
+# test red on purpose. Every send-back says so, with the limit. After <max blocks> failed gates in
+# a row in one turn the stop goes through, with a stopReason saying the gate is still failing, and without running the gate again.
 # The next turn starts from zero, so a seat that lives for days is never gated off for good. The
 # count is kept in <state>/gate/<role>.count, which seats cannot edit (an Edit deny in their
 # settings); a passing gate or a clean tree resets it. Run by hand with no hook input, the script
@@ -111,9 +111,11 @@ n=$((n + 1))
   tail -n 60 "$log"
   echo
   echo "Fix the cause. Run $gate in $workdir yourself (not lib/stop_gate.sh) and report the command and its output."
-  if [ "$n" -eq "$max" ]; then
-    echo "This is the last time the gate sends you back in this turn. If you are stopping on purpose" \
-      "(waiting for an answer or a review, or with a test red on purpose), say so in your report."
-  fi
+  # On every send-back, not only the last: this is the one place a gated seat is told how to stop on
+  # purpose (it moved here from the shared prompt, #117). stderr is what Claude reads; the stopReason
+  # of a let-through is shown to the user only.
+  echo "If you are stopping on purpose (waiting for an answer or a review, or with a test red on purpose)," \
+    "say so in your report: the gate lets you stop after it has failed $max times in a row in one turn."
+  [ "$n" -eq "$max" ] && echo "This is the last time the gate sends you back in this turn."
 } >&2
 exit 2

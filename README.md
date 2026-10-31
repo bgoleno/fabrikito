@@ -445,12 +445,20 @@ What the rules cannot do:
   generated file, so it is refused.
 - Claude Code matches permission rules against each part of a compound command (`;`, `&&`, `|`), but
   against the whole command text when it can't parse the command (for example `"$(...)"` in an
-  argument, or `${...}` next to quotes). In default mode, a subshell `( ... )` or a command it can't
-  parse prompts even when no rule matches (the reason varies: "can't be checked before it runs",
-  "shell operators that require approval"); in bypass mode it prompts only when a rule matches
-  (measured on 2.1.316, [#103](../../issues/103); other modes not measured). So seats run `git push`
-  as its own simple command: chained with an unparseable part, a `main` elsewhere in the command makes
-  it match the base-branch ask.
+  argument, such as a PR body from `$(cat <<EOF ...)`, or `${...}` next to quotes). In default mode, a
+  subshell `( ... )` or a command it can't parse prompts even when no rule matches (the reason varies:
+  "can't be checked before it runs", "shell operators that require approval"); in bypass mode it
+  prompts only when a rule matches (measured on 2.1.316, [#103](../../issues/103); other modes not
+  measured). So seats run `git push` as its own simple command: chained with an unparseable part, a
+  `main` elsewhere in the command makes it match the base-branch ask. A prompt that names a rule
+  (`Permission rule ... requires confirmation`) means the command's text matched an ask rule, even
+  when the reason it shows is about parsing ("expansion obfuscation", "shell operators that require
+  approval"): that reason only says why Claude Code could not narrow the prompt to the matching part.
+  The shared prompt keeps the instructions (push alone, avoid a subshell, a named rule means a match)
+  and leaves this mechanism here ([#117](../../issues/117)).
+- Seats push with `git push origin <branch>:<branch>` on a branch cut with `--no-track`. A branch cut
+  with `git switch -c <branch> origin/main` has the base as its upstream, so under
+  `push.default=upstream` a bare `git push`, or even `git push origin <branch>`, would push to the base.
 
 The [sandbox](https://code.claude.com/docs/en/sandboxing) is the OS-level control that would hold
 whatever the command text, but the launcher does not turn it on: seats run without one unless settings
@@ -482,9 +490,11 @@ Roles without the switch never run it. The example gives it to the engineers and
   PR stays the real check.
 - A seat also stops on purpose: to wait for an answer or a review, or with a test red before the fix.
   After `repo.gate_max_blocks` (default 3) failed gates in a row in one turn, the next stop in that turn
-  goes through without running the gate again, with a note that the gate is still failing, and the seat
-  is told to say so in its report. Each new turn starts from zero, so a seat that lives for days is
-  never gated off for good. The count is in the state folder, which seats cannot edit through Claude
+  goes through without running the gate again, with a note that the gate is still failing. Every
+  send-back tells the seat that, if it is stopping on purpose, it should say so in its report, and
+  gives the limit (this moved here from the shared prompt, [#117](../../issues/117); the let-through's
+  note is shown to the user, not to the seat). Each new turn starts from zero, so a seat that lives
+  for days is never gated off for good. The count is in the state folder, which seats cannot edit through Claude
   Code's tools; a passing gate or a clean tree resets it. A script can still write it, or run the hook
   with made-up input, like every other "a script can do it" limit under [Safety](#safety). Run by hand
   with no hook input, `lib/stop_gate.sh` runs the gate and reports but leaves the count alone. Claude
@@ -512,9 +522,12 @@ note.
 Every seat's generated settings have a `SessionStart` hook (`lib/session_start.sh`, no matcher, so
 it runs at startup, on resume, after `/clear` and after a compaction). It prints the note (cut at 80
 lines or 6000 bytes), the branch, uncommitted files and the last 10 commits of the seat's working
-directory, and Claude Code adds that to the seat's context. The default kickoff asks a seat to name
-the note's task and next step in its first reply. The note is the seat's own writing, so treat it as
-a reminder, not a record: when it and the repository disagree, the repository wins.
+directory, and Claude Code adds that to the seat's context. After the note it prints what to do with
+it, on every path (no note, an unreadable note, a missing or non-git folder): name the task and next
+step in the first reply, follow the kickoff, and trust the repository over the note. That text moved
+here from the shared prompt ([#117](../../issues/117)), so a seat whose hooks are all off goes without
+it, as it goes without the note. The note is the seat's own writing, so treat it as a reminder, not
+a record: when it and the repository disagree, the repository wins.
 
 - Control characters other than tab and newline (and DEL) are dropped from everything the hook
   prints, so a terminal escape in a note or a commit subject arrives as plain text.
