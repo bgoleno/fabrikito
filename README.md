@@ -149,6 +149,15 @@ are labelled `[from <role>]`, and the owner's are `[from owner]`. The label is s
 logs `SendMessage` too), it records `say` traffic only: read `SendMessage` traffic in each session's
 transcript (`ctrl+o` in an attached seat).
 
+Each `say` (`say all` included) appends exactly one line of five tab-separated fields: the local time
+(`2026-10-30T14:05:09`), the sender (`TEAM_ROLE`, or `owner`), the recipient (a role id or `all`),
+`delivered` or `NOT-DELIVERED`, and the message as typed, without its `[from <role>]` label. The
+sender and the message are escaped so the record stays on one line and holds no terminal control
+codes: a backslash is written `\\`, a newline `\n`, a carriage return `\r`, a tab `\t`, and any other
+byte below 0x20, or 0x7F, `\xHH` (two upper-case hex digits). Other bytes, UTF-8 included, are written
+as they are. The escaping is reversible: `printf '%b' "<field>"` in bash gives back the original
+text. The hook that will log `SendMessage` traffic (#39) is to write this same format.
+
 ## Safety
 
 Each seat starts with a generated settings file, `.state/<team>/settings/<role>.json`, passed with

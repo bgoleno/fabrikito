@@ -538,6 +538,15 @@ send_one() {
   tmux send-keys -t "=$sess:" Enter
 }
 
+# One messages.log field, escaped so a record stays on one line and the terminal reading the log
+# with tail cannot be driven by the message (an ESC sequence could retitle it or hide lines):
+# backslash becomes \\, newline \n, CR \r, tab \t, and any other C0 control or DEL \xHH. Bytes
+# from 0x80 up (UTF-8) are left as they are. Reversible: printf '%b' gives back the original.
+# Works on bytes (.b), so a message that is not valid UTF-8 is escaped instead of raising.
+log_field() {
+  ruby -e 'print(ARGV[0].b.gsub(/[\\\x00-\x1f\x7f]/n) { |c| { "\\" => "\\\\", "\n" => "\\n", "\r" => "\\r", "\t" => "\\t" }[c] || format("\\x%02X", c.ord) })' -- "$1"
+}
+
 cmd_say() {
   local to=${1:-} from=${TEAM_ROLE:-owner} text r rc=0
   [ -n "$to" ] && [ $# -ge 2 ] || die "usage: say <role|all> <message...>"
@@ -555,9 +564,11 @@ cmd_say() {
     [ "$to" = "$from" ] && die "a seat cannot message itself"
     send_one "$to" "$text" || rc=1
   fi
-  # The log records what happened, not what was attempted: a refused delivery says so.
-  printf '%s\t%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%dT%H:%M:%S')" "$from" "$to" \
-    "$([ "$rc" -eq 0 ] && echo delivered || echo NOT-DELIVERED)" "$*" >>"$LOG"
+  # The log records what happened, not what was attempted: a refused delivery says so. One line
+  # per say (all included), in the format the README documents under "The message log". $to is a
+  # role id or all; $from comes from TEAM_ROLE, which nothing validates, so it is escaped too.
+  printf '%s\t%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%dT%H:%M:%S')" "$(log_field "$from")" "$to" \
+    "$([ "$rc" -eq 0 ] && echo delivered || echo NOT-DELIVERED)" "$(log_field "$*")" >>"$LOG"
   return "$rc"
 }
 

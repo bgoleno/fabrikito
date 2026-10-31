@@ -219,6 +219,25 @@ tmux capture-pane -p -t '=tt-w1:' | grep -q "from em\] hello w1" && ok "message 
 grep -q "from em\] hello w1" $T/keys-w1.log 2>/dev/null && ok "the stand-in logged the submitted message (the key log works)" || bad "key log of w1"
 tmux show-options -t '=tt-w1:' set-titles-string | grep -q 'set-titles-string "w1 | Worker One | tt-w1"' && ok "pane title set at startup: role | title | session" || bad "pane title at startup"
 tmux set-option -t '=tt-w1:' set-titles-string "stale" && $S -c $T/team.yaml titles >/dev/null && tmux show-options -t '=tt-w1:' set-titles-string | grep -q '"w1 | Worker One | tt-w1"' && ok "titles command repairs a changed title" || bad "titles command"
+# logged <to> <outcome> <message> <escaped> <what>: one say writes exactly one log line, whose
+# message field is <escaped>, and printf %b of that field gives back the message (README format).
+logged() {
+  local n line
+  n=$(wc -l < $T/state/messages.log)
+  TEAM_ROLE=em $S -c $T/team.yaml say "$1" "$3" >/dev/null 2>&1; sleep 1
+  line=$(tail -n +$((n + 1)) $T/state/messages.log)
+  if [ "$(wc -l < $T/state/messages.log)" -eq $((n + 1)) ] && [ "$(printf '%s\n' "$line" | cut -f2-4)" = "em	$1	$2" ] &&
+    [ "$(printf '%s\n' "$line" | cut -f5-)" = "$4" ] && [ "$(printf '%b' "$(printf '%s\n' "$line" | cut -f5-)")" = "$3" ]; then
+    ok "log: $5 is one line, escaped and reversible"
+  else bad "log: $5"; printf '%s\n' "$line" | od -c | head -5; fi
+}
+logged w1 delivered $'first line\nsecond line' 'first line\nsecond line' "a multi-line message"
+logged w2 NOT-DELIVERED $'col a\tcol b' 'col a\tcol b' "a message with a tab"
+logged w2 NOT-DELIVERED $'cr\r and a literal \\n, \\t and \\\\' 'cr\r and a literal \\n, \\t and \\\\' "a message with a CR and literal backslashes"
+# Other controls are escaped so tail cannot be driven by a message (this one would retitle the
+# terminal); UTF-8 is left as it is. w2 is down, so nothing reaches a pane.
+logged w2 NOT-DELIVERED $'title \e]0;x\a, del \x7f, utf-8 é ✓' 'title \x1B]0;x\x07, del \x7F, utf-8 é ✓' "a message with ESC, BEL and DEL"
+logged all delivered $'to all,\nfrom em' 'to all,\nfrom em' "a multi-line say all"
 echo "--- migrate then up w2"
 $S -c $T/team.yaml migrate w2 2>&1 | grep -E "moved|REFUSE|skip" | cut -c1-150
 $S -c $T/team.yaml up w2 2>&1 | grep -E "start|error" | cut -c1-150
