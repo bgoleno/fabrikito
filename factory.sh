@@ -8,7 +8,8 @@
 #   factory.sh [-c team.yaml] <command>
 #
 #   check                      validate the team file and show where everything will live
-#   up [--no-view] [role...]   start the team (default: every role, in file order); skips seats that are up,
+#   up [--no-view] [--default-socket] [role...]
+#                              start the team (default: every role, in file order); skips seats that are up,
 #                              then opens the iTerm tab (see `view`) unless --no-view or display.iterm is false
 #   titles                     set each running seat's terminal title to "<role> | <title> | <session>" (up and
 #                              view do this too); it is what iTerm shows in each pane's header
@@ -94,6 +95,48 @@ check_role() {
   esac
 }
 alive() { tmux has-session -t "=$(session "$1")" 2>/dev/null; }
+
+# The socket a plain `tmux` command run from here reaches, worked out the way tmux 3.7 picks it: the
+# one named in $TMUX when that is set, else tmux-<uid>/default under TMUX_TMPDIR. tmux falls back to
+# /tmp, silently, when TMUX_TMPDIR is empty or names a folder that does not exist (seen 2026-10-30),
+# so those count as /tmp. A value with a colon is taken as /tmp too, since it cannot be told apart.
+# tmux connects through links, so the whole path is resolved (real_path): a private-looking
+# TMUX_TMPDIR whose tmux-<uid> folder or socket links to the default one is the default one.
+tmux_socket() {
+  local d s
+  if [ -n "${TMUX:-}" ]; then
+    s=${TMUX%%,*}
+  else
+    d=${TMUX_TMPDIR:-}
+    case $d in "" | *:*) d=/tmp ;; esac
+    [ -d "$d" ] || d=/tmp
+    s=$d/tmux-$(id -u)/default
+  fi
+  real_path "$s"
+}
+default_tmux_socket() { real_path "/tmp/tmux-$(id -u)/default"; }
+
+# Path $1 with every link in it resolved, as far as it exists (the socket or its folder may not exist
+# yet); the rest is appended as written. A relative path is taken from the current folder, as tmux does.
+real_path() {
+  ruby -e 'p = ARGV[0]; rest = []
+    until File.exist?(p) || p == File.dirname(p)
+      rest.unshift(File.basename(p)); p = File.dirname(p)
+    end
+    puts File.join(File.realpath(p), *rest)' -- "$1"
+}
+
+# A team file outside teams/ next to this script is taken for a throwaway one (a test), which must
+# not start seats on the default tmux server, where the real team runs (#66). `up --default-socket`
+# overrides it for a team that is meant to run there.
+refuse_default_tmux() {
+  local teams dir
+  teams=$(CDPATH= cd -- "$HERE/teams" 2>/dev/null && pwd -P) || teams=$HERE/teams
+  dir=$(CDPATH= cd -- "$(dirname "$CONFIG")" && pwd -P)
+  case $dir/ in "$teams"/*) return 0 ;; esac
+  [ "$(tmux_socket)" = "$(default_tmux_socket)" ] || return 0
+  die "refusing to start seats for $CONFIG on the default tmux server ($(default_tmux_socket)), where your real team runs: the team file is outside $HERE/teams/, so it looks like a throwaway team. Run it on a private server: d=\$($HERE/test/live-env.sh new); $HERE/test/live-env.sh run \"\$d\" $SELF -c $CONFIG up (or unset TMUX and point TMUX_TMPDIR at a folder that exists). If this team is meant to run on the default server, pass up --default-socket."
+}
 
 # The worktree volume is proven from the mount table, at the moment a worktree is created, and
 # the target folder is proven to be on it. `mkdir -p` under an unmounted /Volumes path would
@@ -192,10 +235,16 @@ cmd_check() {
 }
 
 cmd_up() {
-  local want_view=1 started=0 args="" roles r sess dir launch a args_q settings
+  local want_view=1 started=0 args="" roles r sess dir launch a args_q settings default_ok=0
   for a in "$@"; do
-    if [ "$a" = --no-view ]; then want_view=0; else args="$args $a"; fi
+    case $a in
+      --no-view) want_view=0 ;;
+      --default-socket) default_ok=1 ;;
+      *) args="$args $a" ;;
+    esac
   done
+  # Before anything else, tmux included: the refusal must not depend on what a tmux call would do.
+  [ "$default_ok" = 1 ] || refuse_default_tmux
   roles=${args:-$ROLES}
   command -v tmux >/dev/null || die "tmux not found"
   resolve_claude || die "$CLAUDE_ERR"
@@ -747,27 +796,46 @@ caller_seat() {
   done
 }
 
+# Why a sender set in TEAM_ROLE may not send, or nothing when it may (#89). The value becomes the
+# message's [from <role>] label, so only a role id of this team is taken: anything else (a typo, a
+# role of another team, a value with control characters or brackets that would draw a different
+# label) is refused rather than shown. owner and launcher are refused even if a team file names
+# them as roles: [from owner] is the owner's (given only when TEAM_ROLE is unset, outside every
+# seat) and [from launcher] is the kickoff's. The value is shown escaped, never as it is.
+sender_refusal() {
+  local r
+  case $1 in
+    owner) echo "TEAM_ROLE 'owner' is reserved: [from owner] is used only when TEAM_ROLE is unset, outside every seat"; return ;;
+    launcher) echo "TEAM_ROLE 'launcher' is reserved for the kickoff's [from launcher] label"; return ;;
+  esac
+  for r in $ROLES; do [ "$r" = "$1" ] && return; done
+  echo "TEAM_ROLE '$(log_field "$1")' is not a role id of this team (roles: $ROLES); set it to your role id"
+}
+
 cmd_say() {
-  local to=${1:-} from=${TEAM_ROLE:-} text r rc=0
+  local to=${1:-} from=${TEAM_ROLE:-} why="" text r rc=0
   [ -n "$to" ] && [ $# -ge 2 ] || die "usage: say <role|all> <message...>"
+  [ "$to" = all ] || check_role "$to"
   # Inside a seat, a message without TEAM_ROLE goes out under that seat's role, never as the owner's.
   if [ -z "$from" ]; then
     from=$(caller_seat) || die "say: cannot tell whether this runs inside a seat (ps failed); set TEAM_ROLE"
     from=${from:-owner}
+  else
+    why=$(sender_refusal "$from")
   fi
-  # [from launcher] marks the kickoff as team configuration; say never sends with it.
-  [ "$from" = launcher ] && die "the sender 'launcher' is reserved for the kickoff (TEAM_ROLE=launcher)"
   shift
   text="[from $from] $*"
   mkdir -p "$STATE"
-  if [ "$to" = all ]; then
+  if [ -n "$why" ]; then
+    echo "not delivered: $why" >&2
+    rc=1
+  elif [ "$to" = all ]; then
     for r in $ROLES; do
       [ "$r" = "$from" ] && continue
       alive "$r" || continue
       send_one "$r" "$text" || rc=1
     done
   else
-    check_role "$to"
     [ "$to" = "$from" ] && die "a seat cannot message itself"
     send_one "$to" "$text" || rc=1
   fi
@@ -847,5 +915,5 @@ case "${1:-}" in
   attach) shift; cmd_attach "$@" ;;
   migrate) shift; cmd_migrate "$@" ;;
   down) shift; cmd_down "$@" ;;
-  *) sed -n '3,30p' "$0" | sed 's/^# \{0,1\}//'; exit 64 ;;
+  *) sed -n '3,31p' "$0" | sed 's/^# \{0,1\}//'; exit 64 ;;
 esac

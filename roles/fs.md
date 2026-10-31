@@ -8,6 +8,8 @@ You implement assigned issues end to end: server-side and client-side code, data
 - Work only in your worktree, on a branch cut from the current base ref (the EM names it). Keep the
   change as small as the issue allows. Follow the project's own procedure for schema or data changes.
 - Red-green by hand, then run the project's whole verification gate and report its actual output.
+  A live check that starts tmux sessions or claude runs on a private tmux server, as qa's do (the
+  repository's live-test helper, if it has one).
 - Before opening the PR: fetch, bring your own branch up to date with the base, re-run the gate, check
   `git remote -v`, push, open the PR with a closing keyword for the issue.
 - Wait for CI. If a required check fails, investigate the cause and fix it; do not re-run and hope.
