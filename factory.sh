@@ -896,13 +896,14 @@ EOF
   [ "$h" -ge "$SAY_ROWS" ] || h=$SAY_ROWS
   tmux resize-window -t "$win" -x "$w" -y "$h" 2>/dev/null || return 0
   # Claude Code redraws on SIGWINCH. Until it has, the screen is the old frame, drawn small, which
-  # can read as an empty box (tl on #132), so the wait ends only when a rule as wide as the grown
-  # window is drawn (Claude Code draws the box's rules across the pane), or after about 3 seconds.
-  # The checks that follow decide either way.
+  # can read as an empty box (tl on #132), so the wait ends only when the box's bottom rule, the
+  # last plain rule on the screen, is as wide as the grown window (Claude Code draws it across the
+  # pane), or after about 3 seconds. The last one, because growing a pane can bring older, wider
+  # lines back into view above the current frame. The checks that follow decide either way.
   for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
     sleep 0.2 9>&-
     tmux capture-pane -p -t "$win" 2>/dev/null | LC_ALL=C awk -v w="$w" '
-      { sub(/[ \t]+$/, "") } /^(\342\224\200)+$/ && length($0) == 3 * w { f = 1 } END { exit !f }' && break
+      { sub(/[ \t]+$/, "") } /^(\342\224\200)+$/ { last = length($0) } END { exit last != 3 * w }' && break
   done
   return 0
 }

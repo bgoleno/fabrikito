@@ -988,10 +988,13 @@ PATH=$T/rshim:$PATH tall sb ok "$(msg 290)"$'\n'"two" "a two-line, 300-character
 # A seat slow to redraw after the resize (sd, 1.5s): until it does, its old 80x10 frame still reads as
 # an empty box at 220x50, so say waits for a rule as wide as the grown window before it pastes (tl on
 # #132); otherwise the paste lands before the redraw and the check after it refuses.
-tmux resize-window -t '=tp-sd:' -x 80 -y 10; sleep 1
+# lastrule <role>: the width, in columns, of the last plain rule on the seat's screen (its box's bottom rule).
+lastrule() { tmux capture-pane -p -t "=tp-$1:" | LC_ALL=C awk '{ sub(/[ \t]+$/, "") } /^(\342\224\200)+$/ { last = length($0) / 3 } END { print last + 0 }'; }
+tmux resize-window -t '=tp-sd:' -x 80 -y 10; for i in $(seq 1 50); do [ "$(lastrule sd)" = 80 ] && break; sleep 0.1; done
+[ "$(lastrule sd)" = 80 ] || bad "test setup: sd did not redraw at 80 columns"
 tall sd ok "slow seat, one line" "a message to a seat slow to redraw after the resize (say waits for the redrawn box)"
 [ "$(geo sa)" = "$ga" ] && [ "$(geo sb)" = "$gb" ] && ok "after each, the small seats' size and window-size are as before ($ga; $gb)" || bad "small seat geometry after say (sa $(geo sa), was $ga; sb $(geo sb), was $gb)"
-grep -q "=tp-sa:" $T/resize.log && grep -q "=tp-sb:" $T/resize.log && ok "say resized the small seats' windows for the delivery" || { bad "say did not resize the small seats"; cat $T/resize.log; }
+grep -q -- "-t $(tmux display-message -p -t '=tp-sa:' '#{window_id}') " $T/resize.log && grep -q -- "-t $(tmux display-message -p -t '=tp-sb:' '#{window_id}') " $T/resize.log && ok "say resized the small seats' windows for the delivery" || { bad "say did not resize the small seats"; cat $T/resize.log; }
 : > $T/resize.log; PATH=$T/rshim:$PATH tall sc ok "big pane" "a message to a seat in a 220x50 pane"
 [ ! -s $T/resize.log ] && [ "$(geo sc)" = "$gc" ] && ok "a seat in a big pane is not resized (no resize-window, same size and window-size)" || { bad "the big seat was touched ($(geo sc), was $gc)"; cat $T/resize.log; }
 # Two says to one small seat at once: each message arrives whole, one after the other, or one is
