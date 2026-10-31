@@ -10,7 +10,14 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 S=$SRC/factory.sh
 T=$(mktemp -d "${TMPDIR:-/tmp}/team-e2e.XXXX"); T=$(cd "$T" && pwd); mkdir -p $T/bin $T/tmux $T/local
 ROOT="Projects/_teamtest-$$"; VOL=${TEST_VOLUME:-}
-unset TMUX CLAUDE_CONFIG_DIR; export TMUX_TMPDIR=$T/tmux TEAM_STATE_DIR=$T/state
+# Start from a clean environment. Run from a seat, this shell inherits what the seat's launcher
+# and claude set there (DISABLE_AUTOUPDATER, TEAM_*, CLAUDE* including CLAUDE_CONFIG_DIR, TMUX*), and the test's tmux server
+# and everything it starts would inherit it in turn: the leak check on DISABLE_AUTOUPDATER below
+# would fail only when run from a seat, and a stand-in seat could reach the real seat's tmux or
+# messaging socket (#75). This is the one list of what is cleared; add any new launcher variable here.
+# It runs before anything below exports a TEAM_* variable (TEAM_VIEW=0), or it would clear it.
+for v in $(compgen -e); do case $v in DISABLE_AUTOUPDATER|TEAM_*|CLAUDE*|TMUX*) unset "$v" ;; esac; done
+export TMUX_TMPDIR=$T/tmux TEAM_STATE_DIR=$T/state
 # No run may drive iTerm (#93). A stand-in osascript first on PATH records every call and does
 # nothing, and the run fails at the end if it was called: `up` opens a real iTerm window unless told
 # not to, every run left its windows on the user's screen, and enough of them used up every pty on
