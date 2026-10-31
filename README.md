@@ -60,7 +60,11 @@ iTerm.
 - `prompts.common` and a per-role `prompt` (file) or `prompt_text` (inline). Placeholders such as
   `@@ROSTER@@`, `@@GITHUB_REPO@@`, `@@PROJECT_URL@@` and `@@WORKTREE_ROOT@@` are filled in per seat.
 - `roles`: ordered; each has `title`, `workdir` (`project` folder or `worktree`), a prompt, and
-  optional `model`, `effort`, `session`, `kickoff`, `summary`.
+  optional `model`, `effort`, `session`, `kickoff`, `summary`, `skills`.
+- `skills` (per role): skills to name in that seat's prompt, each a name (`plugin:name` for a plugin's
+  skill) with an optional note on when to use it. They are listed after the role's prompt with a note
+  that a skill may not be installed; naming one installs nothing. The example team lists commonly
+  useful ones from the superpowers plugin and Claude Code's bundled skills.
 
 Unknown keys, missing prompt files, duplicate session names and unknown placeholders are errors at load
 time, before anything starts.

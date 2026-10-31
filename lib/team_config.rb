@@ -36,10 +36,12 @@ SESSION_KEYS = %w[prefix claude].freeze
 CLAUDE_KEYS = %w[wrapper args model effort permission_mode].freeze
 PROMPT_KEYS = %w[common].freeze
 ROLE_KEYS = %w[title summary workdir prompt prompt_text kickoff session model effort permission_mode permissions
-               gate_on_stop].freeze
+               gate_on_stop skills].freeze
 WORKDIR_KEYS = %w[type path name].freeze
 ID_RE = /\A[a-z][a-z0-9]*\z/.freeze
 PREFIX_RE = /\A[a-z0-9][a-z0-9-]*\z/.freeze
+# A skill as the Skill tool names it: a bare name, or plugin:name.
+SKILL_RE = /\A[A-Za-z0-9][A-Za-z0-9._-]*(:[A-Za-z0-9][A-Za-z0-9._-]*)?\z/.freeze
 
 # The folder factory.sh and this file are installed in.
 INSTALL = File.expand_path('..', __dir__)
@@ -314,7 +316,43 @@ class TeamConfig
 
   def render(id)
     common = prompts_common
-    subst(common + "\n" + role_prompt(id), id)
+    own = role_prompt(id)
+    own = "#{own.chomp}\n\n#{skills_section(id)}" unless skills(id).empty?
+    subst(common + "\n" + own, id)
+  end
+
+  # roles.<id>.skills: each item is a skill name, or a one-entry mapping of a name to when to use
+  # it. Returns [[name, note or nil], ...]; validate checks the shape first.
+  def skills(id)
+    (role(id)['skills'] || []).map { |s| s.is_a?(Hash) ? [s.keys.first.to_s, s.values.first.to_s] : [s.to_s, nil] }
+  end
+
+  # Seats load the owner's user-level and plugin skills, but which ones are installed differs per
+  # machine, so the wording never assumes a listed skill is there and says what to do when it is not.
+  def skills_section(id)
+    head = ['## Skills',
+            'These skills fit this role. Use one with the Skill tool when it applies, if it is installed (your',
+            'session lists the skills it has). If one is not installed, work without it: do not install it.']
+    (head + skills(id).map { |n, w| w ? "- `#{n}`: #{w}" : "- `#{n}`" }).join("\n") + "\n"
+  end
+
+  def validate_skills(id, list)
+    die "roles.#{id}.skills must be a list" unless list.is_a?(Array)
+    seen = {}
+    list.each do |s|
+      if s.is_a?(Hash)
+        die "roles.#{id}.skills: a mapping entry must be one skill name and its note" unless s.size == 1
+        name, note = s.first
+        unless note.is_a?(String) && !note.strip.empty? && !note.include?("\n")
+          die "roles.#{id}.skills: the note for '#{name}' must be one line of text"
+        end
+      else
+        name = s
+      end
+      die "roles.#{id}.skills: '#{name}' is not a skill name (letters, digits, . _ - and one plugin: prefix)" unless name.is_a?(String) && name =~ SKILL_RE
+      die "roles.#{id}.skills: '#{name}' is listed twice" if seen[name]
+      seen[name] = true
+    end
   end
 
   def prompts_common
@@ -636,6 +674,7 @@ class TeamConfig
       die "roles.#{id}.model must be a non-empty string" if r.key?('model') && r['model'].to_s.strip.empty?
       die "roles.#{id}.gate_on_stop must be true or false" if r.key?('gate_on_stop') && ![true, false].include?(r['gate_on_stop'])
       die "roles.#{id}.gate_on_stop needs repo.gate (the command to run)" if r['gate_on_stop'] == true && gate.nil?
+      validate_skills(id, r['skills']) if r.key?('skills')
       if r.key?('permission_mode') && !PERMISSION_MODES.include?(r['permission_mode'].to_s)
         die "roles.#{id}.permission_mode must be one of #{PERMISSION_MODES.join(', ')}"
       end
