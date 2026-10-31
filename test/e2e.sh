@@ -68,8 +68,9 @@ printf '#!/bin/sh\necho "$TEAM_ROLE $(pwd -P) env=$(test -f .env.local && echo y
 #           while the pane is under 110 columns; under it, at 13 rows or fewer, the screen ends at
 #           the input row, as #95 measured), small-clean (the tall box with no notice; under 12
 #           rows a paste grows the box past the bottom, so its rule and footer are gone, as qa2
-#           measured on #73)
-# On SIGWINCH it redraws at the new size, as Claude Code does.
+#           measured on #73), small-slow (small-clean that waits 1.5s before redrawing after a
+#           resize, as a busy seat might: until then the old, smaller frame stays on the screen)
+# On SIGWINCH it redraws at the new size, as Claude Code does, with its rules as wide as the pane.
 # A submitted line that starts with ! is run by /bin/sh the way Claude Code's Bash tool runs a
 # command: in a child that leaves the pane's terminal (setsid), so the child has no tty of its own
 # and only the stand-in, its parent, holds the pane's tty.
@@ -99,7 +100,7 @@ static int has(const char *what) {
   char path[4096]; snprintf(path, sizeof path, "%s-%s.txt", base, what);
   return access(path, R_OK) == 0;
 }
-static const char *RULE = "────────────────────────────────────────────────────────────";
+static char RULE[4096];   /* the box's plain rule, as wide as the pane (draw() fills it), as Claude Code draws it */
 /* Claude Code 2.1.316's @-mention list, captured on 2026-10-30: drawn above the box's top rule,
    each row indented two spaces in colour 246; a row picked with the arrow keys gets a ❯ in colour
    153, and only then does Enter complete the mention instead of submitting. */
@@ -147,6 +148,7 @@ static void draw(void) {
   struct winsize ws; int cols = 220, rows = 50;
   if (ioctl(1, TIOCGWINSZ, &ws) == 0 && ws.ws_col && ws.ws_row) { cols = ws.ws_col; rows = ws.ws_row; }
   int small = !strncmp(mode, "small", 5), notice = !strcmp(mode, "small") && cols < 110;
+  { size_t o = 0; for (int i = 0; i < cols && o + 4 < sizeof RULE; i++) o += (size_t)snprintf(RULE + o, sizeof RULE - o, "\xe2\x94\x80"); }
   printf("\033[H\033[2J%s\r\n", head);
   fwrite(hist, 1, hlen, stdout);
   if (has("prompt")) { cat("prompt"); fflush(stdout); return; }
@@ -202,7 +204,10 @@ int main(int n, char **v) {
   int c, esc = 0, paste = 0; char seq[8]; int sl = 0;
   for (;;) {
     ssize_t got = read(0, &c, 1);
-    if (got < 0 && errno == EINTR) { if (winch) { winch = 0; if (!paste) draw(); } continue; }
+    if (got < 0 && errno == EINTR) {               /* small-slow: a busy seat, slow to redraw */
+      if (winch) { winch = 0; if (!strcmp(mode, "small-slow")) usleep(1500000); if (!paste) draw(); }
+      continue;
+    }
     if (got != 1) break;
     unsigned char b = (unsigned char)c;
     if (kl) { fputc(b, kl); fflush(kl); }
@@ -789,7 +794,7 @@ echo "--- say delivers only to a seat showing its input box"
 # with no numbers and no key hint: any dialog say does not know must fail closed too.
 roles=""
 # em is a seat here too: say takes its sender from TEAM_ROLE=em, which must be a role of the team (#89).
-for r in em pp pm pd ph pu pb pf ps pg px pk pq po pn pz ta tb tc td te pv pw py sa sb sc; do roles="$roles  $r: { title: Seat $r, workdir: { type: project, path: $T/proj }, prompt_text: \"$r\" }
+for r in em pp pm pd ph pu pb pf ps pg px pk pq po pn pz ta tb tc td te pv pw py sa sb sc sd se; do roles="$roles  $r: { title: Seat $r, workdir: { type: project, path: $T/proj }, prompt_text: \"$r\" }
 "; done
 cat > $T/tp.yaml <<Y
 team: tp
@@ -867,7 +872,7 @@ notice=$(printf '\033[2m\342\225\255%s\033[0m\033[38;5;246m\342\234\225\033[2m\0
   "$(printf '\342\224\200%.0s' $(seq 85))" "" "$(printf '\342\224\200%.0s' $(seq 87))")
 printf '%s\n' "$notice" > $T/fake-pv-output.txt; cp $T/fake-pv-output.txt $T/fake-pw-output.txt; echo cut > $T/fake-pw-mode.txt
 # sa, sb, sc (#84): see "Short panes" below. sa draws the notice only while it is under 110 columns.
-cp $T/fake-pv-output.txt $T/fake-sa-output.txt; echo small > $T/fake-sa-mode.txt; echo small-clean > $T/fake-sb-mode.txt; echo tall > $T/fake-sc-mode.txt
+cp $T/fake-pv-output.txt $T/fake-sa-output.txt; echo small > $T/fake-sa-mode.txt; echo small-clean > $T/fake-sb-mode.txt; echo tall > $T/fake-sc-mode.txt; echo small-slow > $T/fake-sd-mode.txt; echo small-clean > $T/fake-se-mode.txt
 printf '%s\n%s\n' "$notice" "$fake_prompt" > $T/fake-py-prompt.txt
 { printf '%s\n' "$fake_prompt"; for i in $(seq 1 5); do echo "later output line $i"; done; } > $T/fake-pq-output.txt
 cat > $T/fake-po-output.txt <<'M'
@@ -980,6 +985,11 @@ PATH=$T/rshim:$PATH tall sa ok "short pane, one line" "a one-line message to a s
 PATH=$T/rshim:$PATH tall sa ok "line one"$'\n'"line two"$'\n'"line three" "a three-line message to the 89x13 seat"
 PATH=$T/rshim:$PATH tall sb ok "short pane, one line" "a one-line message to a seat in an 80x10 pane (its box would grow past the bottom)"
 PATH=$T/rshim:$PATH tall sb ok "$(msg 290)"$'\n'"two" "a two-line, 300-character message to the 80x10 seat"
+# A seat slow to redraw after the resize (sd, 1.5s): until it does, its old 80x10 frame still reads as
+# an empty box at 220x50, so say waits for a rule as wide as the grown window before it pastes (tl on
+# #132); otherwise the paste lands before the redraw and the check after it refuses.
+tmux resize-window -t '=tp-sd:' -x 80 -y 10; sleep 1
+tall sd ok "slow seat, one line" "a message to a seat slow to redraw after the resize (say waits for the redrawn box)"
 [ "$(geo sa)" = "$ga" ] && [ "$(geo sb)" = "$gb" ] && ok "after each, the small seats' size and window-size are as before ($ga; $gb)" || bad "small seat geometry after say (sa $(geo sa), was $ga; sb $(geo sb), was $gb)"
 grep -q "=tp-sa:" $T/resize.log && grep -q "=tp-sb:" $T/resize.log && ok "say resized the small seats' windows for the delivery" || { bad "say did not resize the small seats"; cat $T/resize.log; }
 : > $T/resize.log; PATH=$T/rshim:$PATH tall sc ok "big pane" "a message to a seat in a 220x50 pane"
@@ -1014,6 +1024,24 @@ for kind in fifo symlink; do
     && ok "a $kind at a seat's lock path: say refuses at once, naming it, and types nothing" || { bad "lock path is a $kind (rc=$lrc, $((t1 - t0))s)"; echo "$lo"; }
 done
 rm -f $T/state/say/sc.lock
+# The window that was grown is the one put back, even when another window of the seat's session has
+# become current meanwhile (tl on #132: the restore went to whatever window was current).
+wa=$(tmux display-message -p -t '=tp-sa:' '#{window_id}')
+PATH=$T/pshim:$PATH TEAM_ROLE=em $S -c $T/tp.yaml say sa "window switch" >$T/ws.out 2>&1 & wp=$!
+for i in $(seq 1 100); do case "$(geo sa)" in 220x50*) break ;; esac; sleep 0.1; done
+nw=$(tmux new-window -P -F '#{window_id}' -t '=tp-sa:' "sleep 60"); nwg=$(tmux display-message -p -t "$nw" '#{window_width}x#{window_height}')
+wait $wp; sleep 0.5
+wag=$(tmux display-message -p -t "$wa" '#{window_width}x#{window_height}')/$(tmux show-options -w -v -t "$wa" window-size)
+[ "$wag" = "89x13/" ] && [ "$(tmux display-message -p -t "$nw" '#{window_width}x#{window_height}')" = "$nwg" ] \
+  && ok "the grown window is put back (89x13, window-size unset) after another window of the session became current; that one is left alone" || { bad "restore by window (grown window $wag, other $(tmux display-message -p -t "$nw" '#{window_width}x#{window_height}'), was $nwg)"; cat $T/ws.out; }
+tmux kill-window -t "$nw"; tmux send-keys -t '=tp-sa:' C-u; sleep 0.5
+# A seat whose session ends mid-delivery: a TERM still runs the whole trap and ends say with 143
+# (tl on #132: under set -e the trap stopped at the failing resize-window and say exited 1).
+tmux resize-window -t '=tp-se:' -x 80 -y 10; sleep 0.5
+PATH=$T/pshim:$PATH TEAM_ROLE=em $S -c $T/tp.yaml say se "session gone" >$T/se.out 2>&1 & ep=$!
+for i in $(seq 1 100); do case "$(tmux display-message -p -t '=tp-se:' '#{window_width}x#{window_height}' 2>/dev/null)" in 220x50) break ;; esac; sleep 0.1; done; sleep 0.5
+tmux kill-session -t '=tp-se'; kill -TERM $ep; wait $ep; erc=$?
+[ $erc = 143 ] && ok "a say stopped with TERM after its seat's session ended exits 143 (the trap runs to its end)" || { bad "TERM after the session ended (rc=$erc)"; cat $T/se.out; }
 $S -c $T/tp.yaml down --yes >/dev/null 2>&1
 echo "--- permission validation (check must refuse each file)"
 # A minimal valid team file; $1 is the sessions.claude body, $2 extra top-level lines, $3 extra keys for role em.
