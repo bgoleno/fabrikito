@@ -176,6 +176,8 @@ someone answers. `say` will not deliver to a seat at a permission prompt or any 
 and the repo's `.claude/` settings, which still apply. `check` shows each seat's mode and rules, and is
 where load-time errors (unknown modes, malformed rules, a permission flag in `args`) are reported.
 
+These rules are an accident guard, not a security boundary: every seat runs as the owner's OS user,
+with the owner's GitHub credential, and can change what loads. #29 tracks making them a boundary.
 What the rules cannot do:
 
 - A Bash rule matches the command text. The same program under another path (`/usr/bin/gh`), inside
@@ -202,8 +204,9 @@ What the rules cannot do:
   bare name is relative to the seat's folder. A single leading `/` anchors at the folder that holds the
   generated file, so it is refused.
 
-The [sandbox](https://code.claude.com/docs/en/sandboxing) is the boundary that holds whatever the
-command text. The hard rules in the shared prompt (`roles/common.md`) still apply; read them before
+The [sandbox](https://code.claude.com/docs/en/sandboxing) is the OS-level control that would hold
+whatever the command text, but the launcher does not turn it on: seats run without one unless settings
+that apply to them enable it. The hard rules in the shared prompt (`roles/common.md`) still apply; read them before
 changing them. A seat started in a folder Claude Code has not seen stops at a trust dialog until a
 human answers it once; `up` reports which seats those are.
 
