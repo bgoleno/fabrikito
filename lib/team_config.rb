@@ -384,9 +384,14 @@ class TeamConfig
           'Team session started: you are the @@TITLE@@ (session @@SESSION@@). Your full role instructions are in your system prompt. ' \
           'Reply with one line confirming your role and working directory, then wait for a message from the EM or @@OWNER@@. ' \
           'Do not start any work until you receive one.'
-    # A label inside the text would make part of it read as another sender's (`[from owner]`).
-    die "the kickoff for #{id} must not contain a [from ...] label: #{KICKOFF_LABEL} is added in front of it" if tpl.to_s.include?('[from ')
-    "#{KICKOFF_LABEL} #{subst(tpl.to_s, id)}"
+    text = subst(tpl.to_s, id)
+    # A label inside the text would make part of it read as another sender's (`[from owner]`). The
+    # check runs on the substituted text, so a label cannot arrive through a role's title or the
+    # owner's name, and on a normalised copy, so `[ From`, full-width brackets and zero-width
+    # characters are caught too. Its one false positive, a word like `[from-scratch]`, is harmless.
+    norm = text.unicode_normalize(:nfkc).gsub(/\p{Cf}/, '')
+    die "the kickoff for #{id} must not contain a [from ...] label: #{KICKOFF_LABEL} is added in front of it" if norm =~ /\[\s*from\b/i
+    "#{KICKOFF_LABEL} #{text}"
   end
 
   # A role's own value wins over sessions.claude. Neither set means the flag is omitted and the
