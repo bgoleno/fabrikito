@@ -1,0 +1,5 @@
+{
+  "name": "factory",
+  "description": "Skills for the seats factory.sh starts. Loaded per session with --plugin-dir, so a session the factory did not start does not have them.",
+  "version": "0.1.0"
+}
