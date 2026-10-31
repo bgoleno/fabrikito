@@ -88,7 +88,8 @@ differ, the role prompt wins.
      waits for (another reviewer, qa, a merge with its base, the owner).
 
    A security finding that your role prompt keeps out of public trackers (its rule 5) goes in
-   neither the file nor the PR, and nothing you post describes it. Who tells whom:
+   neither the file nor the PR, and nothing you post describes it: no other part of the verdict
+   (a criterion, an optional point, Not verified) points at it either. Who tells whom:
    - **Not the security engineer** (for example a tech lead): send it to `sec` and the EM only,
      with `SendMessage`. Tell the author nothing about it: sec's triage decides who is told. Do not
      post READY while it is open; a blocking point says only that one point went to `sec` and the
