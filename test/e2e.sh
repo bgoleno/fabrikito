@@ -1178,6 +1178,12 @@ for r in $(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml ids); do
   n=$(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render "$r" 2>/dev/null | wc -l | tr -d ' ')
   [ "${n:-0}" -gt 0 ] && [ "$n" -lt 200 ] && ok "example seat $r renders a prompt under 200 lines ($n)" || bad "example seat $r renders a prompt of ${n:-?} lines (limit 199)"
 done
+# A push chained with other commands can be matched as one text, when Claude Code cannot split it
+# (an expansion or heredoc in a later part): `git push origin <feature>; gh pr create --base main
+# --body "$(cat <<EOF ...)"` then hits the base-branch ask through the later `main` (#91, #103).
+flat=$(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render fs1 2>&1 | tr '\n' ' ' | tr -s ' ')
+echo "$flat" | grep -qF 'run `git push` as a command of its own, never chained' && echo "$flat" | grep -qF '`gh pr create --base <base>`' \
+  && ok "the shared prompt says to run git push alone, never chained (gh pr create named)" || bad "the shared prompt does not say to run git push alone"
 echo "--- the example team sets effort per role"
 # Effort is the main cost and depth control: the manager coordinates at medium, the seats that
 # write, test and review code run at high. Read from the flags each seat would be launched with.
