@@ -572,6 +572,15 @@ tmux send-keys -t '=tt-w1:' -l "!env -u TEAM_ROLE $S -c $T/other.yaml say em 'fr
 waitlog "$n"; sleep 1
 lastlog '?' em 'from a seat of another team' && grep -q "a seat of another team" $T/other.out &&
   ok "say with TEAM_ROLE unset from a seat of another team is refused, not [from owner]" || { bad "say from another team's seat"; tail -1 $T/state/messages.log; cat $T/other.out; }
+# A pane of em's with an empty tty (tmux prints the line " tt-em") matches no caller: say from a pane
+# that is not a seat, whose ancestors share one tty (so its tty list has two spaces in a row), is
+# still the owner, never em.
+mkdir -p $T/ttyless && printf '#!/bin/sh\n[ "$1" = list-panes ] && printf " tt-em\\n"\nexec %s "$@"\n' "$(command -v tmux)" > $T/ttyless/tmux && chmod +x $T/ttyless/tmux
+n=$(wc -l < $T/state/messages.log)
+tmux new-session -d -s tt-ttyless "PATH=$T/ttyless:\$PATH env -u TEAM_ROLE $S -c $T/team.yaml say w1 'beside a pane with no tty'; sleep 30"
+waitlog "$n"; sleep 1; tmux kill-session -t '=tt-ttyless' 2>/dev/null
+[ "$(tail -n +$((n + 1)) $T/state/messages.log | cut -f2-4)" = "owner	w1	delivered" ] &&
+  ok "a seat's pane with an empty tty matches no caller (say from a non-seat pane is still [from owner])" || { bad "empty pane tty matched a caller"; tail -1 $T/state/messages.log; }
 # A seat messaging itself is refused and logged too.
 n=$(wc -l < $T/state/messages.log)
 TEAM_ROLE=w1 $S -c $T/team.yaml say w1 "to myself" >/dev/null 2>&1; rc=$?

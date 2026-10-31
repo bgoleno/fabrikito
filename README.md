@@ -223,7 +223,13 @@ are labelled `[from <role>]`, and the owner's are `[from owner]`. The label is s
 `TEAM_ROLE`, or `owner` when it is unset) and is not authenticated. When `TEAM_ROLE` is unset, `say`
 run from inside a seat (found from the terminals of the processes that started it) is labelled with
 that seat's role, never `[from owner]`; this stops a mislabel by accident, and the labels are still
-not authenticated ([#29](../../issues/29)). A `TEAM_ROLE` that is set must be one of the team's role
+not authenticated ([#29](../../issues/29)). When it cannot tell, `say` refuses rather than guess: when
+`ps` cannot read its process, when tmux cannot list its panes, or when it runs inside a seat of another
+team on the same tmux server (any session `up` started, which sets `TEAM_ROLE`). Only a process with no
+terminal at all, or whose terminal is a tmux pane that is no team's seat, is labelled `[from owner]`. A
+background job that outlives the command that started it, or a command a seat runs in a new tmux
+session, is not caught and is labelled `[from owner]` (the comment above `caller_seat` in `factory.sh` lists every
+such way). A seat cannot `say` to itself. A `TEAM_ROLE` that is set must be one of the team's role
 ids: `say` refuses any other value, and the reserved `owner` and `launcher`, sending no keys and
 logging NOT-DELIVERED.
 
@@ -247,7 +253,8 @@ logs `SendMessage` too), it records `say` traffic only: read `SendMessage` traff
 transcript (`ctrl+o` in an attached seat).
 
 Each `say` (`say all` included) appends exactly one line of five tab-separated fields: the local time
-(`2026-10-30T14:05:09`), the sender (`TEAM_ROLE`, the seat `say` ran inside, or `owner`), the recipient (a role id or `all`),
+(`2026-10-30T14:05:09`), the sender (`TEAM_ROLE`, the seat `say` ran inside, `owner`, or `?` when `TEAM_ROLE` is unset and
+`say` refused because it could not tell whether it ran inside a seat), the recipient (a role id or `all`),
 `delivered` or `NOT-DELIVERED`, and the message as typed, without its `[from <role>]` label. The
 sender and the message are escaped so the record stays on one line and holds no terminal control
 codes: a backslash is written `\\`, a newline `\n`, a carriage return `\r`, a tab `\t`. Every other C0
