@@ -145,9 +145,12 @@ role's (team first; a role can add or tighten a rule, never loosen one), plus tw
 
 - an `Edit` deny on the files that would change a seat's next start or its live rules: the generated
   settings, launchers and prompts, the message log, the team file and its prompts, the launcher
-  (`factory.sh`, `lib/`, `roles/`), the main checkout's `.claude/`, the seat's own
-  `.claude/settings.json` and `settings.local.json`, and Claude Code's user settings, MCP config,
-  instructions and extensions under `~/.claude`;
+  (`factory.sh`, `lib/`, `roles/`) and the claude `wrapper` (its whole `.app` bundle, if it is in
+  one), the main checkout's `.claude/settings.json`, `settings.local.json`, `skills/`, `agents/` and
+  `commands/`, the seat's own `.claude/settings.json` and `settings.local.json`, and Claude Code's user
+  settings, MCP config, instructions and extensions under `~/.claude`. `.claude/worktrees/` stays
+  editable: Claude Code puts the worktrees it makes there, including those of a worktree seat's
+  subagents, which land under the main checkout;
 - an `ask` on any push to the base branch (from `repo.base`), forced or not, since changes land through
   PRs. It is an early warning for a project whose base branch has no protection. The real control is a
   ruleset on the base branch that blocks force-push and deletion and requires a PR; where one exists,
@@ -169,7 +172,11 @@ What the rules cannot do:
 - A `Read` deny covers Claude's file tools and the file commands it recognises in Bash (`cat`, `head`,
   `tail`, `sed`, `tee`, redirects). It does not cover `grep -r` over a folder, or a Python or Node
   script that opens the file itself.
-- The protected-path `Edit` denies stop the file tools and redirects, not a script that writes the file.
+- The protected-path `Edit` denies stop the file tools, redirects, and `cp`, `mv` and `rm` with a
+  protected file as the target (checked on Claude Code 2.1.316). They match the command text Claude
+  writes, so they do not stop the same command run through another shell or a script (`sh -c 'cp …'`,
+  which qa checked gets through), or a program that writes the file itself, such as a Python or Node
+  script.
 - "Never force-push a branch you did not create" cannot be written as a pattern. Engineers keep
   force-pushing their own branches; only the EM is asked.
 - Any process running as this user can type into a seat's pane, so an ask rule guards against
