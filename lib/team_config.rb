@@ -343,8 +343,10 @@ class TeamConfig
       if s.is_a?(Hash)
         die "roles.#{id}.skills: a mapping entry must be one skill name and its note" unless s.size == 1
         name, note = s.first
-        unless note.is_a?(String) && !note.strip.empty? && !note.include?("\n")
-          die "roles.#{id}.skills: the note for '#{name}' must be one line of text"
+        # The note is written into the prompt as is, so any control character (a newline, but also a
+        # carriage return, tab or escape) would reach the seat raw.
+        unless note.is_a?(String) && !note.strip.empty? && note !~ /[[:cntrl:]]/
+          die "roles.#{id}.skills: the note for '#{name}' must be one line of text, with no control characters"
         end
       else
         name = s

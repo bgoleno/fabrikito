@@ -519,6 +519,10 @@ reject "a skill name with a space" "roles.em.skills: 'code review' is not a skil
 reject "a skill listed twice" "roles.em.skills: 'code-review' is listed twice" "" "" ", skills: [code-review, code-review]"
 reject "a skill entry with two names" "roles.em.skills: a mapping entry must be one skill name and its note" "" "" ', skills: [{ a: "x", b: "y" }]'
 reject "a skill note over two lines" "roles.em.skills: the note for 'a' must be one line of text" "" "" ', skills: [{ a: "x\ny" }]'
+# A carriage return or other control character would be written raw into the prompt.
+reject "a skill note with a carriage return" "roles.em.skills: the note for 'a' must be one line of text" "" "" ', skills: [{ a: "x\ry" }]'
+reject "a skill note with an escape character" "roles.em.skills: the note for 'a' must be one line of text" "" "" ', skills: [{ a: "x\ey" }]'
+reject "a skill note with a tab" "roles.em.skills: the note for 'a' must be one line of text" "" "" ', skills: [{ a: "x\ty" }]'
 # The wrapper claude runs through is protected like factory.sh: a file, or its whole .app bundle.
 mk; ws=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml settings em)
 echo "$ws" | grep -q "wrap\|\.app" && bad "no wrapper configured, but a wrapper deny was added" || ok "no wrapper configured: no wrapper deny"
