@@ -64,10 +64,17 @@ printf '#!/bin/sh\necho "$TEAM_ROLE $(pwd -P) env=$(test -f .env.local && echo y
 #           mentionsel (text "sel @sr" with the list's first row highlighted: Enter completes it)
 #           cut (the screen ends at the input row: no bottom rule and no footer, as a pane too
 #           short for what is drawn above the box)
+#           small (the tall box, with the seat's output file, the diff panel notice, drawn only
+#           while the pane is under 110 columns; under it, at 13 rows or fewer, the screen ends at
+#           the input row, as #95 measured), small-clean (the tall box with no notice; under 12
+#           rows a paste grows the box past the bottom, so its rule and footer are gone, as qa2
+#           measured on #73)
+# On SIGWINCH it redraws at the new size, as Claude Code does.
 # A submitted line that starts with ! is run by /bin/sh the way Claude Code's Bash tool runs a
 # command: in a child that leaves the pane's terminal (setsid), so the child has no tty of its own
 # and only the stand-in, its parent, holds the pane's tty.
 cat > $T/c.c <<'C'
+#include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
@@ -80,6 +87,8 @@ static char buf[65536], hist[65536], head[4096], mode[64], name[256];
 static size_t blen, hlen, pstart;
 static int npaste;
 static const char *base;
+static volatile sig_atomic_t winch;
+static void onwinch(int s) { (void)s; winch = 1; }
 static void cat(const char *what) {
   char path[4096]; snprintf(path, sizeof path, "%s-%s.txt", base, what);
   FILE *f = fopen(path, "r"); int c; if (!f) return;
@@ -135,15 +144,19 @@ static void tall(void) {
   else if (!strcmp(mode, "tall-dim")) printf(" \033[2mrun the tests\033[0m");
 }
 static void draw(void) {
+  struct winsize ws; int cols = 220, rows = 50;
+  if (ioctl(1, TIOCGWINSZ, &ws) == 0 && ws.ws_col && ws.ws_row) { cols = ws.ws_col; rows = ws.ws_row; }
+  int small = !strncmp(mode, "small", 5), notice = !strcmp(mode, "small") && cols < 110;
   printf("\033[H\033[2J%s\r\n", head);
   fwrite(hist, 1, hlen, stdout);
   if (has("prompt")) { cat("prompt"); fflush(stdout); return; }
-  cat("output");
+  if (!small || notice) cat("output");
   if (mention_open()) mention_list();
   if (name[0]) printf("────────────────────────────────────────── %s ──\r\n\xe2\x9d\xaf\xc2\xa0", name);
   else printf("%s\r\n\xe2\x9d\xaf\xc2\xa0", RULE);
-  if (!strncmp(mode, "tall", 4)) {
+  if (!strncmp(mode, "tall", 4) || small) {
     tall();
+    if ((notice && rows <= 13) || (small && blen && rows < 12)) { fflush(stdout); return; }
     printf("\r\n%s\r\n  SL line one\r\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle)\r\n", RULE);
     fflush(stdout); return;
   }
@@ -160,7 +173,7 @@ static void draw(void) {
 /* At the end of a paste, Claude Code 2.1.316 shows a paste of more than 800 characters, or of 4 or
    more lines, as a placeholder (measured 2026-10-30). tall-typed: text typed right after the paste. */
 static void endpaste(void) {
-  if (strncmp(mode, "tall", 4)) return;
+  if (strncmp(mode, "tall", 4) && strncmp(mode, "small", 5)) return;
   size_t len = blen - pstart; int nl = 0;
   for (size_t i = pstart; i < blen; i++) if (buf[i] == '\n') nl++;
   if (len > 800 || nl >= 3) {
@@ -184,9 +197,13 @@ int main(int n, char **v) {
   for (int i = 1; i + 1 < n; i++) if (!strcmp(v[i], "-n")) snprintf(name, sizeof name, "%s", v[i + 1]);
   signal(SIGCHLD, SIG_IGN);                      /* ! commands are not waited for; no zombies */
   tcgetattr(0, &t); cfmakeraw(&t); tcsetattr(0, TCSANOW, &t);
+  struct sigaction sw; memset(&sw, 0, sizeof sw); sw.sa_handler = onwinch; sigaction(SIGWINCH, &sw, 0);  /* no SA_RESTART */
   printf("\033[?2004h"); draw();
   int c, esc = 0, paste = 0; char seq[8]; int sl = 0;
-  while (read(0, &c, 1) == 1) {
+  for (;;) {
+    ssize_t got = read(0, &c, 1);
+    if (got < 0 && errno == EINTR) { if (winch) { winch = 0; if (!paste) draw(); } continue; }
+    if (got != 1) break;
     unsigned char b = (unsigned char)c;
     if (kl) { fputc(b, kl); fflush(kl); }
     if (esc) {                                   /* ESC [ 2 0 0 ~ and ESC [ 2 0 1 ~ mark a paste */
@@ -772,7 +789,7 @@ echo "--- say delivers only to a seat showing its input box"
 # with no numbers and no key hint: any dialog say does not know must fail closed too.
 roles=""
 # em is a seat here too: say takes its sender from TEAM_ROLE=em, which must be a role of the team (#89).
-for r in em pp pm pd ph pu pb pf ps pg px pk pq po pn pz ta tb tc td te pv pw py; do roles="$roles  $r: { title: Seat $r, workdir: { type: project, path: $T/proj }, prompt_text: \"$r\" }
+for r in em pp pm pd ph pu pb pf ps pg px pk pq po pn pz ta tb tc td te pv pw py sa sb sc; do roles="$roles  $r: { title: Seat $r, workdir: { type: project, path: $T/proj }, prompt_text: \"$r\" }
 "; done
 cat > $T/tp.yaml <<Y
 team: tp
@@ -849,6 +866,8 @@ echo mention > $T/fake-pn-mode.txt; echo mentionsel > $T/fake-pz-mode.txt
 notice=$(printf '\033[2m\342\225\255%s\033[0m\033[38;5;246m\342\234\225\033[2m\033[39m\342\224\200\342\225\256\n\342\224\202\033[0m \033[38;5;246mResize your terminal to at least 110 columns to show the diff panel\033[39m%19s\033[2m\342\224\202\n\342\225\260%s\342\225\257\n\033[0m' \
   "$(printf '\342\224\200%.0s' $(seq 85))" "" "$(printf '\342\224\200%.0s' $(seq 87))")
 printf '%s\n' "$notice" > $T/fake-pv-output.txt; cp $T/fake-pv-output.txt $T/fake-pw-output.txt; echo cut > $T/fake-pw-mode.txt
+# sa, sb, sc (#84): see "Short panes" below. sa draws the notice only while it is under 110 columns.
+cp $T/fake-pv-output.txt $T/fake-sa-output.txt; echo small > $T/fake-sa-mode.txt; echo small-clean > $T/fake-sb-mode.txt; echo tall > $T/fake-sc-mode.txt
 printf '%s\n%s\n' "$notice" "$fake_prompt" > $T/fake-py-prompt.txt
 { printf '%s\n' "$fake_prompt"; for i in $(seq 1 5); do echo "later output line $i"; done; } > $T/fake-pq-output.txt
 cat > $T/fake-po-output.txt <<'M'
@@ -918,9 +937,10 @@ before=$(wc -c < $T/keys-pq.log)
 cf=$(PATH=$T/shim:$PATH TEAM_ROLE=em $S -c $T/tp.yaml say pq "capture fails" 2>&1); rc=$?; sleep 1
 [ $rc -ne 0 ] && echo "$cf" | grep -q "could not read" && [ "$(wc -c < $T/keys-pq.log)" = "$before" ] && tail -1 $T/state/messages.log | grep -q "	pq	NOT-DELIVERED	capture fails" && ok "a failed screen capture refuses delivery, logs NOT-DELIVERED, sends no keys" || { bad "failed capture (rc=$rc)"; echo "$cf"; tail -1 $T/state/messages.log; }
 # A message taller than the input box (#47). Claude Code 2.1.316 scrolls a full box and shows only
-# the end of the text; below 801 characters and 4 lines it is not collapsed to a placeholder. ta..td
-# model that box in a 60x16 pane, which shows 3 rows.
-for r in ta tb tc td te; do tmux resize-window -t "=tp-$r:" -x 60 -y 16; tmux send-keys -t "=tp-$r:" C-l; done; sleep 1
+# the end of the text; below 801 characters and 4 lines it is not collapsed to a placeholder. ta..te
+# model that box in a 110x16 pane, which shows 3 rows: the smallest pane say does not resize (#84),
+# so the scrolled box is still what it reads there.
+for r in ta tb tc td te; do tmux resize-window -t "=tp-$r:" -x 110 -y 16; tmux send-keys -t "=tp-$r:" C-l; done; sleep 1
 msg() { local m="" i=0; while [ ${#m} -lt $1 ]; do i=$((i+1)); m="$m w$(printf %03d $i)"; done; m=${m# }; printf '%s' "${m:0:$1}"; }
 # tall <role> <ok|refused> <message> <what>: say's exit status, and whether an Enter followed the paste.
 tall() {
@@ -933,16 +953,56 @@ tall() {
     [ $rc -ne 0 ] && [ "$(tail -c 6 $T/keys-$1.log | od -An -c | tr -d ' \n')" = '033[201~' ] && ok "say refuses $4" || { bad "say refuses $4 (rc=$rc)"; cat $T/tall.out; }
   fi
 }
-tall ta ok "$(msg 290)" "a message taller than the box (300 characters, 6 rows in a 3-row box)"
+tall ta ok "$(msg 490)" "a message taller than the box (500 characters, 5 rows in a 3-row box)"
 tall ta ok "$(msg 790)" "a tall message at the 800-character edge (shown as text)"
 tall ta ok "$(msg 791)" "a message one past the edge (801 characters, a placeholder)"
 tall ta ok "$(msg 140)"$'\n'"$(msg 140)"$'\n'"$(msg 140)" "a tall message of 3 lines (shown as text)"
 tall ta ok "$(msg 60)"$'\n'"$(msg 60)"$'\n'"$(msg 60)"$'\n'"$(msg 60)" "a message of 4 lines (a placeholder)"
-tall tb refused "$(msg 290)" "a tall message with dim text after it"
-tall tc refused "$(msg 290)" "a tall message with text typed after it"
-tall td refused "$(msg 290)" "the end of a tall message in a box that is not full"
+# Each refusal after the paste names its own cause (#84), not the generic "not empty" one.
+why() { grep -qF "$1" $T/tall.out && ok "the refusal says why: $2" || { bad "refusal reason: $2"; cat $T/tall.out; }; }
+tall tb refused "$(msg 490)" "a tall message with dim text after it"; why "dim text" "dim text was drawn next to the message"
+tall tc refused "$(msg 490)" "a tall message with text typed after it"; why "does not end with the message" "the box does not end with the message"
+tall td refused "$(msg 490)" "the end of a tall message in a box that is not full"; why "shows 2 of its 3 rows" "the box shows 2 of its 3 rows"
 # A full box whose visible end matches but is under 40 characters is too little to go on: refused.
-tall te refused "$(msg 50)"$'\n'"ok"$'\n'"go" "a tall message whose visible end is under 40 characters"
+tall te refused "$(msg 110)"$'\n'"ok"$'\n'"go" "a tall message whose visible end is under 40 characters"; why "under the 40 say needs" "too little of the message's end is visible"
+# Short panes (#84). The team view gives seats panes of 89x13 (10 seats) and 10 to 11 rows (12
+# seats). There the diff panel notice pushes the box off the screen (sa: 89x13, the notice, its
+# window-size unset), or a paste grows the box past the bottom (sb: 80x10, no notice, window-size
+# manual, as resize-window leaves it). say delivers to them by growing the seat's window to 220x50
+# for the delivery, then puts back its size and window-size exactly. A big seat (sc) is never resized.
+tmux resize-window -t '=tp-sa:' -x 89 -y 13; tmux set-option -w -u -t '=tp-sa:' window-size; tmux resize-window -t '=tp-sb:' -x 80 -y 10; sleep 1
+geo() { printf '%s %s' "$(tmux display-message -p -t "=tp-$1:" '#{window_width}x#{window_height}')" "opt=[$(tmux show-options -w -t "=tp-$1:" window-size 2>&1)]"; }
+ga=$(geo sa); gb=$(geo sb); gc=$(geo sc)
+[ "$ga" = "89x13 opt=[]" ] && [ "$gb" = "80x10 opt=[window-size manual]" ] && [ "${gc%% *}" = 220x50 ] || bad "test setup: seat geometry (sa $ga, sb $gb, sc $gc)"
+tmux capture-pane -p -t '=tp-sa:' | grep -qF "Resize your terminal to at least 110 columns" && ok "stand-in: sa (89x13) draws the diff panel notice" || bad "stand-in: no notice on sa"
+mkdir -p $T/rshim && printf '#!/bin/sh\n[ "$1" = resize-window ] && echo "$*" >> %s/resize.log\nexec %s "$@"\n' $T "$(command -v tmux)" > $T/rshim/tmux && chmod +x $T/rshim/tmux; : > $T/resize.log
+PATH=$T/rshim:$PATH tall sa ok "short pane, one line" "a one-line message to a seat in an 89x13 pane with the diff panel notice"
+PATH=$T/rshim:$PATH tall sa ok "line one"$'\n'"line two"$'\n'"line three" "a three-line message to the 89x13 seat"
+PATH=$T/rshim:$PATH tall sb ok "short pane, one line" "a one-line message to a seat in an 80x10 pane (its box would grow past the bottom)"
+PATH=$T/rshim:$PATH tall sb ok "$(msg 290)"$'\n'"two" "a two-line, 300-character message to the 80x10 seat"
+[ "$(geo sa)" = "$ga" ] && [ "$(geo sb)" = "$gb" ] && ok "after each, the small seats' size and window-size are as before ($ga; $gb)" || bad "small seat geometry after say (sa $(geo sa), was $ga; sb $(geo sb), was $gb)"
+grep -q "=tp-sa:" $T/resize.log && grep -q "=tp-sb:" $T/resize.log && ok "say resized the small seats' windows for the delivery" || { bad "say did not resize the small seats"; cat $T/resize.log; }
+: > $T/resize.log; PATH=$T/rshim:$PATH tall sc ok "big pane" "a message to a seat in a 220x50 pane"
+[ ! -s $T/resize.log ] && [ "$(geo sc)" = "$gc" ] && ok "a seat in a big pane is not resized (no resize-window, same size and window-size)" || { bad "the big seat was touched ($(geo sc), was $gc)"; cat $T/resize.log; }
+# Two says to one small seat at once: each message arrives whole, one after the other, or one is
+# refused with a reason. Never an interleaved box. The keys the seat read must be whole pastes only.
+: > $T/keys-sa.log
+for i in 1 2; do ( TEAM_ROLE=em $S -c $T/tp.yaml say sa "concurrent $i $(msg 200)" >$T/conc$i.out 2>&1; echo $? > $T/conc$i.rc ) & done; wait; sleep 1
+conc=$(ruby -e '
+  s = File.binread(ARGV[0]); b = s.scan(/\e\[200~(.*?)\e\[201~(\r?)/m)
+  whole = b.map { |t, e| "\e[200~#{t}\e[201~#{e}" }.join == s && b.all? { |t, e| e == "\r" && t =~ /\A\[from em\] concurrent [12] w001/ }
+  puts "#{whole ? "whole" : "MIXED"} #{b.size}"' $T/keys-sa.log)
+r1=$(cat $T/conc1.rc); r2=$(cat $T/conc2.rc)
+if [ "$r1" = 0 ] && [ "$r2" = 0 ]; then [ "$conc" = "whole 2" ] && ok "two concurrent says to a small seat both deliver, one after the other, never mixed" || { bad "concurrent says ($conc)"; od -c $T/keys-sa.log | head; }
+else [ "$conc" = "whole 1" ] && grep -qhF "another say" $T/conc1.out $T/conc2.out && ok "of two concurrent says to a small seat, one delivers and the other is refused with a reason" || { bad "concurrent says (rc $r1 $r2, $conc)"; cat $T/conc1.out $T/conc2.out; }; fi
+[ "$(geo sa)" = "$ga" ] && ok "after the concurrent says, sa's size and window-size are as before" || bad "sa geometry after concurrent says ($(geo sa), was $ga)"
+# A say stopped mid-delivery (TERM) still puts the window back, and sends no Enter. The paste is held
+# up by a stand-in tmux; bash runs the trap once that command returns.
+mkdir -p $T/pshim && printf '#!/bin/sh\n[ "$1" = paste-buffer ] && sleep 3\nexec %s "$@"\n' "$(command -v tmux)" > $T/pshim/tmux && chmod +x $T/pshim/tmux
+: > $T/keys-sa.log; PATH=$T/pshim:$PATH TEAM_ROLE=em $S -c $T/tp.yaml say sa "stopped midway" >$T/term.out 2>&1 & tp=$!
+sleep 2; kill -TERM $tp; wait $tp; trc=$?; sleep 1
+[ $trc -ne 0 ] && grep -qF "stopped midway" $T/keys-sa.log && [ "$(geo sa)" = "$ga" ] && [ "$(tail -c 1 $T/keys-sa.log | od -An -c | tr -d ' \n')" != '\r' ] && ok "a say stopped with TERM mid-delivery puts sa's size and window-size back, and sends no Enter" || { bad "say stopped mid-delivery (rc=$trc, $(geo sa), was $ga)"; cat $T/term.out; }
+tmux send-keys -t '=tp-sa:' C-u; sleep 0.5
 $S -c $T/tp.yaml down --yes >/dev/null 2>&1
 echo "--- permission validation (check must refuse each file)"
 # A minimal valid team file; $1 is the sessions.claude body, $2 extra top-level lines, $3 extra keys for role em.
