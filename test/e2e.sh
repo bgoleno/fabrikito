@@ -11,12 +11,20 @@ S=$SRC/factory.sh
 T=$(mktemp -d "${TMPDIR:-/tmp}/team-e2e.XXXX"); T=$(cd "$T" && pwd); mkdir -p $T/bin $T/tmux $T/local
 ROOT="Projects/_teamtest-$$"; VOL=${TEST_VOLUME:-}
 # Start from a clean environment. Run from a seat, this shell inherits what the seat's launcher
-# and claude set there (DISABLE_AUTOUPDATER, TEAM_*, CLAUDE*, TMUX*), and the test's tmux server
+# and claude set there (DISABLE_AUTOUPDATER, TEAM_*, CLAUDE* including CLAUDE_CONFIG_DIR, TMUX*), and the test's tmux server
 # and everything it starts would inherit it in turn: the leak check on DISABLE_AUTOUPDATER below
 # would fail only when run from a seat, and a stand-in seat could reach the real seat's tmux or
 # messaging socket (#75). This is the one list of what is cleared; add any new launcher variable here.
+# It runs before anything below exports a TEAM_* variable (TEAM_VIEW=0), or it would clear it.
 for v in $(compgen -e); do case $v in DISABLE_AUTOUPDATER|TEAM_*|CLAUDE*|TMUX*) unset "$v" ;; esac; done
 export TMUX_TMPDIR=$T/tmux TEAM_STATE_DIR=$T/state
+# No run may drive iTerm (#93). A stand-in osascript first on PATH records every call and does
+# nothing, and the run fails at the end if it was called: `up` opens a real iTerm window unless told
+# not to, every run left its windows on the user's screen, and enough of them used up every pty on
+# the machine, so tmux could no longer start the test's own seats. The view is off for the whole run
+# (TEAM_VIEW=0), and every up says --no-view too, so dropping either one still opens no window.
+printf '#!/bin/sh\necho "osascript $*" >> %s/osascript.log\nexit 1\n' "$T" > $T/bin/osascript; chmod +x $T/bin/osascript
+export PATH=$T/bin:$PATH TEAM_VIEW=0
 # Stopped early (a gate timeout kills this test's process group): stop the private tmux server,
 # which has left that group, and remove what the test made, as the cleanup at the end does.
 on_signal() {
@@ -39,7 +47,12 @@ git init -q --bare $T/local/origin.git; git clone -q $T/local/origin.git $T/repo
 #   mode    swallow (input never shows), below (a list under the box), prefill (text left in the box),
 #           suggest (a dim suggested prompt in the empty box), sticky (that suggestion stays drawn after
 #           any text), mixed (typed text and the dim suggestion)
+# A submitted line that starts with ! is run by /bin/sh the way Claude Code's Bash tool runs a
+# command: in a child that leaves the pane's terminal (setsid), so the child has no tty of its own
+# and only the stand-in, its parent, holds the pane's tty.
 cat > $T/c.c <<'C'
+#include <fcntl.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -86,6 +99,7 @@ int main(int n, char **v) {
   size_t h = (size_t)snprintf(head, sizeof head, "FAKE-CLAUDE");
   for (int i = 1; i < n && h < sizeof head - 60; i++) h += (size_t)snprintf(head + h, sizeof head - h, " [%.50s]", v[i]);
   for (int i = 1; i + 1 < n; i++) if (!strcmp(v[i], "-n")) snprintf(name, sizeof name, "%s", v[i + 1]);
+  signal(SIGCHLD, SIG_IGN);                      /* ! commands are not waited for; no zombies */
   tcgetattr(0, &t); cfmakeraw(&t); tcsetattr(0, TCSANOW, &t);
   printf("\033[?2004h"); draw();
   int c, esc = 0, paste = 0; char seq[8]; int sl = 0;
@@ -102,6 +116,11 @@ int main(int n, char **v) {
     if (b == '\r' || b == '\n') {
       if (paste) { if (blen < sizeof buf - 1) buf[blen++] = '\n'; }
       else {                                      /* submit: the transcript echoes it, the box empties */
+        if (blen && buf[0] == '!' && fork() == 0) {
+          int fd = open("/dev/null", O_RDWR);
+          setsid(); signal(SIGCHLD, SIG_DFL); dup2(fd, 0); dup2(fd, 1); dup2(fd, 2); buf[blen] = 0;
+          execl("/bin/sh", "sh", "-c", buf + 1, (char *)0); _exit(127);
+        }
         hlen += (size_t)snprintf(hist + hlen, sizeof hist - hlen, "\xe2\x9d\xaf %.*s\r\n", (int)blen, buf);
         if (hlen > sizeof hist - 8192) hlen = 0;
         blen = 0;
@@ -139,15 +158,24 @@ export PATH=$T/bin:$PATH
 # legacy worktree for w2, internal disk
 git -C $T/repo worktree add -q --detach $T/repo/.claude/worktrees/team-w2 origin/main
 echo "--- up (w2 has a legacy worktree, expect it to be refused)"
-out=$($S -c $T/team.yaml up 2>&1); echo "$out" | grep -E "start|error|ATTENTION" | cut -c1-170
+out=$($S -c $T/team.yaml up --no-view 2>&1); echo "$out" | grep -E "start|error|ATTENTION" | cut -c1-170
 echo "$out" | grep -q "start  w1" && ok "w1 started" || bad "w1 started"
 echo "$out" | grep -q "migrate w2" && ok "w2 refused with migrate hint" || bad "w2 refused with migrate hint"
 case "$(git -C $T/repo worktree list)" in *"$VOL/$ROOT/team-w1"*) ok "w1 worktree is on the volume";; *) bad "w1 worktree is on the volume";; esac
 sleep 3
 grep -q "^w1 .*--model sonnet --effort low" $T/args.log && ok "w1 launched with --model sonnet --effort low" || { bad "w1 args"; cat $T/args.log; }
-grep -qF "em --permission-mode bypassPermissions --settings $T/state/settings/em.json -n tt-em" $T/args.log && ok "em launched with the team mode, its settings file, no --model/--effort (inherit)" || { bad "em args"; cat $T/args.log; }
-grep -qF "w1 --model sonnet --effort low --permission-mode default --settings $T/state/settings/w1.json -n tt-w1" $T/args.log && ok "w1 launched with its own mode (default) and its settings file" || { bad "w1 mode/settings args"; cat $T/args.log; }
+PLUG=$(cd $SRC/plugin && pwd -P)
+grep -qF "em --permission-mode bypassPermissions --plugin-dir $PLUG --settings $T/state/settings/em.json -n tt-em" $T/args.log && ok "em launched with the team mode, the factory plugin, its settings file, no --model/--effort (inherit)" || { bad "em args"; cat $T/args.log; }
+grep -qF "w1 --model sonnet --effort low --permission-mode default --plugin-dir $PLUG --settings $T/state/settings/w1.json -n tt-w1" $T/args.log && ok "w1 launched with its own mode (default) and its settings file" || { bad "w1 mode/settings args"; cat $T/args.log; }
 grep -E "^(em|w1) " $T/args.log | grep -c -- "--effort" | grep -q '^1$' && ok "only w1 got --effort" || bad "only w1 got --effort"
+echo "--- factory plugin"
+# The plugin each seat loads: a manifest named factory and the placeholder skill that proves loading.
+ruby -rjson -e 'exit(JSON.parse(File.read(ARGV[0]))["name"] == "factory" ? 0 : 1)' $SRC/plugin/.claude-plugin/plugin.json 2>/dev/null && ok "plugin.json parses and names the plugin factory (skills are /factory:<skill>)" || bad "plugin.json"
+grep -qx "name: ping" $SRC/plugin/skills/ping/SKILL.md 2>/dev/null && ok "the placeholder skill skills/ping exists" || bad "skills/ping/SKILL.md"
+# args.log holds each launch line followed by the multi-line prompt, so each seat's line is found by its role.
+pd() { grep -E "^$1 " $T/args.log | grep -o -- "--plugin-dir [^ ]*"; }
+[ "$PLUG" = "$(cd $SRC && pwd -P)/plugin" ] && [ "$(pd em)" = "--plugin-dir $PLUG" ] && [ "$(pd w1)" = "--plugin-dir $PLUG" ] && ok "every seat got --plugin-dir once, with the real path of <install>/plugin" || { bad "--plugin-dir per seat"; cat $T/args.log; }
+$S -c $T/team.yaml check 2>&1 | grep -qxF "plugin    : $PLUG (skills as /factory:<skill>)" && ok "check: plugin header shows the loaded plugin" || { bad "check: plugin header"; $S -c $T/team.yaml check 2>&1 | head -10; }
 echo "--- generated settings"
 # The user's rules, in team-then-role order, without duplicates. Rules the launcher adds itself
 # (Edit denies on its own files) are checked separately, so they are left out of these lists.
@@ -170,11 +198,11 @@ disable=disable'
 RT=$(cd $T && pwd -P); RSRC=$(cd $SRC && pwd -P); RW1=$(cd $VOL/$ROOT/team-w1 && pwd -P); RHC=$(cd ~/.claude && pwd -P); RH=$(cd ~ && pwd -P)
 missing=""
 for p in "$RT/state/settings/**" "$RT/state/launch/**" "$RT/state/prompts/**" "$RT/state/messages.log" "$RT/team.yaml" \
-  "$RSRC/roles/common.md" "$RSRC/factory.sh" "$RSRC/lib/**" "$RSRC/roles/**" "$RT/bin/wrap" \
+  "$RSRC/roles/common.md" "$RSRC/factory.sh" "$RSRC/lib/**" "$RSRC/roles/**" "$RSRC/plugin/**" "$RT/bin/wrap" \
   "$RT/repo/.claude/settings.json" "$RT/repo/.claude/settings.local.json" "$RT/repo/.claude/skills/**" "$RT/repo/.claude/agents/**" "$RT/repo/.claude/commands/**" \
   "$RT/repo/.mcp.json" "$RT/repo/.claude/hooks/**" "$RT/repo/.claude/CLAUDE.md" "$RT/repo/.claude/rules/**" \
   "$RW1/.claude/settings.json" "$RW1/.claude/settings.local.json" "$RHC/settings.json" "$RH/.claude.json" "$RHC/CLAUDE.md" \
-  "$RHC/plugins/**" "$RHC/skills/**" "$RHC/agents/**" "$RHC/commands/**" "$RHC/hooks/**"; do
+  "$RHC/plugins/**" "$RHC/skills/**" "$RHC/agents/**" "$RHC/commands/**" "$RHC/hooks/**" "$RHC/rules/**"; do
   rules $T/state/settings/w1.json deny | grep -qxF "Edit(/$p)" || missing="$missing $p"
 done
 [ -z "$missing" ] && ok "w1.json: Edit deny on every protected path" || { bad "protected paths missing:$missing"; rules $T/state/settings/w1.json deny; }
@@ -274,14 +302,50 @@ n=$(wc -l < $T/state/messages.log)
 LC_ALL=C TEAM_ROLE=em $S -c $T/team.yaml say w2 $'c locale: csi \xc2\x9b, e-acute \xc3\xa9' >/dev/null 2>&1
 [ "$(wc -l < $T/state/messages.log)" -eq $((n + 1)) ] && [ "$(tail -1 $T/state/messages.log | cut -f5-)" = $'c locale: csi \\xC2\\x9B, e-acute \xc3\xa9' ] &&
   ok "log: under LC_ALL=C the message is escaped, not logged as a failure" || { bad "log: LC_ALL=C"; tail -1 $T/state/messages.log; }
+# Prompt and team files are read as UTF-8 whatever the locale (#72). say validates the team file,
+# which renders every prompt, so a non-ASCII prompt or kickoff must not stop it under LC_ALL=C.
+# A prompt file, not prompt_text: YAML hands back UTF-8 strings in any locale, a plain read does not.
+printf 'em prompt, caf\xc3\xa9 \xe2\x80\xa6\n' > $T/em-u.md
+EMU=$T/em-u.md ruby -pe 'sub(/prompt_text: "em prompt"/) { "prompt: #{ENV["EMU"]}, kickoff: \"start, caf\u00e9 \u2026\"" }' $T/team.yaml > $T/team-u.yaml
+n=$(wc -l < $T/state/messages.log)
+LC_ALL=C TEAM_ROLE=em $S -c $T/team-u.yaml say w2 'from a team with a non-ASCII prompt' >/dev/null 2>&1
+[ "$(wc -l < $T/state/messages.log)" -eq $((n + 1)) ] && tail -1 $T/state/messages.log | grep -qF "from a team with a non-ASCII prompt" \
+  && ok "say under LC_ALL=C with a non-ASCII prompt in the team" || { bad "say under LC_ALL=C with a non-ASCII prompt"; tail -1 $T/state/messages.log; }
+LC_ALL=C ruby $SRC/lib/team_config.rb $T/team-u.yaml render em 2>&1 | grep -qF $'em prompt, caf\xc3\xa9 \xe2\x80\xa6' \
+  && LC_ALL=C ruby $SRC/lib/team_config.rb $T/team-u.yaml kickoff em 2>&1 | grep -qxF $'start, caf\xc3\xa9 \xe2\x80\xa6' \
+  && ok "a non-ASCII prompt and kickoff come out byte for byte under LC_ALL=C" || bad "non-ASCII prompt or kickoff under LC_ALL=C"
 # The sender comes from TEAM_ROLE, which nothing validates: it is escaped like the message.
 n=$(wc -l < $T/state/messages.log)
 TEAM_ROLE=$'e\tm\nx' $S -c $T/team.yaml say w2 "from an odd sender" >/dev/null 2>&1
 [ "$(wc -l < $T/state/messages.log)" -eq $((n + 1)) ] && [ "$(tail -1 $T/state/messages.log | cut -f2-5)" = 'e\tm\nx	w2	NOT-DELIVERED	from an odd sender' ] &&
   ok "log: a TEAM_ROLE with a tab and a newline is escaped, one line" || { bad "log: odd TEAM_ROLE"; tail -2 $T/state/messages.log | od -c | head -6; }
+echo "--- say with TEAM_ROLE unset (#41): never [from owner] from inside a seat"
+# waitlog <lines before>: wait up to 10s for say to append its log line.
+waitlog() { local i; for i in $(seq 1 20); do [ "$(wc -l < $T/state/messages.log)" -gt "$1" ] && return 0; sleep 0.5; done; return 1; }
+# Inside w1's pane: the stand-in runs the command in a child with no tty (as the Bash tool does) and
+# with TEAM_ROLE removed, as a cleared or rebuilt environment would leave it.
+n=$(wc -l < $T/state/messages.log)
+tmux send-keys -t '=tt-w1:' -l "!env -u TEAM_ROLE $S -c $T/team.yaml say em 'unset role inside w1'"; tmux send-keys -t '=tt-w1:' Enter
+waitlog "$n"; sleep 1
+em_screen=$(tmux capture-pane -p -t '=tt-em:')
+! echo "$em_screen" | grep -qF "[from owner] unset role inside w1" && ! tail -1 $T/state/messages.log | grep -q "	owner	" &&
+  ok "say from inside a seat with TEAM_ROLE unset is not labelled [from owner]" || { bad "say inside a seat was labelled owner"; tail -1 $T/state/messages.log; }
+echo "$em_screen" | grep -qF "[from w1] unset role inside w1" && [ "$(tail -1 $T/state/messages.log | cut -f2-4)" = "w1	em	delivered" ] &&
+  ok "say from inside a seat with TEAM_ROLE unset is labelled with that seat's role" || { bad "say inside a seat: label"; tail -1 $T/state/messages.log; echo "$em_screen" | tail -8; }
+# Outside every seat: this test's own process (its terminal is not a seat's pane) is the owner.
+n=$(wc -l < $T/state/messages.log)
+env -u TEAM_ROLE $S -c $T/team.yaml say w1 "unset role outside every seat" >/dev/null 2>&1; sleep 1
+tmux capture-pane -p -t '=tt-w1:' | grep -qF "[from owner] unset role outside every seat" && [ "$(tail -n +$((n + 1)) $T/state/messages.log | cut -f2-4)" = "owner	w1	delivered" ] &&
+  ok "say from outside every seat with TEAM_ROLE unset is still [from owner]" || { bad "say outside seats: owner label"; tail -1 $T/state/messages.log; }
+# A tmux pane of the owner's that is not a seat, on the seats' own server, named with the team prefix.
+n=$(wc -l < $T/state/messages.log)
+tmux new-session -d -s tt-notaseat "env -u TEAM_ROLE $S -c $T/team.yaml say w1 'unset role from a pane that is not a seat'; sleep 30"
+waitlog "$n"; sleep 1; tmux kill-session -t '=tt-notaseat' 2>/dev/null
+tmux capture-pane -p -t '=tt-w1:' | grep -qF "[from owner] unset role from a pane that is not a seat" && [ "$(tail -n +$((n + 1)) $T/state/messages.log | cut -f2-4)" = "owner	w1	delivered" ] &&
+  ok "say from a tmux pane that is not a seat with TEAM_ROLE unset is still [from owner]" || { bad "say from a non-seat pane: owner label"; tail -1 $T/state/messages.log; }
 echo "--- migrate then up w2"
 $S -c $T/team.yaml migrate w2 2>&1 | grep -E "moved|REFUSE|skip" | cut -c1-150
-$S -c $T/team.yaml up w2 2>&1 | grep -E "start|error" | cut -c1-150
+$S -c $T/team.yaml up --no-view w2 2>&1 | grep -E "start|error" | cut -c1-150
 case "$(git -C $T/repo worktree list)" in *"$VOL/$ROOT/team-w2"*) ok "w2 recreated on the volume";; *) bad "w2 recreated on the volume";; esac
 [ ! -d $T/repo/.claude/worktrees/team-w2 ] && ok "legacy w2 folder gone" || bad "legacy w2 folder gone"
 echo "--- status"; $S -c $T/team.yaml status | cut -c1-150
@@ -295,7 +359,7 @@ echo "--- unmounted volume"
 sed "s#volume: $VOL#volume: /Volumes/NotMounted#" $T/team.yaml > $T/team2.yaml
 $S -c $T/team.yaml down --yes w2 >/dev/null
 echo '  w3: { title: Worker Three, workdir: { type: worktree }, prompt_text: "w3 prompt" }' >> $T/team2.yaml
-rm_out=$($S -c $T/team2.yaml up w3 2>&1); echo "$rm_out" | grep -E "error|skip" | cut -c1-150 | head -2
+rm_out=$($S -c $T/team2.yaml up --no-view w3 2>&1); echo "$rm_out" | grep -E "error|skip" | cut -c1-150 | head -2
 echo "$rm_out" | grep -q "is not mounted; refusing" && ok "unmounted volume refused with a clear error" || { bad "unmounted volume refused"; echo "<<<$rm_out>>>"; }
 [ ! -e /Volumes/NotMounted ] && ok "nothing created at the missing volume" || bad "nothing created at the missing volume"
 echo "--- iTerm view layout (generated script only; iTerm itself is not driven)"
@@ -506,6 +570,27 @@ REPO_EXTRA='gate: ""' reject "an empty gate" "repo.gate must be a non-empty comm
 REPO_EXTRA='gate: "true", gate_timeout: 0' reject "a zero gate_timeout" "repo.gate_timeout must be a positive whole number of seconds" ""
 REPO_EXTRA='gate: "true", gate_max_blocks: two' reject "a non-integer gate_max_blocks" "repo.gate_max_blocks must be a positive whole number" ""
 REPO_EXTRA='gate: "true"' accept "a gate that no role runs" ""
+printf 'ok\nnot utf-8: \xff\n' > $T/bad-utf8.md
+reject "a prompt file that is not UTF-8" "$T/bad-utf8.md is not valid UTF-8 (line 2)" "" "prompts: { common: $T/bad-utf8.md }"
+mk ""; printf '# \xff\n' >> $T/v.yaml
+out=$($S -c $T/v.yaml check 2>&1); rc=$?
+[ $rc -ne 0 ] && echo "$out" | grep -qF "$T/v.yaml is not valid UTF-8 (line 9)" && ok "rejects a team file that is not UTF-8, naming the line" || { bad "rejects a team file that is not UTF-8 (rc=$rc)"; echo "$out" | tail -2; }
+reject "a non-boolean sessions.claude.plugin" "sessions.claude.plugin must be true or false" "plugin: yes please"
+mk "plugin: false"; pa=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml claude_args em)
+[ $? = 0 ] && ! echo "$pa" | grep -q -- "--plugin-dir" && $S -c $T/v.yaml check 2>&1 | grep -qxF "plugin    : off (sessions.claude.plugin: false)" && ok "plugin: false omits --plugin-dir, and check says off" || { bad "plugin: false"; echo "$pa"; }
+# A team's own --plugin-dir in args is allowed and kept: the flag repeats, so both plugins load.
+mk "args: [--plugin-dir, $T/other-plugin]"; pa=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml claude_args em | tr '\n' ' ')
+[ "$pa" = "--plugin-dir $T/other-plugin --plugin-dir $PLUG " ] && ok "a team's own --plugin-dir in args is kept next to the factory plugin" || { bad "own --plugin-dir in args"; echo "$pa"; }
+# Seats get an Edit deny on a plugin the team loads itself, in both spellings: a folder (existing or
+# not) with everything under it, a .zip as the file, a relative path taken from the seat's folder.
+mk "args: [--plugin-dir, $T/other-plugin, --plugin-dir=rel/plug.zip]"
+pdeny=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml settings em | ruby -rjson -e 'puts JSON.parse(STDIN.read)["permissions"]["deny"]')
+echo "$pdeny" | grep -qxF "Edit(/$RT/other-plugin/**)" && echo "$pdeny" | grep -qxF "Edit(/$RT/proj/rel/plug.zip)" && ok "a team's own --plugin-dir (folder, or .zip relative to the seat) is Edit-protected" || { bad "own plugin dir deny"; echo "$pdeny" | grep -i plug; }
+# An install with no plugin/ folder: refused at load time while the plugin is on, fine when off.
+mkdir -p $T/inst/lib && cp $SRC/lib/team_config.rb $T/inst/lib/
+mk; out=$(TEAM_STATE_DIR=$T/state ruby $T/inst/lib/team_config.rb $T/v.yaml validate 2>&1); rc=$?
+[ $rc != 0 ] && echo "$out" | grep -qF "plugin.json is missing" && ok "rejects plugin on with no plugin manifest in the install" || { bad "missing plugin manifest (rc=$rc)"; echo "$out"; }
+mk "plugin: false"; TEAM_STATE_DIR=$T/state ruby $T/inst/lib/team_config.rb $T/v.yaml validate >/dev/null 2>&1 && ok "accepts plugin: false with no plugin manifest in the install" || bad "plugin: false with no manifest"
 echo "--- skills named in a role's prompt"
 render_em() { ruby $SRC/lib/team_config.rb $T/v.yaml render em 2>&1; }
 accept "skills by name and with a note" "" "" ', skills: [code-review, { "superpowers:test-driven-development": "before writing implementation code" }]'
@@ -525,9 +610,28 @@ reject "a skill name with a space" "roles.em.skills: 'code review' is not a skil
 reject "a skill listed twice" "roles.em.skills: 'code-review' is listed twice" "" "" ", skills: [code-review, code-review]"
 reject "a skill entry with two names" "roles.em.skills: a mapping entry must be one skill name and its note" "" "" ', skills: [{ a: "x", b: "y" }]'
 reject "a skill note over two lines" "roles.em.skills: the note for 'a' must be one line of text" "" "" ', skills: [{ a: "x\ny" }]'
+# A carriage return or other control character would be written raw into the prompt.
+reject "a skill note with a carriage return" "roles.em.skills: the note for 'a' must be one line of text" "" "" ', skills: [{ a: "x\ry" }]'
+reject "a skill note with an escape character" "roles.em.skills: the note for 'a' must be one line of text" "" "" ', skills: [{ a: "x\ey" }]'
+reject "a skill note with a tab" "roles.em.skills: the note for 'a' must be one line of text" "" "" ', skills: [{ a: "x\ty" }]'
 # The wrapper claude runs through is protected like factory.sh: a file, or its whole .app bundle.
 mk; ws=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml settings em)
 echo "$ws" | grep -q "wrap\|\.app" && bad "no wrapper configured, but a wrapper deny was added" || ok "no wrapper configured: no wrapper deny"
+# With CLAUDE_CONFIG_DIR set, Claude Code keeps the user's config there, .claude.json included
+# (code.claude.com/docs/en/claude-directory), so that folder is protected too. ~/.claude and
+# ~/.claude.json stay protected: the owner's sessions started without the variable still load them.
+mk; cc=$(CLAUDE_CONFIG_DIR=$T/cfg TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml settings em | ruby -rjson -e 'puts JSON.parse(STDIN.read)["permissions"]["deny"]')
+missing=""
+for p in settings.json .claude.json CLAUDE.md plugins/** skills/** agents/** commands/** hooks/** rules/**; do echo "$cc" | grep -qxF "Edit(/$RT/cfg/$p)" || missing="$missing $p"; done
+[ -z "$missing" ] && ok "CLAUDE_CONFIG_DIR set: the user's config paths, .claude.json included, are built from it" || { bad "CLAUDE_CONFIG_DIR paths missing:$missing"; echo "$cc" | grep cfg; }
+missing=""
+for p in $RHC/settings.json $RH/.claude.json $RHC/CLAUDE.md "$RHC/plugins/**" "$RHC/skills/**" "$RHC/agents/**" "$RHC/commands/**" "$RHC/hooks/**" "$RHC/rules/**"; do echo "$cc" | grep -qxF "Edit(/$p)" || missing="$missing $p"; done
+[ -z "$missing" ] && ok "CLAUDE_CONFIG_DIR set: ~/.claude and ~/.claude.json stay protected too" || bad "CLAUDE_CONFIG_DIR set, default config paths no longer denied:$missing"
+# The seat uses the folder its rules protect: the launch script pins CLAUDE_CONFIG_DIR, or unsets it.
+grep -qx "unset CLAUDE_CONFIG_DIR" $T/state/launch/em.sh && ok "unset when up ran: the launch script unsets CLAUDE_CONFIG_DIR" || { bad "launch script without CLAUDE_CONFIG_DIR"; grep CLAUDE_CONFIG_DIR $T/state/launch/em.sh; }
+CLAUDE_CONFIG_DIR=$T/cfg TEAM_STATE_DIR=$T/state3 TEAM_VIEW=0 $S -c $T/v.yaml up --no-view >/dev/null 2>&1
+grep -qx "export CLAUDE_CONFIG_DIR=$T/cfg" $T/state3/launch/em.sh && ok "set when up ran: the launch script exports that CLAUDE_CONFIG_DIR" || { bad "launch script with CLAUDE_CONFIG_DIR"; grep CLAUDE_CONFIG_DIR $T/state3/launch/em.sh 2>&1; }
+TEAM_STATE_DIR=$T/state3 $S -c $T/v.yaml down --yes >/dev/null 2>&1
 ln -s $T/bin $T/linkbin; mk "wrapper: $T/linkbin/wrap"; ws=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml settings em)
 echo "$ws" | grep -qF "\"Edit(/$T/linkbin/wrap)\"" && echo "$ws" | grep -qF "\"Edit(/$RT/bin/wrap)\"" && ok "a wrapper reached through a symlinked folder: the link path and the real path are both denied" || { bad "symlinked wrapper"; echo "$ws" | grep -i wrap; }
 mk "wrapper: $T/Wrap.app/Contents/MacOS/Wrap"; ws=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml settings em)
@@ -594,6 +698,20 @@ for r in $(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml ids); do
   n=$(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render "$r" 2>/dev/null | wc -l | tr -d ' ')
   [ "${n:-0}" -gt 0 ] && [ "$n" -lt 200 ] && ok "example seat $r renders a prompt under 200 lines ($n)" || bad "example seat $r renders a prompt of ${n:-?} lines (limit 199)"
 done
+echo "--- prompts render the same whatever the locale"
+# Under LC_ALL=C, or with no locale at all (cron, env -i), ruby would read files as US-ASCII and the
+# first non-ASCII byte in a prompt would stop the render (#72). The output must not depend on it.
+# env -i drops TEAM_SCRIPT and TEAM_LOG, which the prompts name, so every run gets the same values.
+pin="TEAM_SCRIPT=factory.sh TEAM_LOG=messages.log"
+for r in $(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml ids); do
+  want=$(env $pin LC_ALL=en_US.UTF-8 ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render "$r" 2>&1)
+  c=$(env $pin LC_ALL=C ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render "$r" 2>&1); rc=$?
+  none=$(env -i PATH="$PATH" HOME="$HOME" $pin ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render "$r" 2>&1); rn=$?
+  [ $rc = 0 ] && [ $rn = 0 ] && [ -n "$want" ] && [ "$c" = "$want" ] && [ "$none" = "$want" ] \
+    && ok "example seat $r renders the same under LC_ALL=C and with no locale" || { bad "example seat $r under LC_ALL=C (rc=$rc) or no locale (rc=$rn)"; echo "$c" | tail -2; }
+done
+echo "--- iTerm"
+[ ! -e $T/osascript.log ] && ok "nothing in this run called osascript, so no iTerm window was opened" || { bad "osascript was called $(wc -l < $T/osascript.log | tr -d ' ') time(s)"; cut -c1-120 $T/osascript.log | head -5; }
 echo "--- cleanup"
 $S -c $T/team.yaml down --yes >/dev/null 2>&1; tmux kill-server 2>/dev/null
 for w in team-w1 team-w2; do git -C $T/repo worktree remove --force $VOL/$ROOT/$w 2>/dev/null; git -C $T/repo worktree remove --force $T/repo/.claude/worktrees/$w 2>/dev/null; done

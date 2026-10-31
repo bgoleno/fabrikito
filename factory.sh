@@ -150,6 +150,9 @@ cmd_check() {
   echo "project   : $PROJECT_NAME $PROJECT_URL"
   echo "worktrees : $WT_ROOT   [volume $VOLUME: $on]"
   echo "wrapper   : ${WRAPPER:-none (claude runs directly)}"
+  local plugin
+  plugin=$(cfg get sessions.plugin)
+  if [ -n "$plugin" ]; then echo "plugin    : $plugin (skills as /factory:<skill>)"; else echo "plugin    : off (sessions.claude.plugin: false)"; fi
   echo "gate      : $(cfg get repo.gate_summary)"
   echo "updates   : Claude Code's auto-updater is off in every seat (DISABLE_AUTOUPDATER=1); update by hand, then down and up"
   if resolve_claude; then
@@ -222,6 +225,12 @@ cmd_up() {
       echo '# started from tmux has no responsible app for; it passes them to its child. If it is'
       echo '# configured but missing, claude runs directly.'
       printf 'wrapper=%q\n' "$WRAPPER"
+      echo '# The user config folder the seat uses is the one its protected-path rules were built for.'
+      if [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then
+        printf 'export CLAUDE_CONFIG_DIR=%q\n' "$(cfg get claude.config_dir)"
+      else
+        echo 'unset CLAUDE_CONFIG_DIR'
+      fi
       echo '# The auto-updater would reinstall claude under this running seat, after which macOS can no'
       echo '# longer tell which process it is and its privacy grants stop working (#50). Update by hand.'
       echo 'export DISABLE_AUTOUPDATER=1'
@@ -657,9 +666,44 @@ log_field() {
     print s.gsub(re) { |c| esc[c] || c.bytes.map { |b| format("\\x%02X", b) }.join }' -- "$1" || printf '%s' '<log_field failed>'
 }
 
+# The role of the seat this process runs inside, or nothing when it runs outside every seat. Used
+# when TEAM_ROLE is unset (a cleared or rebuilt environment: env -i, a sanitising script), so that
+# say from inside a seat is not labelled [from owner] (#41). It walks this process's ancestors and
+# compares each one's controlling tty with the seats' pane ttys. The ancestors are walked, not only
+# this process, because Claude Code's Bash tool runs commands in a child that has left the pane's
+# terminal: that child and its descendants have no tty, but the claude process above them still
+# holds its pane's tty. A pane that is not a seat's (the owner's own tmux pane) matches no seat.
+# This catches mislabelling by accident only; a process that leaves both the pane's tty and its
+# ancestry (setsid, then its parent exits) is not caught, and labels are not authenticated (#29).
+# Fails (status 1) when ps cannot read this process, so the caller refuses instead of guessing.
+caller_seat() {
+  local pid=$$ ppid tty ttys="" panes sess name n=0 r
+  while [ "$pid" -gt 1 ] && [ $n -lt 100 ]; do
+    read -r ppid tty < <(ps -o ppid=,tty= -p "$pid" 2>/dev/null) || ppid=""
+    if [ -z "$ppid" ]; then [ $n -eq 0 ] && return 1; break; fi
+    case $tty in ""|"?"|"??") ;; *) ttys="$ttys ${tty#/dev/} " ;; esac
+    pid=$ppid; n=$((n + 1))
+  done
+  [ -n "$ttys" ] || return 0
+  # The tty first: a session name may hold spaces, and read gives the last field the rest of the line.
+  panes=$(tmux list-panes -a -F '#{pane_tty} #{session_name}' 2>/dev/null) || return 0
+  for r in $ROLES; do
+    sess=$(session "$r")
+    while read -r tty name; do
+      [ "$name" = "$sess" ] || continue
+      case $ttys in *" ${tty#/dev/} "*) echo "$r"; return 0 ;; esac
+    done <<<"$panes"
+  done
+}
+
 cmd_say() {
-  local to=${1:-} from=${TEAM_ROLE:-owner} text r rc=0
+  local to=${1:-} from=${TEAM_ROLE:-} text r rc=0
   [ -n "$to" ] && [ $# -ge 2 ] || die "usage: say <role|all> <message...>"
+  # Inside a seat, a message without TEAM_ROLE goes out under that seat's role, never as the owner's.
+  if [ -z "$from" ]; then
+    from=$(caller_seat) || die "say: cannot tell whether this runs inside a seat (ps failed); set TEAM_ROLE"
+    from=${from:-owner}
+  fi
   shift
   text="[from $from] $*"
   mkdir -p "$STATE"
