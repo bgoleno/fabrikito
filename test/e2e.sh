@@ -579,6 +579,13 @@ n=$(wc -l < $T/state/messages.log); k=$(wc -c < $T/keys-w1.log)
 pout=$(PATH=$T/psfail:$PATH env -u TEAM_ROLE $S -c $T/team.yaml say w1 "ps cannot read" 2>&1); rc=$?; sleep 1
 [ $rc -ne 0 ] && echo "$pout" | grep -q "ps could not read" && [ "$(wc -l < $T/state/messages.log)" -eq $((n + 1)) ] && lastlog '?' w1 'ps cannot read' && [ "$(wc -c < $T/keys-w1.log)" = "$k" ] &&
   ok "say with TEAM_ROLE unset refuses when ps fails, and logs NOT-DELIVERED" || { bad "say when ps fails (rc=$rc)"; echo "$pout"; tail -1 $T/state/messages.log; }
+# ps fails for say's parent only (an ancestor that exited mid-walk): refuse too, never owner. The
+# sh records its pid for the stand-in and runs say as a child (not exec), so it is say's parent.
+mkdir -p $T/psparent && printf '#!/bin/sh\n[ "$*" = "-o ppid=,tty= -p $(cat %s/psparent.pid)" ] && exit 1\nexec /bin/ps "$@"\n' "$T" > $T/psparent/ps && chmod +x $T/psparent/ps
+n=$(wc -l < $T/state/messages.log); k=$(wc -c < $T/keys-w1.log)
+pout=$(PATH=$T/psparent:$PATH sh -c 'echo $$ > "$1/psparent.pid"; env -u TEAM_ROLE "$2" -c "$1/team.yaml" say w1 "ps cannot read the parent"; rc=$?; exit $rc' sh "$T" "$S" 2>&1); rc=$?; sleep 1
+[ $rc -ne 0 ] && echo "$pout" | grep -q "ps could not read" && lastlog '?' w1 'ps cannot read the parent' && [ "$(wc -c < $T/keys-w1.log)" = "$k" ] &&
+  ok "say with TEAM_ROLE unset refuses when ps fails for an ancestor, and logs NOT-DELIVERED" || { bad "say when ps fails for the parent (rc=$rc)"; echo "$pout"; tail -1 $T/state/messages.log; }
 # Inside a seat of another team on the same server (here w1, running say with a file for team to):
 # its pane matches none of that team's seats, but it is a seat, so it is not the owner either.
 sed 's/^  prefix: tt$/  prefix: to/' $T/team.yaml > $T/other.yaml

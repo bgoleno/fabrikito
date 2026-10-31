@@ -270,7 +270,7 @@ are labelled `[from <role>]`, and the owner's are `[from owner]`. The label is s
 run from inside a seat (found from the terminals of the processes that started it) is labelled with
 that seat's role, never `[from owner]`; this stops a mislabel by accident, and the labels are still
 not authenticated ([#29](../../issues/29)). When it cannot tell, `say` refuses rather than guess: when
-`ps` cannot read its process, when tmux cannot list its panes, or when it runs inside a seat of another
+`ps` cannot read its process or one of its ancestors, when tmux cannot list its panes, or when it runs inside a seat of another
 team on the same tmux server (any session `up` started, which sets `TEAM_ROLE`). The check looks only at
 the tmux server `say` addresses: a process is labelled `[from owner]` when it has no terminal at all, or
 when its terminal is not a seat's pane on that server. So a seat on another tmux server is labelled

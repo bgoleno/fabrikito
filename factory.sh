@@ -897,7 +897,7 @@ log_field() {
 # holds its pane's tty. A pane that is not a seat's (the owner's own tmux pane) matches no seat.
 #
 # It fails closed (status 1, the reason on stdout) whenever it cannot tell (#97): when ps cannot
-# read this process; when an ancestor has a tty but tmux cannot list its panes (only a process with
+# read this process or any of its ancestors; when an ancestor has a tty but tmux cannot list its panes (only a process with
 # no tty at all is taken to be outside tmux); and when the tty is a pane of a seat of another team
 # on this server (its session sets TEAM_ROLE, as up sets it for every seat), which is a seat but has
 # no role in this team to be labelled with.
@@ -921,9 +921,12 @@ caller_seat() {
   local pid=$$ ppid tty ttys="" panes line sess name n=0 r
   while [ "$pid" -gt 1 ] && [ $n -lt 100 ]; do
     read -r ppid tty < <(ps -o ppid=,tty= -p "$pid" 2>/dev/null) || ppid=""
+    # A walk ends at pid 1 without asking ps, so ps failing at any depth means it could not read
+    # this process or an ancestor (one that exited mid-walk, say): refuse, whatever ttys were seen.
     if [ -z "$ppid" ]; then
-      [ $n -eq 0 ] && { echo "ps could not read this process, so say cannot tell whether it runs inside a seat"; return 1; }
-      break
+      [ $n -eq 0 ] && echo "ps could not read this process, so say cannot tell whether it runs inside a seat" ||
+        echo "ps could not read an ancestor of this process (pid $pid), so say cannot tell whether it runs inside a seat"
+      return 1
     fi
     case $tty in ""|"?"|"??") ;; *) ttys="$ttys ${tty#/dev/} " ;; esac
     pid=$ppid; n=$((n + 1))
