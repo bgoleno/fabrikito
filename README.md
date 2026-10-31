@@ -182,6 +182,10 @@ someone answers. `say` will not deliver to a seat at a permission prompt or any 
 and the repo's `.claude/` settings, which still apply. `check` shows each seat's mode and rules, and is
 where load-time errors (unknown modes, malformed rules, a permission flag in `args`) are reported.
 
+These rules are an accident guard, not a security boundary: every seat runs as the owner's OS user,
+with the owner's GitHub credential, and can change what loads. [#29](../../issues/29) tracks making
+them a boundary.
+
 What the rules cannot do:
 
 - A Bash rule matches the command text. The same program under another path (`/usr/bin/gh`), inside
@@ -201,17 +205,18 @@ What the rules cannot do:
   accidents. It is not a gate that only the owner can pass.
 - Seats act with the owner's GitHub rights, so they can change a ruleset or branch protection through
   the API. No rule here stops that (an ask that matched it would also stall seats reading the
-  settings); #29 tracks the fix.
+  settings); [#29](../../issues/29) tracks the fix.
 - Settings above these files apply as well: managed settings, and, depending on the account, installed
   mods, which can approve calls these rules would stop.
 - Paths in Read and Edit rules: `//path` is absolute, `~/path` is under the home folder, `./path` or a
   bare name is relative to the seat's folder. A single leading `/` anchors at the folder that holds the
   generated file, so it is refused.
 
-The [sandbox](https://code.claude.com/docs/en/sandboxing) is the boundary that holds whatever the
-command text. The hard rules in the shared prompt (`roles/common.md`) still apply; read them before
-changing them. A seat started in a folder Claude Code has not seen stops at a trust dialog until a
-human answers it once; `up` reports which seats those are.
+The [sandbox](https://code.claude.com/docs/en/sandboxing) is the OS-level control that would hold
+whatever the command text, but the launcher does not turn it on: seats run without one unless settings
+that apply to them enable it. The hard rules in the shared prompt (`roles/common.md`) still apply;
+read them before changing them. A seat started in a folder Claude Code has not seen stops at a trust
+dialog until a human answers it once; `up` reports which seats those are.
 
 ## The gate
 

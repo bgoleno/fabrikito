@@ -415,7 +415,7 @@ class TeamConfig
   # runs under now: each path as configured and, when a symlink makes it differ, its real path too,
   # so neither spelling (nor the link itself) is left open. Every seat
   # gets an Edit deny on each (Edit also covers Write, NotebookEdit and shell redirects). This is not
-  # a boundary: a script can still write them. The sandbox is the boundary.
+  # a boundary: a script can still write them (see README, Safety, and #29).
   def protected_paths(id)
     home = Dir.home
     claude_home = File.join(home, '.claude')
