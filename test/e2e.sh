@@ -548,6 +548,35 @@ tmux new-session -d -s tt-notaseat "env -u TEAM_ROLE $S -c $T/team.yaml say w1 '
 waitlog "$n"; sleep 1; tmux kill-session -t '=tt-notaseat' 2>/dev/null
 tmux capture-pane -p -t '=tt-w1:' | grep -qF "[from owner] unset role from a pane that is not a seat" && [ "$(tail -n +$((n + 1)) $T/state/messages.log | cut -f2-4)" = "owner	w1	delivered" ] &&
   ok "say from a tmux pane that is not a seat with TEAM_ROLE unset is still [from owner]" || { bad "say from a non-seat pane: owner label"; tail -1 $T/state/messages.log; }
+echo "--- say with TEAM_ROLE unset fails closed when it cannot tell (#97)"
+# lastlog <sender> <to> <message>: the newest log line is exactly that NOT-DELIVERED record.
+lastlog() { [ "$(tail -1 $T/state/messages.log | cut -f2-5)" = "$1	$2	NOT-DELIVERED	$3" ]; }
+# tmux cannot list its panes while say has a terminal (a pane that is not a seat): refuse, never owner.
+mkdir -p $T/lpfail && printf '#!/bin/sh\n[ "$1" = list-panes ] && exit 1\nexec %s "$@"\n' "$(command -v tmux)" > $T/lpfail/tmux && chmod +x $T/lpfail/tmux
+n=$(wc -l < $T/state/messages.log); k=$(wc -c < $T/keys-w1.log)
+tmux new-session -d -s tt-lpfail "PATH=$T/lpfail:\$PATH env -u TEAM_ROLE $S -c $T/team.yaml say w1 'tmux cannot list panes' > $T/lpfail.out 2>&1; sleep 30"
+waitlog "$n"; sleep 1; tmux kill-session -t '=tt-lpfail' 2>/dev/null
+lastlog '?' w1 'tmux cannot list panes' && [ "$(wc -c < $T/keys-w1.log)" = "$k" ] && grep -q "tmux could not list" $T/lpfail.out &&
+  ok "say with TEAM_ROLE unset refuses when tmux cannot list panes (no keys, NOT-DELIVERED), not [from owner]" || { bad "say when list-panes fails"; tail -1 $T/state/messages.log; cat $T/lpfail.out; }
+# ps cannot read say's own process: refuse, and the refusal is logged like every other.
+mkdir -p $T/psfail && printf '#!/bin/sh\ncase "$*" in *ppid=*) exit 1 ;; esac\nexec /bin/ps "$@"\n' > $T/psfail/ps && chmod +x $T/psfail/ps
+n=$(wc -l < $T/state/messages.log); k=$(wc -c < $T/keys-w1.log)
+pout=$(PATH=$T/psfail:$PATH env -u TEAM_ROLE $S -c $T/team.yaml say w1 "ps cannot read" 2>&1); rc=$?; sleep 1
+[ $rc -ne 0 ] && echo "$pout" | grep -q "ps could not read" && [ "$(wc -l < $T/state/messages.log)" -eq $((n + 1)) ] && lastlog '?' w1 'ps cannot read' && [ "$(wc -c < $T/keys-w1.log)" = "$k" ] &&
+  ok "say with TEAM_ROLE unset refuses when ps fails, and logs NOT-DELIVERED" || { bad "say when ps fails (rc=$rc)"; echo "$pout"; tail -1 $T/state/messages.log; }
+# Inside a seat of another team on the same server (here w1, running say with a file for team to):
+# its pane matches none of that team's seats, but it is a seat, so it is not the owner either.
+sed 's/^  prefix: tt$/  prefix: to/' $T/team.yaml > $T/other.yaml
+n=$(wc -l < $T/state/messages.log)
+tmux send-keys -t '=tt-w1:' -l "!env -u TEAM_ROLE $S -c $T/other.yaml say em 'from a seat of another team' > $T/other.out 2>&1"; tmux send-keys -t '=tt-w1:' Enter
+waitlog "$n"; sleep 1
+lastlog '?' em 'from a seat of another team' && grep -q "a seat of another team" $T/other.out &&
+  ok "say with TEAM_ROLE unset from a seat of another team is refused, not [from owner]" || { bad "say from another team's seat"; tail -1 $T/state/messages.log; cat $T/other.out; }
+# A seat messaging itself is refused and logged too.
+n=$(wc -l < $T/state/messages.log)
+TEAM_ROLE=w1 $S -c $T/team.yaml say w1 "to myself" >/dev/null 2>&1; rc=$?
+[ $rc -ne 0 ] && [ "$(wc -l < $T/state/messages.log)" -eq $((n + 1)) ] && lastlog w1 w1 'to myself' &&
+  ok "say from a seat to itself is refused and logged NOT-DELIVERED" || { bad "say to itself (rc=$rc)"; tail -1 $T/state/messages.log; }
 echo "--- say refuses a TEAM_ROLE that is not a sender of this team (#89)"
 # notsender <TEAM_ROLE> <what>: say exits non-zero naming TEAM_ROLE, sends w1 no keys at all, and
 # logs one NOT-DELIVERED line whose sender field is the value, escaped.
