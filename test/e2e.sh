@@ -576,7 +576,15 @@ mk "permission_mode: auto" "" ', permissions: { deny: ["Bash(gh *)"] }'
 $S -c $T/v.yaml check 2>&1 | grep -qF "could merge" && bad "a broader deny (Bash(gh *)) still warned" || ok "a broader rule that covers the patterns (Bash(gh *)) counts"
 mk "permission_mode: auto" "" ', permissions: { deny: ["Bash(gh pr merge 12*)", "Bash(gh api repos/x/y/pulls/1/merge*)", "Bash(gh api graphql -f q=mergePullRequest*)"] }'
 $S -c $T/v.yaml check 2>&1 | grep -qF "warning: em could merge a PR without being asked: no deny or ask rule matches Bash(gh pr merge *), Bash(gh api *pulls/*/merge*), Bash(gh api graphql*mergePullRequest*)." && ok "narrower rules that leave other merges open do not count" || bad "narrower merge rules counted as covering"
+# The legacy :* form keeps the space before *: Bash(ls:*) is Bash(ls *) (permissions docs), so a rule
+# that stops mid-word covers nothing here, and the whole-word ones still cover.
+mk "permission_mode: auto" "" ', permissions: { deny: ["Bash(gh pr mer:*)", "Bash(gh ap:*)", "Bash(gh api graphq:*)"] }'
+$S -c $T/v.yaml check 2>&1 | grep -qF "warning: em could merge a PR without being asked: no deny or ask rule matches Bash(gh pr merge *), Bash(gh api *pulls/*/merge*), Bash(gh api graphql*mergePullRequest*)." && ok "legacy :* rules that stop mid-word (gh pr mer:*, gh ap:*, gh api graphq:*) do not count" || bad "legacy mid-word :* rules counted as covering"
+mk "permission_mode: auto" "" ', permissions: { deny: ["Bash(gh pr merge:*)", "Bash(gh api:*)"] }'
+$S -c $T/v.yaml check 2>&1 | grep -qF "could merge" && bad "whole-word legacy rules (gh pr merge:*, gh api:*) not counted" || ok "whole-word legacy :* rules (gh pr merge:*, gh api:*) count"
 reject "a non-boolean may_merge" "roles.em.may_merge must be true or false" "" "" ", may_merge: yes please"
+# A quoted "yes" is a string, not a boolean. (An unquoted yes is YAML 1.1's true, and is accepted.)
+reject "a quoted \"yes\" for may_merge" "roles.em.may_merge must be true or false" "" "" ', may_merge: "yes"'
 echo "--- stop gate hook (lib/stop_gate.sh, run directly with hook input on stdin)"
 # A throwaway repo and a stand-in gate that records each run and passes only once g-pass exists.
 mkdir -p $T/g && git -C $T/g init -q && git -C $T/g commit -q --allow-empty -m init

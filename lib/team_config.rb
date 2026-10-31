@@ -654,14 +654,17 @@ class TeamConfig
 
   # Whether a Bash permission rule matches every command a Bash pattern matches: the rule's `*`
   # matches anything, so it covers the pattern when it matches the pattern's text with the
-  # pattern's own `*` taken literally. The legacy prefix form `cmd:*` is read as `cmd*`.
+  # pattern's own `*` taken literally. The legacy prefix form `cmd:*` is read as `cmd *`, space
+  # included: "`Bash(ls:*)` matches the same commands as `Bash(ls *)`", and "The space before a
+  # trailing `*` is part of the rule" (https://code.claude.com/docs/en/permissions). Read as `cmd*`,
+  # Bash(gh pr mer:*) would wrongly count as covering `gh pr merge *`.
   def rule_covers?(rule, pattern)
     return true if ['Bash', 'Bash(*)'].include?(rule)
 
     spec = rule[/\ABash\((.*)\)\z/m, 1]
     return false if spec.nil?
 
-    re = Regexp.new("\\A#{spec.sub(/:\*\z/, '*').split('*', -1).map { |s| Regexp.escape(s) }.join('.*')}\\z", Regexp::MULTILINE)
+    re = Regexp.new("\\A#{spec.sub(/:\*\z/, ' *').split('*', -1).map { |s| Regexp.escape(s) }.join('.*')}\\z", Regexp::MULTILINE)
     re.match?(pattern[/\ABash\((.*)\)\z/m, 1])
   end
 
@@ -761,6 +764,7 @@ class TeamConfig
       die "roles.#{id}.gate_on_stop must be true or false" if r.key?('gate_on_stop') && ![true, false].include?(r['gate_on_stop'])
       die "roles.#{id}.gate_on_stop needs repo.gate (the command to run)" if r['gate_on_stop'] == true && gate.nil?
       validate_skills(id, r['skills']) if r.key?('skills')
+      # A YAML boolean: the system ruby's YAML 1.1 also reads an unquoted yes or on as true.
       die "roles.#{id}.may_merge must be true or false" if r.key?('may_merge') && ![true, false].include?(r['may_merge'])
       if r.key?('permission_mode') && !PERMISSION_MODES.include?(r['permission_mode'].to_s)
         die "roles.#{id}.permission_mode must be one of #{PERMISSION_MODES.join(', ')}"

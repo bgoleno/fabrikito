@@ -200,7 +200,8 @@ where load-time errors (unknown modes, malformed rules, a permission flag in `ar
 It also warns, without stopping a start, about seats whose modes would hold messages between them
 ([Which messages are held](#which-messages-are-held)), and about any role whose rules have neither a
 deny nor an ask on each of the three merge patterns (`Bash(gh pr merge *)`, `Bash(gh api *pulls/*/merge*)`,
-`Bash(gh api graphql*mergePullRequest*)`), unless that role is marked `may_merge: true`.
+`Bash(gh api graphql*mergePullRequest*)`), unless that role is marked `may_merge: true` (a YAML boolean, so an unquoted `yes` or `on`
+also counts as true).
 
 These rules are an accident guard, not a security boundary: every seat runs as the owner's OS user,
 with the owner's GitHub credential, and can change what loads. [#29](../../issues/29) tracks making
