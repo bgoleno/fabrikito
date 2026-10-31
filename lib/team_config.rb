@@ -30,12 +30,13 @@ TOP_KEYS = %w[team owner repo project storage sessions display prompts kickoff p
 DISPLAY_KEYS = %w[iterm primary window].freeze
 PROJECT_KEYS = %w[name url].freeze
 EFFORTS = %w[low medium high xhigh max].freeze
-REPO_KEYS = %w[path github base].freeze
+REPO_KEYS = %w[path github base gate gate_timeout gate_max_blocks].freeze
 STORAGE_KEYS = %w[volume root].freeze
 SESSION_KEYS = %w[prefix claude].freeze
 CLAUDE_KEYS = %w[wrapper args model effort permission_mode].freeze
 PROMPT_KEYS = %w[common].freeze
-ROLE_KEYS = %w[title summary workdir prompt prompt_text kickoff session model effort permission_mode permissions].freeze
+ROLE_KEYS = %w[title summary workdir prompt prompt_text kickoff session model effort permission_mode permissions
+               gate_on_stop].freeze
 WORKDIR_KEYS = %w[type path name].freeze
 ID_RE = /\A[a-z][a-z0-9]*\z/.freeze
 PREFIX_RE = /\A[a-z0-9][a-z0-9-]*\z/.freeze
@@ -67,6 +68,11 @@ RESERVED_FLAGS = {
 # (see protected_paths), so a folder added here is protected without further changes. Files seats
 # are meant to write (such as progress notes) belong in a folder that is not listed.
 GENERATED_DIRS = %w[settings launch prompts].freeze
+
+# Folders under the state folder that hooks write, and seats must not: the gate's failure counter
+# lives in gate/, so a seat that could edit it could switch its own gate off. Protected like
+# GENERATED_DIRS, but not regenerated per start.
+HOOK_DIRS = %w[gate].freeze
 
 # The field a tool's own specifier already covers. Claude Code ignores a `Tool(field:...)` rule on
 # it, with only a startup warning.
@@ -294,7 +300,8 @@ class TeamConfig
       'SCRIPT' => ENV.fetch('TEAM_SCRIPT', 'factory.sh'), 'LOG' => ENV.fetch('TEAM_LOG', 'messages.log'),
       'REPO' => repo_path, 'WORKDIR' => workdir(id), 'WORKTREE_ROOT' => worktree_root,
       'VOLUME' => volume, 'GITHUB_REPO' => github, 'GITHUB_URL' => "https://github.com/#{github}",
-      'PROJECT_NAME' => project['name'].to_s, 'PROJECT_URL' => project['url'].to_s, 'TEAM' => @c['team'].to_s, 'OWNER' => owner, 'ROSTER' => roster
+      'PROJECT_NAME' => project['name'].to_s, 'PROJECT_URL' => project['url'].to_s, 'TEAM' => @c['team'].to_s, 'OWNER' => owner, 'ROSTER' => roster,
+      'GATE_MAX_BLOCKS' => gate_max_blocks.to_s
     }
   end
 
@@ -413,7 +420,7 @@ class TeamConfig
     claude_home = File.join(home, '.claude')
     [
       # what factory.sh regenerates for each start (settings, launchers, prompts) and the message log
-      *GENERATED_DIRS.map { |d| File.join(state_dir, d, '**') },
+      *(GENERATED_DIRS + HOOK_DIRS).map { |d| File.join(state_dir, d, '**') },
       File.join(state_dir, 'messages.log'),
       # the team file and the prompts it loads into every seat
       @path,
@@ -490,6 +497,33 @@ class TeamConfig
     end.to_h
   end
 
+  # The repo's pass/fail command, its time limit, and how many failed gates in a row send a seat
+  # back before its stop goes through (see lib/stop_gate.sh).
+  def gate
+    repo['gate']&.to_s
+  end
+
+  def gate_timeout
+    (repo['gate_timeout'] || 600).to_i
+  end
+
+  def gate_max_blocks
+    (repo['gate_max_blocks'] || 3).to_i
+  end
+
+  def gate_on_stop?(id)
+    role(id)['gate_on_stop'] == true
+  end
+
+  # The Stop hook that runs the gate when a seat with gate_on_stop ends a turn with uncommitted
+  # changes. Exec form (args): each argument reaches the script as written, with no shell quoting.
+  # The hook's own timeout is a backstop; the script enforces the gate's.
+  def stop_gate_hook(id)
+    { 'type' => 'command', 'command' => File.join(INSTALL, 'lib', 'stop_gate.sh'),
+      'args' => [state_dir, id, workdir(id), gate, gate_timeout.to_s, gate_max_blocks.to_s],
+      'timeout' => gate_timeout + 30 }
+  end
+
   # The seat's Claude Code settings, written to <state>/settings/<id>.json and passed with
   # --settings. Later features add their own top-level keys (hooks, for example) here.
   def settings(id)
@@ -497,7 +531,15 @@ class TeamConfig
     mode = permission_mode(id)
     # A seat started in another mode cannot be switched into bypass from inside the session.
     perms['disableBypassPermissionsMode'] = 'disable' if mode && mode != 'bypassPermissions'
-    perms.empty? ? {} : { 'permissions' => perms }
+    out = perms.empty? ? {} : { 'permissions' => perms }
+    if gate_on_stop?(id)
+      out['hooks'] = { 'Stop' => [{ 'hooks' => [stop_gate_hook(id)] }] }
+      # --settings outranks project and local settings, so a disableAllHooks: true written in the
+      # seat's .claude/ cannot switch the gate off. It also turns on the user's own hooks for this
+      # seat if they had switched them all off in ~/.claude/settings.json.
+      out['disableAllHooks'] = false
+    end
+    out
   end
 
   def permissions_report
@@ -541,6 +583,13 @@ class TeamConfig
     die "display.primary '#{view_primary}' is not a role id (roles: #{roles.keys.join(' ')})" unless roles.key?(view_primary)
     bad = claude.keys - CLAUDE_KEYS
     die "unknown key(s) under 'sessions.claude': #{bad.join(', ')}" unless bad.empty?
+    die 'repo.gate must be a non-empty command' if repo.key?('gate') && !(repo['gate'].is_a?(String) && !repo['gate'].strip.empty?)
+    %w[gate_timeout gate_max_blocks].each do |k|
+      next unless repo.key?(k)
+
+      what = k == 'gate_timeout' ? 'a positive whole number of seconds' : 'a positive whole number'
+      die "repo.#{k} must be #{what}" unless repo[k].is_a?(Integer) && repo[k].positive?
+    end
     die "sessions.claude.effort must be one of #{EFFORTS.join(', ')}" if claude['effort'] && !EFFORTS.include?(claude['effort'].to_s)
     if claude.key?('permission_mode') && !PERMISSION_MODES.include?(claude['permission_mode'].to_s)
       die "sessions.claude.permission_mode must be one of #{PERMISSION_MODES.join(', ')}"
@@ -569,6 +618,8 @@ class TeamConfig
       die "roles.#{id}.workdir.path is not a directory: #{workdir(id)}" if w['type'] == 'project' && !File.directory?(workdir(id))
       die "roles.#{id}.effort must be one of #{EFFORTS.join(', ')}" if r['effort'] && !EFFORTS.include?(r['effort'].to_s)
       die "roles.#{id}.model must be a non-empty string" if r.key?('model') && r['model'].to_s.strip.empty?
+      die "roles.#{id}.gate_on_stop must be true or false" if r.key?('gate_on_stop') && ![true, false].include?(r['gate_on_stop'])
+      die "roles.#{id}.gate_on_stop needs repo.gate (the command to run)" if r['gate_on_stop'] == true && gate.nil?
       if r.key?('permission_mode') && !PERMISSION_MODES.include?(r['permission_mode'].to_s)
         die "roles.#{id}.permission_mode must be one of #{PERMISSION_MODES.join(', ')}"
       end
@@ -619,6 +670,8 @@ when 'get'
   when 'sessions.wrapper' then puts(cfg.claude['wrapper'] ? cfg.expand(cfg.claude['wrapper']) : '')
   when 'state.dir' then puts cfg.state_dir
   when 'state.generated_dirs' then puts GENERATED_DIRS
+  when 'repo.gate_summary'
+    puts(cfg.gate ? "#{cfg.gate} (timeout #{cfg.gate_timeout}s; a seat may stop after #{cfg.gate_max_blocks} failed gates in a row)" : 'none')
   else die "unknown key '#{key}'"
   end
 when 'role'
@@ -631,6 +684,7 @@ when 'role'
   when 'model' then puts(cfg.model(id) || '(inherit)')
   when 'effort' then puts(cfg.effort(id) || '(inherit)')
   when 'permission_mode' then puts cfg.mode_label(id)
+  when 'gate' then puts(cfg.gate_on_stop?(id) ? 'on-stop' : '-')
   else die "unknown role key '#{key}'"
   end
 when 'workdir' then puts cfg.workdir(args.fetch(0) { die 'workdir needs a role id' })

@@ -150,11 +150,12 @@ cmd_check() {
   echo "project   : $PROJECT_NAME $PROJECT_URL"
   echo "worktrees : $WT_ROOT   [volume $VOLUME: $on]"
   echo "wrapper   : ${WRAPPER:-none (claude runs directly)}"
+  echo "gate      : $(cfg get repo.gate_summary)"
   echo "state     : $STATE"
-  printf '%-5s %-36s %-18s %-12s %-9s %-24s %s\n' ROLE SEAT SESSION MODEL EFFORT MODE WORKDIR
+  printf '%-5s %-36s %-18s %-12s %-9s %-24s %-7s %s\n' ROLE SEAT SESSION MODEL EFFORT MODE GATE WORKDIR
   for r in $ROLES; do
-    printf '%-5s %-36s %-18s %-12s %-9s %-24s %s\n' "$r" "$(title "$r")" "$(session "$r")" "$(cfg role "$r" model)" \
-      "$(cfg role "$r" effort)" "$(cfg role "$r" permission_mode)" "$(workdir "$r")"
+    printf '%-5s %-36s %-18s %-12s %-9s %-24s %-7s %s\n' "$r" "$(title "$r")" "$(session "$r")" "$(cfg role "$r" model)" \
+      "$(cfg role "$r" effort)" "$(cfg role "$r" permission_mode)" "$(cfg role "$r" gate)" "$(workdir "$r")"
   done
   echo "(inherit = flag omitted; the seat uses model, effortLevel and permissions.defaultMode from ~/.claude/settings.json)"
   echo
