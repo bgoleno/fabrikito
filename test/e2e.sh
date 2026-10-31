@@ -33,7 +33,12 @@ git init -q --bare $T/local/origin.git; git clone -q $T/local/origin.git $T/repo
 #   mode    swallow (input never shows), below (a list under the box), prefill (text left in the box),
 #           suggest (a dim suggested prompt in the empty box), sticky (that suggestion stays drawn after
 #           any text), mixed (typed text and the dim suggestion)
+# A submitted line that starts with ! is run by /bin/sh the way Claude Code's Bash tool runs a
+# command: in a child that leaves the pane's terminal (setsid), so the child has no tty of its own
+# and only the stand-in, its parent, holds the pane's tty.
 cat > $T/c.c <<'C'
+#include <fcntl.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -80,6 +85,7 @@ int main(int n, char **v) {
   size_t h = (size_t)snprintf(head, sizeof head, "FAKE-CLAUDE");
   for (int i = 1; i < n && h < sizeof head - 60; i++) h += (size_t)snprintf(head + h, sizeof head - h, " [%.50s]", v[i]);
   for (int i = 1; i + 1 < n; i++) if (!strcmp(v[i], "-n")) snprintf(name, sizeof name, "%s", v[i + 1]);
+  signal(SIGCHLD, SIG_IGN);                      /* ! commands are not waited for; no zombies */
   tcgetattr(0, &t); cfmakeraw(&t); tcsetattr(0, TCSANOW, &t);
   printf("\033[?2004h"); draw();
   int c, esc = 0, paste = 0; char seq[8]; int sl = 0;
@@ -96,6 +102,11 @@ int main(int n, char **v) {
     if (b == '\r' || b == '\n') {
       if (paste) { if (blen < sizeof buf - 1) buf[blen++] = '\n'; }
       else {                                      /* submit: the transcript echoes it, the box empties */
+        if (blen && buf[0] == '!' && fork() == 0) {
+          int fd = open("/dev/null", O_RDWR);
+          setsid(); signal(SIGCHLD, SIG_DFL); dup2(fd, 0); dup2(fd, 1); dup2(fd, 2); buf[blen] = 0;
+          execl("/bin/sh", "sh", "-c", buf + 1, (char *)0); _exit(127);
+        }
         hlen += (size_t)snprintf(hist + hlen, sizeof hist - hlen, "\xe2\x9d\xaf %.*s\r\n", (int)blen, buf);
         if (hlen > sizeof hist - 8192) hlen = 0;
         blen = 0;
@@ -273,6 +284,30 @@ n=$(wc -l < $T/state/messages.log)
 TEAM_ROLE=$'e\tm\nx' $S -c $T/team.yaml say w2 "from an odd sender" >/dev/null 2>&1
 [ "$(wc -l < $T/state/messages.log)" -eq $((n + 1)) ] && [ "$(tail -1 $T/state/messages.log | cut -f2-5)" = 'e\tm\nx	w2	NOT-DELIVERED	from an odd sender' ] &&
   ok "log: a TEAM_ROLE with a tab and a newline is escaped, one line" || { bad "log: odd TEAM_ROLE"; tail -2 $T/state/messages.log | od -c | head -6; }
+echo "--- say with TEAM_ROLE unset (#41): never [from owner] from inside a seat"
+# waitlog <lines before>: wait up to 10s for say to append its log line.
+waitlog() { local i; for i in $(seq 1 20); do [ "$(wc -l < $T/state/messages.log)" -gt "$1" ] && return 0; sleep 0.5; done; return 1; }
+# Inside w1's pane: the stand-in runs the command in a child with no tty (as the Bash tool does) and
+# with TEAM_ROLE removed, as a cleared or rebuilt environment would leave it.
+n=$(wc -l < $T/state/messages.log)
+tmux send-keys -t '=tt-w1:' -l "!env -u TEAM_ROLE $S -c $T/team.yaml say em 'unset role inside w1'"; tmux send-keys -t '=tt-w1:' Enter
+waitlog "$n"; sleep 1
+em_screen=$(tmux capture-pane -p -t '=tt-em:')
+! echo "$em_screen" | grep -qF "[from owner] unset role inside w1" && ! tail -1 $T/state/messages.log | grep -q "	owner	" &&
+  ok "say from inside a seat with TEAM_ROLE unset is not labelled [from owner]" || { bad "say inside a seat was labelled owner"; tail -1 $T/state/messages.log; }
+echo "$em_screen" | grep -qF "[from w1] unset role inside w1" && [ "$(tail -1 $T/state/messages.log | cut -f2-4)" = "w1	em	delivered" ] &&
+  ok "say from inside a seat with TEAM_ROLE unset is labelled with that seat's role" || { bad "say inside a seat: label"; tail -1 $T/state/messages.log; echo "$em_screen" | tail -8; }
+# Outside every seat: this test's own process (its terminal is not a seat's pane) is the owner.
+n=$(wc -l < $T/state/messages.log)
+env -u TEAM_ROLE $S -c $T/team.yaml say w1 "unset role outside every seat" >/dev/null 2>&1; sleep 1
+tmux capture-pane -p -t '=tt-w1:' | grep -qF "[from owner] unset role outside every seat" && [ "$(tail -n +$((n + 1)) $T/state/messages.log | cut -f2-4)" = "owner	w1	delivered" ] &&
+  ok "say from outside every seat with TEAM_ROLE unset is still [from owner]" || { bad "say outside seats: owner label"; tail -1 $T/state/messages.log; }
+# A tmux pane of the owner's that is not a seat, on the seats' own server, named with the team prefix.
+n=$(wc -l < $T/state/messages.log)
+tmux new-session -d -s tt-notaseat "env -u TEAM_ROLE $S -c $T/team.yaml say w1 'unset role from a pane that is not a seat'; sleep 30"
+waitlog "$n"; sleep 1; tmux kill-session -t '=tt-notaseat' 2>/dev/null
+tmux capture-pane -p -t '=tt-w1:' | grep -qF "[from owner] unset role from a pane that is not a seat" && [ "$(tail -n +$((n + 1)) $T/state/messages.log | cut -f2-4)" = "owner	w1	delivered" ] &&
+  ok "say from a tmux pane that is not a seat with TEAM_ROLE unset is still [from owner]" || { bad "say from a non-seat pane: owner label"; tail -1 $T/state/messages.log; }
 echo "--- migrate then up w2"
 $S -c $T/team.yaml migrate w2 2>&1 | grep -E "moved|REFUSE|skip" | cut -c1-150
 $S -c $T/team.yaml up w2 2>&1 | grep -E "start|error" | cut -c1-150
