@@ -288,6 +288,18 @@ n=$(wc -l < $T/state/messages.log)
 LC_ALL=C TEAM_ROLE=em $S -c $T/team.yaml say w2 $'c locale: csi \xc2\x9b, e-acute \xc3\xa9' >/dev/null 2>&1
 [ "$(wc -l < $T/state/messages.log)" -eq $((n + 1)) ] && [ "$(tail -1 $T/state/messages.log | cut -f5-)" = $'c locale: csi \\xC2\\x9B, e-acute \xc3\xa9' ] &&
   ok "log: under LC_ALL=C the message is escaped, not logged as a failure" || { bad "log: LC_ALL=C"; tail -1 $T/state/messages.log; }
+# Prompt and team files are read as UTF-8 whatever the locale (#72). say validates the team file,
+# which renders every prompt, so a non-ASCII prompt or kickoff must not stop it under LC_ALL=C.
+# A prompt file, not prompt_text: YAML hands back UTF-8 strings in any locale, a plain read does not.
+printf 'em prompt, caf\xc3\xa9 \xe2\x80\xa6\n' > $T/em-u.md
+EMU=$T/em-u.md ruby -pe 'sub(/prompt_text: "em prompt"/) { "prompt: #{ENV["EMU"]}, kickoff: \"start, caf\u00e9 \u2026\"" }' $T/team.yaml > $T/team-u.yaml
+n=$(wc -l < $T/state/messages.log)
+LC_ALL=C TEAM_ROLE=em $S -c $T/team-u.yaml say w2 'from a team with a non-ASCII prompt' >/dev/null 2>&1
+[ "$(wc -l < $T/state/messages.log)" -eq $((n + 1)) ] && tail -1 $T/state/messages.log | grep -qF "from a team with a non-ASCII prompt" \
+  && ok "say under LC_ALL=C with a non-ASCII prompt in the team" || { bad "say under LC_ALL=C with a non-ASCII prompt"; tail -1 $T/state/messages.log; }
+LC_ALL=C ruby $SRC/lib/team_config.rb $T/team-u.yaml render em 2>&1 | grep -qF $'em prompt, caf\xc3\xa9 \xe2\x80\xa6' \
+  && LC_ALL=C ruby $SRC/lib/team_config.rb $T/team-u.yaml kickoff em 2>&1 | grep -qxF $'start, caf\xc3\xa9 \xe2\x80\xa6' \
+  && ok "a non-ASCII prompt and kickoff come out byte for byte under LC_ALL=C" || bad "non-ASCII prompt or kickoff under LC_ALL=C"
 # The sender comes from TEAM_ROLE, which nothing validates: it is escaped like the message.
 n=$(wc -l < $T/state/messages.log)
 TEAM_ROLE=$'e\tm\nx' $S -c $T/team.yaml say w2 "from an odd sender" >/dev/null 2>&1
@@ -544,6 +556,11 @@ REPO_EXTRA='gate: ""' reject "an empty gate" "repo.gate must be a non-empty comm
 REPO_EXTRA='gate: "true", gate_timeout: 0' reject "a zero gate_timeout" "repo.gate_timeout must be a positive whole number of seconds" ""
 REPO_EXTRA='gate: "true", gate_max_blocks: two' reject "a non-integer gate_max_blocks" "repo.gate_max_blocks must be a positive whole number" ""
 REPO_EXTRA='gate: "true"' accept "a gate that no role runs" ""
+printf 'ok\nnot utf-8: \xff\n' > $T/bad-utf8.md
+reject "a prompt file that is not UTF-8" "$T/bad-utf8.md is not valid UTF-8 (line 2)" "" "prompts: { common: $T/bad-utf8.md }"
+mk ""; printf '# \xff\n' >> $T/v.yaml
+out=$($S -c $T/v.yaml check 2>&1); rc=$?
+[ $rc -ne 0 ] && echo "$out" | grep -qF "$T/v.yaml is not valid UTF-8 (line 9)" && ok "rejects a team file that is not UTF-8, naming the line" || { bad "rejects a team file that is not UTF-8 (rc=$rc)"; echo "$out" | tail -2; }
 reject "a non-boolean sessions.claude.plugin" "sessions.claude.plugin must be true or false" "plugin: yes please"
 mk "plugin: false"; pa=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml claude_args em)
 [ $? = 0 ] && ! echo "$pa" | grep -q -- "--plugin-dir" && $S -c $T/v.yaml check 2>&1 | grep -qxF "plugin    : off (sessions.claude.plugin: false)" && ok "plugin: false omits --plugin-dir, and check says off" || { bad "plugin: false"; echo "$pa"; }
@@ -666,6 +683,18 @@ echo "--- rendered prompts stay short"
 for r in $(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml ids); do
   n=$(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render "$r" 2>/dev/null | wc -l | tr -d ' ')
   [ "${n:-0}" -gt 0 ] && [ "$n" -lt 200 ] && ok "example seat $r renders a prompt under 200 lines ($n)" || bad "example seat $r renders a prompt of ${n:-?} lines (limit 199)"
+done
+echo "--- prompts render the same whatever the locale"
+# Under LC_ALL=C, or with no locale at all (cron, env -i), ruby would read files as US-ASCII and the
+# first non-ASCII byte in a prompt would stop the render (#72). The output must not depend on it.
+# env -i drops TEAM_SCRIPT and TEAM_LOG, which the prompts name, so every run gets the same values.
+pin="TEAM_SCRIPT=factory.sh TEAM_LOG=messages.log"
+for r in $(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml ids); do
+  want=$(env $pin LC_ALL=en_US.UTF-8 ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render "$r" 2>&1)
+  c=$(env $pin LC_ALL=C ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render "$r" 2>&1); rc=$?
+  none=$(env -i PATH="$PATH" HOME="$HOME" $pin ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render "$r" 2>&1); rn=$?
+  [ $rc = 0 ] && [ $rn = 0 ] && [ -n "$want" ] && [ "$c" = "$want" ] && [ "$none" = "$want" ] \
+    && ok "example seat $r renders the same under LC_ALL=C and with no locale" || { bad "example seat $r under LC_ALL=C (rc=$rc) or no locale (rc=$rn)"; echo "$c" | tail -2; }
 done
 echo "--- cleanup"
 $S -c $T/team.yaml down --yes >/dev/null 2>&1; tmux kill-server 2>/dev/null
