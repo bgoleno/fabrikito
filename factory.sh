@@ -23,9 +23,10 @@
 #                              volume, so `up` recreates them there (stop the seat first)
 #   down --yes [role...]       kill seats (worktrees are kept)
 #
-# up, view, say, attach and down refuse a team file outside teams/ on the default tmux server, where
-# the real team runs: it looks like a throwaway copy. Run it on a private server (test/live-env.sh), or
-# pass --default-socket (say and attach: as the first argument) for a team meant to run there.
+# up, view, titles, say, attach and down refuse a team file outside teams/ on the default tmux
+# server, where the real team runs: it looks like a throwaway copy. Run it on a private server
+# (test/live-env.sh), or pass --default-socket (say and attach: as the first argument) for a team
+# meant to run there.
 #
 # The team file is -c, else $TEAM_CONFIG, else teams/team.yaml next to this script.
 #
@@ -135,9 +136,12 @@ real_path() {
 # A team file outside teams/ next to this script is taken for a throwaway one (a test), which must
 # not reach seats on the default tmux server, where the real team runs (#66). A copy of the real
 # team file shares its session prefix, so it would reach the real seats: up would start beside
-# them, down kill them, say type into them, attach and view show them. So every command that
-# reaches seats calls this first, before any tmux call (#105). --default-socket overrides it for a
-# team that is meant to run there. Usage: refuse_default_tmux <command> <what it would do>.
+# them, down kill them, say type into them, attach and view show them, titles relabel them. So
+# up, down, say, attach, view and titles call this first, before any tmux call (#105, #124).
+# Two commands that reach seats do not: status only reads, and migrate removes worktrees, not
+# sessions, and keeps any worktree a running process works in, whatever server it reaches (#121).
+# --default-socket overrides it for a team that is meant to run there.
+# Usage: refuse_default_tmux <command> <what it would do>.
 refuse_default_tmux() {
   local cmd=$1 what=$2 teams dir
   teams=$(CDPATH= cd -- "$HERE/teams" 2>/dev/null && pwd -P) || teams=$HERE/teams
@@ -461,6 +465,11 @@ apply_title() {
 
 cmd_titles() {
   local r n=0
+  case ${1:-} in
+    --default-socket) ;;
+    '') refuse_default_tmux titles "set the titles of seats" ;;
+    *) die "usage: titles [--default-socket]" ;;
+  esac
   for r in $ROLES; do
     alive "$r" || continue
     apply_title "$r"
@@ -1130,10 +1139,10 @@ case "${1:-}" in
   up) shift; cmd_up "$@" ;;
   status) cmd_status ;;
   view) shift; cmd_view "$@" ;;
-  titles) cmd_titles ;;
+  titles) shift; cmd_titles "$@" ;;
   say) shift; cmd_say "$@" ;;
   attach) shift; cmd_attach "$@" ;;
   migrate) shift; cmd_migrate "$@" ;;
   down) shift; cmd_down "$@" ;;
-  *) sed -n '3,36p' "$0" | sed 's/^# \{0,1\}//'; exit 64 ;;
+  *) sed -n '3,37p' "$0" | sed 's/^# \{0,1\}//'; exit 64 ;;
 esac
