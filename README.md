@@ -83,11 +83,13 @@ use them. A message arrives between tool calls without interrupting a running to
 permission prompt or change settings, and bursts and loops are throttled. A seat waiting on another can
 ask for one notice when that seat next goes idle (`notify_when_idle`) instead of polling it.
 
-Session names are not authenticated. Every Claude session on the machine, other teams' seats included,
-can message a seat, and any local process can start a session under a seat's name. The prompt tells
-seats to act only on exact roster names, and to report any other sender, or two sessions sharing a
-roster name, to the EM. That guards against mistakes, not impersonation, which is the same limit as for
-`say` and the pane (see [Safety](#safety)).
+Session names are not authenticated: a `from` name is a claim, not an identity. Claude Code's own
+held-message notice shows the sender as a verified process id and the name it claims ("peer claims
+name"). Every Claude session on the machine, other teams' seats included, can message a seat, and any
+local process can start a session under a seat's name. The prompt tells seats to act only on exact
+roster names, and to report any other sender, or two sessions sharing a roster name, to the EM. That
+guards against mistakes, not impersonation, which is the same limit as for `say` and the pane (see
+[Safety](#safety)).
 
 ### Which messages are held
 
