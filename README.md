@@ -218,7 +218,9 @@ are labelled `[from <role>]`, and the owner's are `[from owner]`. The label is s
 `TEAM_ROLE`, or `owner` when it is unset) and is not authenticated. When `TEAM_ROLE` is unset, `say`
 run from inside a seat (found from the terminals of the processes that started it) is labelled with
 that seat's role, never `[from owner]`; this stops a mislabel by accident, and the labels are still
-not authenticated ([#29](../../issues/29)).
+not authenticated ([#29](../../issues/29)). A `TEAM_ROLE` that is set must be one of the team's role
+ids: `say` refuses any other value, and the reserved `owner` and `launcher`, sending no keys and
+logging NOT-DELIVERED.
 
 ### The kickoff
 
