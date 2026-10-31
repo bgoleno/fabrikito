@@ -663,3 +663,12 @@ The exit code is authoritative: `test/e2e.sh` exits 0 only when it reaches the e
 assertion passed (`RESULT pass=<n> fail=0`), and non-zero when any assertion fails or the run stops
 early (a setup error, a signal). A run that stops early still removes what it made and says
 `ABORTED` on stderr. That makes it safe as a `repo.gate` command, which is judged by its exit code.
+
+One failure is not ours to fix ([#101](../../issues/101)). Under heavy load (a load average of about
+40, many seats gating at once), a run can fail one assertion, and its output then shows
+`factory.sh: line <n>: echo: write error: Interrupted system call`. macOS's own bash (3.2) does not
+restart a write into a pipe that a child's exit (SIGCHLD) interrupts, and its `echo` does not retry.
+Under `set -e` the failed write then ends the command with exit 1. The same can happen to any
+factory.sh output into a pipe, such as a seat's Bash tool. Rerun when that exact message is in the
+output. It is the only failure where a green rerun is the right answer. For any other failure, a
+green rerun is not evidence.

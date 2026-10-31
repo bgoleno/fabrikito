@@ -39,5 +39,8 @@ together in one iTerm tab. Read `README.md` for use and `teams/example.yaml` for
 - iTerm: Finder's desktop bounds span all displays, so window sizing uses NSScreen. Scripting iTerm needs a
   macOS Automation grant, and a pending prompt blocks osascript forever: run it with a time limit.
 - System ruby is 2.6: no endless method definitions. YAML flow mappings need quoted URLs.
+- Under heavy load, an e2e run can fail one assertion with `echo: write error: Interrupted system call`
+  from factory.sh: macOS bash 3.2 does not restart a pipe write interrupted by SIGCHLD (#101). Rerun
+  only for that exact message; for any other failure a green rerun is not evidence.
 - Durable knowledge about this project lives in the Obsidian vault under `projects/software-factory/`,
   not in Claude Code's own memory files.
