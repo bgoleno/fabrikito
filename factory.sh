@@ -164,19 +164,43 @@ require_volume() {
   rm -f "$t"
 }
 
-# Registered worktrees of the repo with this folder name that are not at the expected path.
+# The paths of the repo's registered worktrees, each ended by a NUL. Read with -z, which ends every
+# field with a NUL, never line by line (#134): a path may hold a newline, and read as lines it would
+# be two paths, the first a truncated one that a command could then act on. Read the output with
+# `read -r -d ''`, and show a path with log_field, which escapes a newline.
+worktree_paths() {
+  local f
+  git -C "$REPO" worktree list --porcelain -z | while IFS= read -r -d '' f; do
+    case $f in "worktree "*) printf '%s\0' "${f#worktree }" ;; esac
+  done
+}
+
+# Callers read worktree_paths through a process substitution, and bash drops its exit status. So a
+# git that cannot list would look like a repo with no other worktrees: migrate would report
+# "removed 0" and up would skip #121's legacy refusal, both without a word. That happens with a git
+# older than 2.36, which added -z, or a repository git cannot read. Each caller runs this first, in
+# its own shell, so the failure stops the command instead. Both failures persist, so one check
+# before the read is enough; git failing only between the two calls is not handled.
+require_worktree_list() {
+  git -C "$REPO" worktree list --porcelain -z >/dev/null ||
+    die "cannot list the worktrees of $REPO with 'git worktree list --porcelain -z' (needs git 2.36 or later)"
+}
+
+# Registered worktrees of the repo with this folder name that are not at the expected path, each
+# ended by a NUL (worktree_paths). The name is taken with ${p##*/}, not basename: $(basename ...)
+# would drop a newline that ends the path.
 other_worktrees_named() {
   local name=$1 expected=$2 p
-  git -C "$REPO" worktree list --porcelain | sed -n 's/^worktree //p' | while IFS= read -r p; do
-    if [ "$(basename "$p")" = "$name" ] && [ "$p" != "$expected" ]; then echo "$p"; fi
-  done
+  while IFS= read -r -d '' p; do
+    if [ "${p##*/}" = "$name" ] && [ "$p" != "$expected" ]; then printf '%s\0' "$p"; fi
+  done < <(worktree_paths)
   return 0
 }
 
 # Create the worktree detached at the base ref, but never reuse or alter one that exists: it
 # may hold a seat's unfinished work.
 ensure_worktree() {
-  local id=$1 dir url legacy
+  local id=$1 dir url legacy p
   dir=$(workdir "$id")
   if [ -d "$dir" ]; then
     git -C "$dir" rev-parse --git-dir >/dev/null 2>&1 || die "$dir exists but is not a git worktree"
@@ -186,7 +210,9 @@ ensure_worktree() {
     fi
     return 0
   fi
-  legacy=$(other_worktrees_named "$(cfg role "$id" worktree_name)" "$dir")
+  require_worktree_list
+  legacy=""
+  while IFS= read -r -d '' p; do legacy="$legacy${legacy:+, }$(log_field "$p")"; done < <(other_worktrees_named "$(cfg role "$id" worktree_name)" "$dir")
   if [ -n "$legacy" ]; then
     die "'$id' already has a worktree elsewhere ($legacy). Stop the seat and run: $SELF migrate $id"
   fi
@@ -1161,39 +1187,47 @@ cwd_users() {
 # lets through by design. The working-folder check holds on any server, and for a copy with another
 # session prefix too, whose `alive` misses the real seats even on the default server.
 cmd_migrate() {
-  local roles=${*:-$ROLES} r p dir name moved=0 users cu
+  local roles=${*:-$ROLES} r p s b dir name moved=0 users cu
   for r in $roles; do check_role "$r"; done
+  require_worktree_list
   for r in $roles; do
     [ "$(wtype "$r")" = worktree ] || continue
     dir=$(workdir "$r")
     name=$(cfg role "$r" worktree_name)
-    while IFS= read -r p; do
+    # Each path is ended by a NUL and acted on whole (#134); $s is how it is shown, escaped.
+    while IFS= read -r -d '' p; do
       [ -n "$p" ] || continue
+      s=$(log_field "$p")
       if alive "$r"; then echo "skip   $r: seat is up; stop it first ($SELF down --yes $r)"; continue; fi
-      if [ ! -d "$p" ]; then echo "skip   $r: $p is registered but missing (run: git -C $REPO worktree prune)"; continue; fi
-      if [ -n "$(git -C "$p" status --porcelain)" ]; then echo "REFUSE $r: $p has uncommitted or untracked files"; continue; fi
-      if [ -n "$(git -C "$p" branch --show-current)" ]; then echo "REFUSE $r: $p has branch '$(git -C "$p" branch --show-current)' checked out; move that work by hand"; continue; fi
-      if ! git -C "$p" merge-base --is-ancestor HEAD "$BASE"; then echo "REFUSE $r: $p HEAD is not contained in $BASE (unpushed commits)"; continue; fi
+      if [ ! -d "$p" ]; then echo "skip   $r: $s is registered but missing (run: git -C $REPO worktree prune)"; continue; fi
+      if [ -n "$(git -C "$p" status --porcelain)" ]; then echo "REFUSE $r: $s has uncommitted or untracked files"; continue; fi
+      # The branch name is shown escaped too: git refuses ESC and a newline in a ref name, but takes a
+      # C1 control or a bidi override, which would reorder the line on a terminal. set -e: a failing
+      # assignment would end the script, so a git that cannot read the branch gives "" as the old test
+      # did, and the HEAD check below then refuses.
+      b=$(git -C "$p" branch --show-current) || b=""
+      if [ -n "$b" ]; then echo "REFUSE $r: $s has branch '$(log_field "$b")' checked out; move that work by hand"; continue; fi
+      if ! git -C "$p" merge-base --is-ancestor HEAD "$BASE"; then echo "REFUSE $r: $s HEAD is not contained in $BASE (unpushed commits)"; continue; fi
       # set -e: a failing $(...) assignment would end the script, so its status is caught here.
       cu=0; users=$(cwd_users "$p") || cu=$?
       case $cu in
         0) ;;
-        3) echo "REFUSE $r: cannot tell whether a running process works in $p: lsof escapes characters in its path (a backslash, a control or non-ASCII character); remove it by hand"; continue ;;
-        *) echo "REFUSE $r: cannot tell whether a running process works in $p (lsof gave no answer)"; continue ;;
+        3) echo "REFUSE $r: cannot tell whether a running process works in $s: lsof escapes characters in its path (a backslash, a control or non-ASCII character); remove it by hand"; continue ;;
+        *) echo "REFUSE $r: cannot tell whether a running process works in $s (lsof gave no answer)"; continue ;;
       esac
-      if [ -n "$users" ]; then echo "REFUSE $r: $p is the working folder of a running process (pid $users); stop it first"; continue; fi
+      if [ -n "$users" ]; then echo "REFUSE $r: $s is the working folder of a running process (pid $users); stop it first"; continue; fi
       git -C "$REPO" worktree remove "$p"
-      echo "moved  $r: removed $p; '$SELF up $r' recreates it at $dir"
+      echo "moved  $r: removed $s; '$SELF up $r' recreates it at $dir"
       moved=$((moved + 1))
     done < <(other_worktrees_named "$name" "$dir")
   done
   echo "removed $moved worktree(s)."
   echo "Other worktrees of $REPO that this team does not manage (left alone):"
-  git -C "$REPO" worktree list --porcelain | sed -n 's/^worktree //p' | while IFS= read -r p; do
+  while IFS= read -r -d '' p; do
     [ "$p" = "$REPO" ] && continue
     case $p in "$WT_ROOT"/*) continue ;; esac
-    echo "  $p"
-  done
+    echo "  $(log_field "$p")"
+  done < <(worktree_paths)
 }
 
 cmd_down() {
