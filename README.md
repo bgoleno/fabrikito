@@ -83,13 +83,14 @@ use them. A message arrives between tool calls without interrupting a running to
 permission prompt or change settings, and bursts and loops are throttled. A seat waiting on another can
 ask for one notice when that seat next goes idle (`notify_when_idle`) instead of polling it.
 
-Session names are not authenticated: a `from` name is a claim, not an identity. Claude Code's own
+Session names are not authenticated: a sender's name is a claim, not an identity. Claude Code's own
 held-message notice shows the sender as a verified process id and the name it claims ("peer claims
 name"). Every Claude session on the machine, other teams' seats included, can message a seat, and any
-local process can start a session under a seat's name. The prompt tells seats to act only on exact
-roster names, and to report any other sender, or two sessions sharing a roster name, to the EM. That
-guards against mistakes, not impersonation, which is the same limit as for `say` and the pane (see
-[Safety](#safety)).
+local process can start a session under a seat's name. A delivered message carries the sender's address
+in `from` and its session name in `from-name`. The prompt tells seats to act only on a `from-name` that
+exactly matches a roster name, and to report any other sender, or two sessions sharing a roster name, to
+the EM. That guards against mistakes, not impersonation, which is the same limit as for `say` and the
+pane (see [Safety](#safety)).
 
 ### Which messages are held
 
@@ -106,8 +107,10 @@ permission modes. `bypassPermissions` is one class, and every other mode (`auto`
 | The owner typing into an attached seat, or `say` | Not a cross-session message, so it is never held. |
 
 The sender gets a notice when a message is held, refused or expires. The prompt tells a seat in that
-case to tell the EM rather than resend with `say`, because the receiving side made that call. `say` is
-the seats' fallback only for a running seat that `ListAgents` does not show.
+case not to resend the content with `say`: a refusal is the receiver's decision, and a hold waits for a
+human in that pane. The seat reports it to the EM instead, with `say em` when the EM is the receiver or
+the report itself would be held. `say` is the seats' fallback only for a running seat that `ListAgents`
+does not show.
 
 To change the default, set `crossSessionInbound` to `accept`, `hold` or `refuse`. It is read from managed
 settings, then the `--settings` file, then user settings, and the first value found applies. A project or
@@ -119,16 +122,18 @@ settings.
 ### `say`
 
 `say` is how the owner and scripts reach a seat, and the seats' fallback for a seat that `SendMessage`
-cannot reach. It types a message into the seat's tmux pane by bracketed paste. It refuses a seat that is not
-running claude (the text would run as a shell command), one waiting at a startup dialog (the Enter would
-pick "No, exit"), and one waiting at a permission prompt or a menu (the Enter would pick an answer). A
-refused message is logged as NOT-DELIVERED. Messages are labelled `[from <role>]`, and the owner's are
-`[from owner]`.
+cannot reach. It types a message into the seat's tmux pane by bracketed paste. It refuses a seat that is
+not running claude (the text would run as a shell command), one waiting at a startup dialog (the Enter
+would pick "No, exit"), and one waiting at a permission prompt or a menu that it recognises (the Enter
+would pick an answer). A refused message is logged as NOT-DELIVERED. Messages are labelled `[from
+<role>]`, and the owner's are `[from owner]`. The label is set by the sender (from `TEAM_ROLE`, or
+`owner` when it is unset) and is not authenticated.
 
 ### The message log
 
-`.state/<team>/messages.log` records every `say` with its delivery outcome. `SendMessage` traffic is not
-in it. Read that in each session's transcript (`ctrl+o` in an attached seat).
+`.state/<team>/messages.log` records every `say` with its delivery outcome. Until #39 lands (a hook that
+logs `SendMessage` too), it records `say` traffic only: read `SendMessage` traffic in each session's
+transcript (`ctrl+o` in an attached seat).
 
 ## Safety
 
