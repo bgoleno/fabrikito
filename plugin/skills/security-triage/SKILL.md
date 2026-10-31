@@ -121,9 +121,14 @@ one finding, and does not restate them. Where the two differ, the role prompt wi
      and the condition for disclosure (the owner's word). Create nothing there yourself unless the
      EM asks you to: the place is decided by `sec` and the EM, and the repository's settings are
      the owner's.
-8. **Write the triage record** to a file outside every worktree, in your state folder (the one your
-   progress note is in), not a session's scratch folder, which can be cleaned while the EM still
-   needs the path:
+8. **Write the triage record** to `triage/<label>.md` in your state folder, the folder that holds
+   `notes/`, where your progress note is (`<state>/triage/`, outside every worktree). Not a
+   session's scratch folder, which can be cleaned while the EM still needs the path. Your settings
+   let you write and read that folder without a prompt, let the EM read it, and deny it to every
+   other seat. `<label>` is a neutral name you choose, made only of `a-z`, `0-9` and `-` (for example
+   `pr-135` or `report-2026-10-31-a`): never built from the argument text, and never naming the
+   finding's class, file or severity, since any seat can list the folder. Never delete a record:
+   disposing of one is the owner's call.
    - first line `sec triage of <source> at <sha>: <severity>, <found|suspected|ruled out>`;
    - Where (file, function, commit); Reachability (who, the path, the guards); Severity and why,
      with the higher-exposure rating if it differs; Routing (who was told, and where it was kept

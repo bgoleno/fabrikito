@@ -349,7 +349,7 @@ cmd_check() {
 }
 
 cmd_up() {
-  local want_view=1 started=0 args="" roles r sess dir launch a args_q settings default_ok=0
+  local want_view=1 started=0 args="" roles r sess dir launch a args_q settings default_ok=0 tdir
   for a in "$@"; do
     case $a in
       --no-view) want_view=0 ;;
@@ -366,6 +366,10 @@ cmd_up() {
   for a in $(cfg get state.generated_dirs); do mkdir -p "$STATE/$a"; done
   # Progress notes (#5): seats write them, so up only makes the folder and never touches a note.
   mkdir -p "$(cfg get state.notes_dir)"
+  # The security-triage record folder (#138), when the team has the role that writes it: up only
+  # makes it, owner-only, and nothing deletes a record (disposing of one is the owner's call).
+  tdir=$(cfg get state.triage_dir)
+  [ -z "$tdir" ] || mkdir -p -m 700 "$tdir"
   ensure_claude_copy
   # Roles start in the order given (file order by default).
   for r in $roles; do
