@@ -212,6 +212,7 @@ roles:
     prompt: ../roles/fs.md
     gate_on_stop: true
     skills:
+      - "factory:start-task": when you take an assigned issue, before changing anything
       - "superpowers:test-driven-development": before writing implementation code
       - "superpowers:systematic-debugging": on a bug or a failing test, before proposing a fix
       - "superpowers:verification-before-completion": before saying work is done or opening a PR
@@ -234,6 +235,7 @@ roles:
     prompt: ../roles/fs.md
     gate_on_stop: true
     skills:
+      - "factory:start-task": when you take an assigned issue, before changing anything
       - "superpowers:test-driven-development": before writing implementation code
       - "superpowers:systematic-debugging": on a bug or a failing test, before proposing a fix
       - "superpowers:verification-before-completion": before saying work is done or opening a PR
