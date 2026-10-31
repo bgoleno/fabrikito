@@ -6,18 +6,24 @@
 #
 #   stop_gate.sh <state dir> <role> <workdir> <gate command> <timeout s> <max blocks>
 #
-# The hook input (JSON) arrives on stdin; only session_id is used. The working directory is the one
-# the launcher configured, not the hook's cwd, which follows Claude's current folder.
+# The hook input (JSON) arrives on stdin: session_id, and stop_hook_active (true when this stop
+# ends a turn the hook has already sent back). The working directory is the one the launcher
+# configured, not the hook's cwd, which follows Claude's current folder.
 #
 # A seat also stops for reasons other than "done": to wait for an answer or a review, or with a
-# test red on purpose. So after <max blocks> failed gates in a row in one session the stop goes
-# through, with a stopReason saying the gate is still failing. The count is kept in
-# <state>/gate/<role>.count, which seats cannot edit (an Edit deny in their settings); a passing
-# gate or a clean tree resets it. Claude Code also ends the loop by itself after 8 continuations in
-# a row with no tool call in between (CLAUDE_CODE_STOP_HOOK_BLOCK_CAP).
+# test red on purpose. So after <max blocks> failed gates in a row in one turn the stop goes
+# through, with a stopReason saying the gate is still failing, and without running the gate again.
+# The next turn starts from zero, so a seat that lives for days is never gated off for good. The
+# count is kept in <state>/gate/<role>.count, which seats cannot edit (an Edit deny in their
+# settings); a passing gate or a clean tree resets it. Run by hand with no hook input, the script
+# runs the gate and reports, but leaves the count alone. Claude Code also ends the loop by itself
+# after 8 continuations in a row with no tool call in between (CLAUDE_CODE_STOP_HOOK_BLOCK_CAP).
 set -u
 state=$1 role=$2 workdir=$3 gate=$4 limit=$5 max=$6
-session=$(ruby -rjson -e 'puts((JSON.parse(STDIN.read)["session_id"] rescue nil).to_s)' 2>/dev/null)
+input=$(ruby -rjson -e 'j = (JSON.parse(STDIN.read) rescue {}); j = {} unless j.is_a?(Hash)
+  print j["session_id"].to_s.gsub(/[^A-Za-z0-9._-]/, ""), " ", j["stop_hook_active"] == true' 2>/dev/null)
+session=${input% *}
+active=${input##* }
 dir="$state/gate"
 log="$dir/$role.log"
 count="$dir/$role.count"
@@ -28,9 +34,24 @@ mkdir -p "$dir"
 # Only uncommitted work is gated (untracked files count; ignored ones do not). Committed work is
 # gated again when the reviewer runs the gate on the PR.
 if [ -z "$(git status --porcelain 2>/dev/null)" ]; then
-  rm -f "$count"
+  [ -n "$session" ] && rm -f "$count"
   exit 0
 fi
+
+# Failures so far in this turn: none at the start of a turn, or in another session.
+n=0
+if [ -n "$session" ] && [ "$active" = true ] && [ -f "$count" ]; then
+  read -r was c <"$count"
+  case $c in '' | *[!0-9]*) c=0 ;; esac
+  [ "$was" = "$session" ] && n=$c
+fi
+let_through() {
+  ruby -rjson -e 'puts JSON.generate("continue" => false, "stopReason" => ARGV[0])' \
+    "The gate is still failing after $max tries in a row ($log). The stop goes through: report the failing gate to the EM if you have not."
+  exit 0
+}
+# At the limit in this turn the stop goes through anyway, so the gate is not run again for it.
+[ "$n" -ge "$max" ] && let_through
 
 # macOS has no timeout(1). The gate runs in a process group of its own (perl's setpgrp), so on
 # timeout the whole group is killed, with everything it started in the background. A program that
@@ -61,24 +82,12 @@ wait "$pid" || rc=$?
 exec 2>&3 3>&-
 
 if [ "$timed_out" = 0 ] && [ "$rc" = 0 ]; then
-  rm -f "$count"
+  [ -n "$session" ] && rm -f "$count"
   exit 0
 fi
 
-# Failures in a row in this session; another session starts from zero.
-n=0
-if [ -f "$count" ]; then
-  read -r was c <"$count"
-  [ "$was" = "$session" ] && n=${c:-0}
-fi
 n=$((n + 1))
-printf '%s %s\n' "$session" "$n" >"$count"
-
-if [ "$n" -gt "$max" ]; then
-  ruby -rjson -e 'puts JSON.generate("continue" => false, "stopReason" => ARGV[0])' \
-    "The gate is still failing after $max tries in a row ($log). The stop goes through: report the failing gate to the EM if you have not."
-  exit 0
-fi
+[ -n "$session" ] && printf '%s %s\n' "$session" "$n" >"$count"
 {
   if [ "$timed_out" = 1 ]; then
     echo "gate timed out after ${limit}s: $gate"
@@ -88,7 +97,7 @@ fi
   echo "Last lines of its output (all of it is in $log):"
   tail -n 60 "$log"
   echo
-  echo "Fix the cause, run the gate yourself, and report the command and its output."
+  echo "Fix the cause. Run $gate in $workdir yourself (not lib/stop_gate.sh) and report the command and its output."
   if [ "$n" -eq "$max" ]; then
     echo "This is the last time the gate sends you back in this session. If you are stopping on purpose" \
       "(waiting for an answer or a review, or with a test red on purpose), say so in your report."

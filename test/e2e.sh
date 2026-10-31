@@ -454,8 +454,9 @@ echo "--- stop gate hook (lib/stop_gate.sh, run directly with hook input on stdi
 mkdir -p $T/g && git -C $T/g init -q && git -C $T/g commit -q --allow-empty -m init
 printf '#!/bin/sh\necho ran >> %s/gate-runs\n[ -f %s/g-pass ] && { echo all green; exit 0; }\necho "FAKE FAILURE: 1 test failed"\nexit 1\n' $T $T > $T/gate.sh; chmod +x $T/gate.sh
 # gate <session> [workdir] [gate] [timeout]: runs the hook with max blocks 2; sets rc, out, err.
+# ACTIVE=true marks a stop in a turn the hook has already sent back (stop_hook_active).
 gate() {
-  printf '{"session_id":"%s","stop_hook_active":false,"cwd":"/"}' "$1" | $SRC/lib/stop_gate.sh $T/gstate w9 "${2:-$T/g}" "${3:-$T/gate.sh}" "${4:-30}" 2 >$T/gout 2>$T/gerr; rc=$?
+  printf '{"session_id":"%s","stop_hook_active":%s,"cwd":"/"}' "$1" "${ACTIVE:-false}" | $SRC/lib/stop_gate.sh $T/gstate w9 "${2:-$T/g}" "${3:-$T/gate.sh}" "${4:-30}" 2 >$T/gout 2>$T/gerr; rc=$?
   out=$(cat $T/gout); err=$(cat $T/gerr)
 }
 runs() { [ -f $T/gate-runs ] && wc -l < $T/gate-runs | tr -d ' ' || echo 0; }
@@ -464,11 +465,18 @@ gate s1 $T/proj; [ $rc = 0 ] && [ "$(runs)" = 0 ] && ok "not a git work tree: th
 touch $T/g/new.txt
 gate s1; [ $rc = 2 ] && [ "$(runs)" = 1 ] && echo "$err" | grep -qF "gate failed (exit 1): $T/gate.sh" && echo "$err" | grep -qF "FAKE FAILURE: 1 test failed" && echo "$err" | grep -qF "$T/gstate/gate/w9.log" && ok "dirty tree, failing gate: exit 2 with the command, its output and the log path on stderr" || { bad "failing gate (rc=$rc)"; echo "$err"; }
 grep -qF "FAKE FAILURE" $T/gstate/gate/w9.log && ok "the gate's full output is in the log" || bad "gate log"
-gate s1; [ $rc = 2 ] && echo "$err" | grep -q "last time" && ok "second failure in a row (the limit, 2): still sent back, told it is the last time" || { bad "second failure (rc=$rc)"; echo "$err"; }
-gate s1; [ $rc = 0 ] && echo "$out" | ruby -rjson -e 'j = JSON.parse(STDIN.read); exit(j["continue"] == false && j["stopReason"].include?("still failing") ? 0 : 1)' && ok "past the limit: the stop goes through, with a stopReason saying the gate is still failing" || { bad "past the limit (rc=$rc)"; echo "$out"; }
+echo "$err" | grep -qF "Run $T/gate.sh in $T/g yourself (not lib/stop_gate.sh)" && ok "the send-back names the gate to run and where, and not the hook script" || { bad "send-back wording"; echo "$err"; }
+ACTIVE=true gate s1; [ $rc = 2 ] && echo "$err" | grep -q "last time" && ok "second failure in a row in a turn (the limit, 2): still sent back, told it is the last time" || { bad "second failure (rc=$rc)"; echo "$err"; }
+before=$(runs); ACTIVE=true gate s1; [ $rc = 0 ] && [ "$(runs)" = "$before" ] && echo "$out" | ruby -rjson -e 'j = JSON.parse(STDIN.read); exit(j["continue"] == false && j["stopReason"].include?("still failing") ? 0 : 1)' && ok "past the limit: the stop goes through with a stopReason, without running the gate again" || { bad "past the limit (rc=$rc, runs $before -> $(runs))"; echo "$out"; }
+gate s1; [ $rc = 2 ] && ! echo "$err" | grep -q "last time" && ok "a new turn (stop_hook_active false) with the gate still failing is sent back again" || { bad "new turn after the limit (rc=$rc)"; echo "$out"; }
 gate s2; [ $rc = 2 ] && ! echo "$err" | grep -q "last time" && ok "a new session starts counting again" || bad "new session (rc=$rc)"
+echo "s2 1+1" > $T/gstate/gate/w9.count; ACTIVE=true gate s2; [ $rc = 2 ] && ! echo "$err" | grep -q "last time" && ok "a count file that is not a number counts as zero" || { bad "non-numeric count (rc=$rc)"; echo "$err"; }
 touch $T/g-pass; gate s2; [ $rc = 0 ] && [ ! -e $T/gstate/gate/w9.count ] && ok "a passing gate lets the stop through and resets the count" || bad "passing gate (rc=$rc)"
 rm $T/g-pass; gate s2; [ $rc = 2 ] && ! echo "$err" | grep -q "last time" && ok "after a pass, a failure counts from one again" || bad "count after a pass (rc=$rc)"
+# Run by hand (no hook input): the gate runs and reports, but the count is left as it was.
+cp $T/gstate/gate/w9.count $T/count-before; touch $T/g-pass
+$SRC/lib/stop_gate.sh $T/gstate w9 $T/g $T/gate.sh 30 2 </dev/null >/dev/null 2>&1; rc=$?; rm $T/g-pass
+[ $rc = 0 ] && cmp -s $T/count-before $T/gstate/gate/w9.count && ok "a run with no hook input (by hand) leaves the count alone" || bad "manual run changed the count (rc=$rc)"
 # A gate that runs past its time is killed with everything it started (its process group).
 printf '#!/bin/sh\nsleep 60 &\necho $! > %s/bgpid\nsleep 60\n' $T > $T/slow.sh; chmod +x $T/slow.sh
 t0=$(date +%s); gate s3 $T/g $T/slow.sh 2; t1=$(date +%s); sleep 1

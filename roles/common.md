@@ -95,7 +95,8 @@ They are not preferences.
   changed, how it was tested, and what was not verified. Use the repository's pull request template when
   it has one. Put the reason for any non-obvious choice in the code, not only in the PR.
 - Some checks may run only in CI. Say so when you could not run them locally.
-- A report of done work names the command you ran and quotes its output. If the gate sends you back
-  when you end a turn, fix the cause; if you are stopping on purpose (waiting for an answer or a
-  review, or with a test red on purpose), say so in your report. The gate lets you stop after it has
-  failed @@GATE_MAX_BLOCKS@@ times in a row.
+- A report of done work names the command you ran and quotes its output.
+- If your seat runs the gate when it stops (`check` shows a GATE column) and the gate sends you back,
+  fix the cause and run the gate command it names yourself. If you are stopping on purpose (waiting
+  for an answer or a review, or with a test red on purpose), say so in your report: the gate lets you
+  stop after it has failed @@GATE_MAX_BLOCKS@@ times in a row in one turn.

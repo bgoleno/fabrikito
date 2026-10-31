@@ -227,9 +227,13 @@ Roles without the switch never run it. The example gives it to the engineers and
   its tree becomes commands that run unprompted at the stop. The reviewer's own run of the gate on the
   PR stays the real check.
 - A seat also stops on purpose: to wait for an answer or a review, or with a test red before the fix.
-  After `repo.gate_max_blocks` (default 3) failed gates in a row in one session, the stop goes through
-  with a note that the gate is still failing, and the seat is told to say so in its report. The count
-  is in the state folder, which seats cannot edit, and a passing gate or a clean tree resets it. Claude
+  After `repo.gate_max_blocks` (default 3) failed gates in a row in one turn, the next stop in that turn
+  goes through without running the gate again, with a note that the gate is still failing, and the seat
+  is told to say so in its report. Each new turn starts from zero, so a seat that lives for days is
+  never gated off for good. The count is in the state folder, which seats cannot edit through Claude
+  Code's tools; a passing gate or a clean tree resets it. A script can still write it, or run the hook
+  with made-up input, like every other "a script can do it" limit under [Safety](#safety). Run by hand
+  with no hook input, `lib/stop_gate.sh` runs the gate and reports but leaves the count alone. Claude
   Code also ends such a loop itself after 8 continuations with no tool call in between (raise it with
   `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`).
 - The gate runs with a time limit (`repo.gate_timeout`, default 600 s) in a process group of its own,
