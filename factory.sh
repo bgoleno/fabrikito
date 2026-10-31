@@ -197,6 +197,8 @@ cmd_check() {
   plugin=$(cfg get sessions.plugin)
   if [ -n "$plugin" ]; then echo "plugin    : $plugin (skills as /factory:<skill>)"; else echo "plugin    : off (sessions.claude.plugin: false)"; fi
   echo "gate      : $(cfg get repo.gate_summary)"
+  hooks_note=$(cfg get hooks.note)
+  [ -z "$hooks_note" ] || echo "hooks     : $hooks_note"
   echo "updates   : Claude Code's auto-updater is off in every seat (DISABLE_AUTOUPDATER=1); update by hand, then down and up"
   if resolve_claude; then
     echo "claude    : $CLAUDE_SRC, version $CLAUDE_VERSION; seats run the team's copy $CLAUDE_COPY$([ -x "$CLAUDE_COPY" ] || echo ' (made at the next up)')"
@@ -214,12 +216,13 @@ cmd_check() {
     echo "            $d ($(cat "$d/.how" 2>/dev/null || echo '?')):${users:- no running seat}"
   done
   echo "state     : $STATE"
-  printf '%-5s %-36s %-18s %-12s %-9s %-24s %-7s %s\n' ROLE SEAT SESSION MODEL EFFORT MODE GATE WORKDIR
+  printf '%-5s %-36s %-18s %-12s %-9s %-24s %-9s %-7s %s\n' ROLE SEAT SESSION MODEL EFFORT MODE MEMORY GATE WORKDIR
   for r in $ROLES; do
-    printf '%-5s %-36s %-18s %-12s %-9s %-24s %-7s %s\n' "$r" "$(title "$r")" "$(session "$r")" "$(cfg role "$r" model)" \
-      "$(cfg role "$r" effort)" "$(cfg role "$r" permission_mode)" "$(cfg role "$r" gate)" "$(workdir "$r")"
+    printf '%-5s %-36s %-18s %-12s %-9s %-24s %-9s %-7s %s\n' "$r" "$(title "$r")" "$(session "$r")" "$(cfg role "$r" model)" \
+      "$(cfg role "$r" effort)" "$(cfg role "$r" permission_mode)" "$(cfg role "$r" auto_memory)" "$(cfg role "$r" gate)" "$(workdir "$r")"
   done
   echo "(inherit = flag omitted; the seat uses model, effortLevel and permissions.defaultMode from ~/.claude/settings.json)"
+  echo "(MEMORY off = Claude Code's auto memory is off in that seat; (inherit) = auto_memory: true, Claude Code's own settings decide)"
   echo
   echo "kickoff (each seat's first message; the label marks it as team configuration, not the owner's voice):"
   for r in $ROLES; do
@@ -247,6 +250,8 @@ cmd_up() {
   resolve_claude || die "$CLAUDE_ERR"
   for r in $roles; do check_role "$r"; done
   for a in $(cfg get state.generated_dirs); do mkdir -p "$STATE/$a"; done
+  # Progress notes (#5): seats write them, so up only makes the folder and never touches a note.
+  mkdir -p "$(cfg get state.notes_dir)"
   ensure_claude_copy
   # Roles start in the order given (file order by default).
   for r in $roles; do
@@ -289,6 +294,15 @@ cmd_up() {
       echo '# The auto-updater would reinstall claude under this running seat, after which macOS can no'
       echo '# longer tell which process it is and its privacy grants stop working (#50). Update by hand.'
       echo 'export DISABLE_AUTOUPDATER=1'
+      if [ "$(cfg role "$r" auto_memory)" = off ]; then
+        echo '# Auto memory is one folder for every worktree of the repo, loaded into every session there,'
+        echo '# so a seat would write unreviewed notes for all of them (#71). On with auto_memory: true.'
+        echo 'export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1'
+      else
+        # On: the seat must not inherit the variable from the tmux server's environment (a team
+        # started from inside a seat, where it is set), or check's (inherit) would not be true.
+        echo 'unset CLAUDE_CODE_DISABLE_AUTO_MEMORY'
+      fi
       printf 'claude_bin=%q\n' "$CLAUDE_COPY"
       echo 'if [ -n "$wrapper" ] && [ -x "$wrapper" ]; then run=("$wrapper" "$claude_bin"); else run=("$claude_bin"); fi'
       printf '"${run[@]}"%s --settings %q -n %q \\\n' "$args_q" "$settings" "$sess"

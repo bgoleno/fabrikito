@@ -50,6 +50,30 @@ closing the tab detaches and never stops a seat. Each pane's header reads `<role
 the launcher sets tmux's `set-titles-string` on every seat (at start, and again by `view` or `titles`). The first run asks macOS for permission to control
 iTerm.
 
+## Right-sizing
+
+Every seat is a separate Claude Code session with its own context, so token use grows with the number
+of seats that are working, and with how long each works. Coding has fewer truly parallel tasks than it
+seems: three focused seats often get more done than five scattered ones, and a team of three to five is
+a good start.
+
+- Start only the seats a task needs: `./factory.sh up em tl fs1`. Add one later with `up fs2`, and stop
+  one that is done with `down --yes fs2` (its worktree is kept).
+- An idle seat spends little (Claude Code's session recap and idle compaction can still use some
+  tokens). A message delivered to it starts a turn that sends its whole conversation again, so a seat
+  that is sent many messages keeps spending.
+- Effort is the main cost and depth control (`effort` per role, or `sessions.claude.effort` for all).
+  The example team runs the manager at `medium` and the seats that write, test and review code at
+  `high`; keep `max` for a hard problem a seat works on unattended, such as a security hunt. A `model`
+  per role works the same way. `./factory.sh check` shows each seat's model and effort, and
+  `(inherit)` where the seat takes them from `~/.claude/settings.json`.
+- To see what a team costs, run `/usage` in a seat. Its Session block counts that seat's own tokens
+  (its dollar figure is a list-price estimate, meaningful on API billing). On a subscription it also
+  shows the plan usage bars, which every seat draws on, and a breakdown (by skill, subagent, plugin
+  and MCP server, with recommendations) of recent usage computed from this machine's session history.
+  That covers all the seats together, but also every other Claude Code session on the machine, and it
+  is not split by seat. See [Manage costs](https://code.claude.com/docs/en/costs).
+
 ## The team file
 
 - `repo`, `project`, `owner`: the local checkout, its GitHub repo (`owner/name`), the GitHub Project the
@@ -231,7 +255,7 @@ the original text. The hook that will log `SendMessage` traffic (#39) is to writ
 
 Each seat starts with a generated settings file, `.state/<team>/settings/<role>.json`, passed with
 `--settings` and rewritten read-only on every `up`. It holds the team's `permissions` merged with the
-role's (team first; a role can add or tighten a rule, never loosen one), plus two sets factory.sh adds:
+role's (team first; a role can add or tighten a rule, never loosen one), plus what factory.sh adds:
 
 - an `Edit` deny on the files that would change a seat's next start or its live rules: the generated
   settings, launchers and prompts, the message log and the gate's state, the team file and its
@@ -253,7 +277,11 @@ role's (team first; a role can add or tighten a rule, never loosen one), plus tw
 - an `ask` on any push to the base branch (from `repo.base`), forced or not, since changes land through
   PRs. It is an early warning for a project whose base branch has no protection. The real control is a
   ruleset on the base branch that blocks force-push and deletion and requires a PR; where one exists,
-  this ask is redundant.
+  this ask is redundant;
+- an `Edit` allow on the seat's own progress note (see [Progress notes](#progress-notes)), which is
+  outside its working directory and would otherwise prompt in a mode other than bypass, and an `Edit`
+  deny on every other seat's note: a note is put into its seat's context at each start, so a seat
+  that could write another's would have a lasting channel into it.
 
 `permission_mode` (in `sessions.claude`, or per role) picks the mode; the example uses `auto`.
 `bypassPermissions` skips every prompt and is meant for an isolated machine only. Deny rules hold in
@@ -264,9 +292,34 @@ and the repo's `.claude/` settings, which still apply. `check` shows each seat's
 where load-time errors (unknown modes, malformed rules, a permission flag in `args`) are reported.
 It also warns, without stopping a start, about seats whose modes would hold messages between them
 ([Which messages are held](#which-messages-are-held)), and about any role whose rules have neither a
-deny nor an ask on each of the three merge patterns (`Bash(gh pr merge *)`, `Bash(gh api *pulls/*/merge*)`,
-`Bash(gh api graphql*mergePullRequest*)`), unless that role is marked `may_merge: true` (a YAML boolean, so an unquoted `yes` or `on`
-also counts as true).
+deny nor an ask on each of the merge patterns, unless that role is marked `may_merge: true` (a YAML
+boolean, so an unquoted `yes` or `on` also counts as true). The patterns, the ones `teams/example.yaml`
+denies or asks on ([#85](../../issues/85)):
+
+- `Bash(gh pr merge *)`: `gh pr merge`, with or without arguments.
+- `Bash(gh pr -* merge *)` and `Bash(gh pr -* merge)`: the same with a flag before the subcommand
+  (`gh pr -R o/r merge 5`, `--repo o/r`, `--repo=o/r`). The space after `merge` keeps
+  `gh pr -R o/r view 5 --json mergeable` out.
+- `Bash(gh api *pulls/*/merge*)` and `Bash(gh api graphql*mergePullRequest*)`: the REST and GraphQL merge.
+- `Bash(gh api graphql*enablePullRequestAutoMerge*)`: auto-merge.
+- `Bash(gh api graphql*mergeBranch*)` and `Bash(gh api *repos/*/merges*)`: merging a branch without a PR.
+
+A team file written before these were added gets the warning until it has them. Known false matches:
+a `gh pr -R o/r <subcommand>` whose later text has ` merge ` in it, and `gh api` reads whose path or
+query names these. Not covered: a GraphQL query read from a file or stdin (`-F query=@q.graphql`,
+`--input`), `curl` or other HTTP clients against the API, `gh` aliases, extensions and scripts, a
+`git push` of a merge commit to the base branch (the base-branch push ask covers that), and other
+hosts' CLIs.
+
+Claude Code's auto memory is off in every seat: the generated settings set `autoMemoryEnabled: false`
+and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, and the launch script exports the variable. Auto memory lives
+in one folder per repository (`<config>/projects/<repo>/memory/`), shared by all its worktrees, and its
+`MEMORY.md` loads into every session there, the owner's own in the main checkout included
+([docs](https://code.claude.com/docs/en/memory#storage-location)). A seat's note there would reach every
+other seat and the owner without review, outside the PR process. Set `auto_memory: true` under
+`sessions.claude`, or on a role, to leave it to Claude Code's own settings (that seat's launch script
+unsets the variable, so it is not inherited from a tmux server started inside a seat). `check` shows it per seat
+in the MEMORY column.
 
 These rules are an accident guard, not a security boundary: every seat runs as the owner's OS user,
 with the owner's GitHub credential, and can change what loads. [#29](../../issues/29) tracks making
@@ -344,6 +397,32 @@ Roles without the switch never run it. The example gives it to the engineers and
   cannot switch the gate off. That also turns the user's own hooks back on for that seat if
   `~/.claude/settings.json` had switched them all off.
 
+## Progress notes
+
+Each seat keeps a short progress note, `.state/<team>/notes/<role>.md`: its current task, branch,
+state, next step and what it is waiting for. The shared prompt tells it to rewrite the note whenever
+a task changes state and to work on one task at a time. The note is outside the worktree, so it
+survives `down` and `up` and a recreated worktree; `up` only makes the folder, and nothing removes a
+note.
+
+Every seat's generated settings have a `SessionStart` hook (`lib/session_start.sh`, no matcher, so
+it runs at startup, on resume, after `/clear` and after a compaction). It prints the note (cut at 80
+lines or 6000 bytes), the branch, uncommitted files and the last 10 commits of the seat's working
+directory, and Claude Code adds that to the seat's context. The default kickoff asks a seat to name
+the note's task and next step in its first reply. The note is the seat's own writing, so treat it as
+a reminder, not a record: when it and the repository disagree, the repository wins.
+
+- Control characters other than tab and newline (and DEL) are dropped from everything the hook
+  prints, so a terminal escape in a note or a commit subject arrives as plain text.
+- `git status` and `git log` each have their own time limit (4s and 3s), well inside the hook's 10s,
+  and a repository's fsmonitor program is not run. Claude Code drops all of a hook's output when the
+  hook runs past its timeout, so a slow status on a cold volume costs the seat its file list, not its
+  note.
+- Each seat may edit only its own note: the others are denied (see [Safety](#safety)).
+- The hook is a convenience, not a control, so it does not override a user who switched every hook
+  off: with `disableAllHooks: true` in `~/.claude/settings.json`, a seat without a gate gets no note,
+  and `check` prints a `hooks` line naming those seats.
+
 ## Updating Claude Code
 
 Claude Code's updater replaces its shared executable (the npm package's `bin/claude.exe`), even with
@@ -395,7 +474,7 @@ exist. A throwaway team's worktrees on the volume are not removed by `down`; rem
 
 `TEST_VOLUME=/Volumes/YourDrive test/e2e.sh` runs the launcher against a throwaway repo with a stand-in
 `claude` on a private tmux server. It covers worktree placement on the volume, per-role model and
-effort, message delivery, migrating a legacy worktree (clean and dirty), and refusing to run when the
+effort (and the example team's effort per role), message delivery, migrating a legacy worktree (clean and dirty), and refusing to run when the
 volume is not mounted. It also covers the generated settings files (merged rules, protected paths,
 base-branch rules, permission mode and launch flags), the factory plugin (its manifest, `--plugin-dir`
 with the plugin's real path, `sessions.claude.plugin: false`, a bad value, a missing manifest, a team's
@@ -405,7 +484,11 @@ named `launcher` or `owner`), the load-time checks on modes, rules and `args`,
 `say` delivering only to a seat whose input box is showing (dialogs captured from Claude Code
 2.1.316, an unknown dialog, text in the box, copy mode, an unreadable screen), and the gate: the
 generated Stop hook, its load-time checks, and `lib/stop_gate.sh` itself (clean tree, failure, the
-limit, a new turn or session, a pass, a timeout that kills the gate's process group), and the
+limit, a new turn or session, a pass, a timeout that kills the gate's process group), progress notes
+(the `SessionStart` hook in every seat, `disableAllHooks` only where gated, the own-note allow and
+the other-note denies, `check`'s hooks line, a note surviving `down` and `up`, and
+`lib/session_start.sh` itself: no note, a note, a detached HEAD, no repository, a missing folder, a
+long note, a non-UTF-8 note under `LC_ALL=C`, control characters, a hanging `git status`), and the
 auto-updater being off in every seat and nowhere else, and the seats' own copy of claude (made by
 `up`, never the shared file; still intact after the shared file is replaced; `REPLACED` when its own
 file is swapped; a copy that cannot be made, or a shared install caught mid-reinstall, stops the

@@ -54,7 +54,9 @@ git init -q --bare $T/local/origin.git; git clone -q $T/local/origin.git $T/repo
 #   prompt  a dialog, drawn instead of the box     output  lines drawn above the box
 #   mode    swallow (input never shows), below (a list under the box), prefill (text left in the box),
 #           suggest (a dim suggested prompt in the empty box), sticky (that suggestion stays drawn after
-#           any text), mixed (typed text and the dim suggestion)
+#           any text), mixed (typed text and the dim suggestion), mention (the @-mention list drawn
+#           above the box while its last word starts with @, no row highlighted, as after a paste),
+#           mentionsel (text "sel @sr" with the list's first row highlighted: Enter completes it)
 # A submitted line that starts with ! is run by /bin/sh the way Claude Code's Bash tool runs a
 # command: in a child that leaves the pane's terminal (setsid), so the child has no tty of its own
 # and only the stand-in, its parent, holds the pane's tty.
@@ -82,6 +84,21 @@ static int has(const char *what) {
   return access(path, R_OK) == 0;
 }
 static const char *RULE = "────────────────────────────────────────────────────────────";
+/* Claude Code 2.1.316's @-mention list, captured on 2026-10-30: drawn above the box's top rule,
+   each row indented two spaces in colour 246; a row picked with the arrow keys gets a ❯ in colour
+   153, and only then does Enter complete the mention instead of submitting. */
+static int mention_open(void) {
+  size_t i = blen;
+  if (strcmp(mode, "mention") && strcmp(mode, "mentionsel")) return 0;
+  while (i > 0 && buf[i - 1] != ' ' && buf[i - 1] != '\n') i--;
+  return i < blen && buf[i] == '@';
+}
+static void mention_list(void) {
+  const char *rows[] = { "+ src/", "+ src/beta.txt", "+ src/alpha.txt", "\xe2\x97\x87 example:skill:\xe2\x80\xa6 \xe2\x80\x93 requirements.txt" };
+  for (int i = 0; i < 4; i++)
+    if (i == 0 && !strcmp(mode, "mentionsel")) printf("  \033[38;5;153m\xe2\x9d\xaf %s\033[39m\r\n", rows[i]);
+    else printf("  \033[38;5;246m  %s\033[39m\r\n", rows[i]);
+}
 /* mode tall*: the input box as Claude Code 2.1.316 draws long text. Rows wrap at word boundaries
    with a 2-space indent; the box shows at most max(3, (terminal rows - 10) / 2) rows and scrolls to
    keep the end in view, with the prompt on the first VISIBLE row and no scroll marker. tall-dim
@@ -115,6 +132,7 @@ static void draw(void) {
   fwrite(hist, 1, hlen, stdout);
   if (has("prompt")) { cat("prompt"); fflush(stdout); return; }
   cat("output");
+  if (mention_open()) mention_list();
   if (name[0]) printf("────────────────────────────────────────── %s ──\r\n\xe2\x9d\xaf\xc2\xa0", name);
   else printf("%s\r\n\xe2\x9d\xaf\xc2\xa0", RULE);
   if (!strncmp(mode, "tall", 4)) {
@@ -152,6 +170,7 @@ int main(int n, char **v) {
   if ((mf = fopen(path, "r"))) { if (fscanf(mf, "%63s", mode) != 1) mode[0] = 0; fclose(mf); }
   if (!strcmp(mode, "prefill")) blen = (size_t)snprintf(buf, sizeof buf, "leftover draft text");
   if (!strcmp(mode, "mixed")) blen = (size_t)snprintf(buf, sizeof buf, "typed text");
+  if (!strcmp(mode, "mentionsel")) blen = (size_t)snprintf(buf, sizeof buf, "sel @sr");
   size_t h = (size_t)snprintf(head, sizeof head, "FAKE-CLAUDE");
   for (int i = 1; i < n && h < sizeof head - 60; i++) h += (size_t)snprintf(head + h, sizeof head - h, " [%.50s]", v[i]);
   for (int i = 1; i + 1 < n; i++) if (!strcmp(v[i], "-n")) snprintf(name, sizeof name, "%s", v[i + 1]);
@@ -171,6 +190,10 @@ int main(int n, char **v) {
     if (!strcmp(mode, "swallow")) continue;
     if (b == '\r' || b == '\n') {
       if (paste) { if (blen < sizeof buf - 1) buf[blen++] = '\n'; }
+      else if (!strcmp(mode, "mentionsel") && mention_open()) {   /* Enter picks the highlighted row */
+        while (blen > 0 && buf[blen - 1] != '@') blen--;
+        blen += (size_t)snprintf(buf + blen, sizeof buf - blen, "src/");
+      }
       else {                                      /* submit: the transcript echoes it, the box empties */
         if (blen && buf[0] == '!' && fork() == 0) {
           int fd = open("/dev/null", O_RDWR);
@@ -192,7 +215,7 @@ int main(int n, char **v) {
 }
 C
 cc -o $T/bin/claude $T/c.c || { echo "no compiler"; exit 2; }
-printf '#!/bin/sh\necho "$TEAM_ROLE $1" >> %s/bin.log\nc=$1\nshift\necho "$TEAM_ROLE $*" >> %s/args.log\necho "$TEAM_ROLE DISABLE_AUTOUPDATER=${DISABLE_AUTOUPDATER-unset}" >> %s/env.log\nexport FAKE_KEYLOG=%s/keys-$TEAM_ROLE.log FAKE_FILES=%s/fake-$TEAM_ROLE\nexec "$c" "$@"\n' $T $T $T $T $T > $T/bin/wrap; chmod +x $T/bin/wrap
+printf '#!/bin/sh\necho "$TEAM_ROLE $1" >> %s/bin.log\nc=$1\nshift\necho "$TEAM_ROLE $*" >> %s/args.log\necho "$TEAM_ROLE DISABLE_AUTOUPDATER=${DISABLE_AUTOUPDATER-unset}" >> %s/env.log\necho "$TEAM_ROLE CLAUDE_CODE_DISABLE_AUTO_MEMORY=${CLAUDE_CODE_DISABLE_AUTO_MEMORY-unset}" >> %s/env.log\nexport FAKE_KEYLOG=%s/keys-$TEAM_ROLE.log FAKE_FILES=%s/fake-$TEAM_ROLE\nexec "$c" "$@"\n' $T $T $T $T $T $T > $T/bin/wrap; chmod +x $T/bin/wrap
 mkdir -p $T/proj
 cat > $T/team.yaml <<Y
 team: tt
@@ -211,7 +234,7 @@ roles:
   em: { title: Manager, workdir: { type: project, path: $T/proj }, prompt_text: "em prompt" }
   w1: { title: Worker One, model: sonnet, effort: low, permission_mode: default, gate_on_stop: true, workdir: { type: worktree }, prompt_text: "w1 prompt",
         permissions: { deny: ["Bash(gh pr merge *)", "Read(//**/.env)"], allow: ["Bash(make *)"] } }
-  w2: { title: Worker Two, workdir: { type: worktree }, prompt_text: "w2 prompt" }
+  w2: { title: Worker Two, auto_memory: true, workdir: { type: worktree }, prompt_text: "w2 prompt" }
 Y
 export PATH=$T/bin:$PATH
 # legacy worktree for w2, internal disk
@@ -293,7 +316,7 @@ for p in "$RT/state/settings/**" "$RT/state/launch/**" "$RT/state/prompts/**" "$
   rules $T/state/settings/w1.json deny | grep -qxF "Edit(/$p)" || missing="$missing $p"
 done
 [ -z "$missing" ] && ok "w1.json: Edit deny on every protected path" || { bad "protected paths missing:$missing"; rules $T/state/settings/w1.json deny; }
-rules $T/state/settings/w1.json deny | grep -qE "state/notes|Edit\(//$RT/state/\*\*\)|Edit\(//$RHC/\*\*\)" && bad "protected paths are too wide (state notes, whole state dir or whole ~/.claude)" || ok "protected paths leave state/notes and the rest of ~/.claude writable"
+rules $T/state/settings/w1.json deny | grep -qE "state/notes/\*\*|state/notes/w1\.md|Edit\(//$RT/state/\*\*\)|Edit\(//$RHC/\*\*\)" && bad "protected paths are too wide (all notes or the seat's own, whole state dir or whole ~/.claude)" || ok "protected paths leave the seat's own note and the rest of ~/.claude writable"
 # Claude Code puts the worktrees it makes (--worktree, subagents with isolation: worktree) under
 # <repo>/.claude/worktrees/, so no deny may cover that folder.
 # $T is the path as configured; on macOS it runs through the /var symlink, so its real path ($RT)
@@ -318,6 +341,8 @@ Bash(git push */main *)'
 [ "$(rules $T/state/settings/em.json ask | grep '^Bash(git push ')" = "$base_rules" ] && ok "ask on any push to the base branch (main, from origin/main): the 8 patterns" || { bad "base-branch ask"; rules $T/state/settings/em.json ask; }
 chk=$($S -c $T/team.yaml check 2>&1)
 echo "$chk" | grep -qE "^em +Manager .* bypassPermissions " && echo "$chk" | grep -qE "^w1 +Worker One .* default " && ok "check: MODE column per role" || { bad "check MODE column"; echo "$chk"; }
+echo "$chk" | grep -qE "^w1 +Worker One +tt-w1 +sonnet +low " && echo "$chk" | grep -qE "^em +Manager +tt-em +\(inherit\) +\(inherit\) " \
+  && ok "check: MODEL and EFFORT columns per role (a role's own, or inherit)" || { bad "check MODEL/EFFORT columns"; echo "$chk"; }
 echo "$chk" | grep -qF "warning: seat-to-seat messages will be held. Prompting for permissions: w1 (default). Bypassing them: em (bypassPermissions), w2 (bypassPermissions)." && ok "check: a team whose seats fall into both message classes is warned, naming each" || { bad "check: held-message warning on the mixed test team"; echo "$chk" | grep -A2 "^warning"; }
 sect() { echo "$chk" | sed -n "/^\[$1\]/,/^\[/p"; }
 sect w1 | grep -qF "deny : Read(//**/.env), Bash(touch tt-deny*), Bash(gh pr merge *)" && ok "check: w1's merged deny list" || { bad "check w1 deny"; sect w1; }
@@ -329,6 +354,14 @@ grep -qx "em DISABLE_AUTOUPDATER=1" $T/env.log && grep -qx "w1 DISABLE_AUTOUPDAT
 noenv=""; for r in em w1; do ruby -rjson -e 'exit(JSON.parse(File.read(ARGV[0])).dig("env", "DISABLE_AUTOUPDATER") == "1" ? 0 : 1)' $T/state/settings/$r.json || noenv="$noenv $r"; done
 [ -z "$noenv" ] && ok "every seat's settings set env DISABLE_AUTOUPDATER=1" || bad "settings without env DISABLE_AUTOUPDATER=1:$noenv"
 ! tmux show-environment -g DISABLE_AUTOUPDATER >/dev/null 2>&1 && ! tmux show-environment -t '=tt-em:' DISABLE_AUTOUPDATER >/dev/null 2>&1 && ok "the variable is not in the tmux server's or the session's environment (other programs there are unaffected)" || bad "DISABLE_AUTOUPDATER leaked into tmux's environment"
+# Auto memory is shared by every worktree of the repo and loads into every session there (#71): it
+# is off in every seat unless the team file turns it on (w2 has auto_memory: true).
+grep -qx "em CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" $T/env.log && grep -qx "w1 CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" $T/env.log && ok "auto memory: em and w1 run with CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" || { bad "auto memory: seat environment"; grep AUTO_MEMORY $T/env.log; }
+am() { ruby -rjson -e 's = JSON.parse(STDIN.read); puts [s["autoMemoryEnabled"].inspect, s.dig("env", "CLAUDE_CODE_DISABLE_AUTO_MEMORY").inspect].join(" ")'; }
+[ "$(am < $T/state/settings/em.json)" = 'false "1"' ] && [ "$(am < $T/state/settings/w1.json)" = 'false "1"' ] && ok "auto memory: off by default in the generated settings (autoMemoryEnabled false, env CLAUDE_CODE_DISABLE_AUTO_MEMORY=1)" || { bad "auto memory: default settings"; am < $T/state/settings/em.json; am < $T/state/settings/w1.json; }
+$S -c $T/team.yaml check >/dev/null 2>&1 && [ "$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml settings w2 | am)" = 'nil nil' ] && ok "auto memory: auto_memory: true leaves both unset, so Claude Code's own settings decide" || { bad "auto memory: w2 settings"; TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml settings w2; }
+grep -qx "export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" $T/state/launch/em.sh && grep -qx "export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" $T/state/launch/w1.sh && ok "auto memory: the launch script exports the variable" || { bad "auto memory: launch scripts"; grep -H AUTO_MEMORY $T/state/launch/*.sh; }
+echo "$chk" | grep -qE "^em .* off +- " && echo "$chk" | grep -qE "^w1 .* off +on-stop " && echo "$chk" | grep -qE "^w2 .* \(inherit\) +- " && ok "check: MEMORY column (off for em and w1, (inherit) for w2)" || { bad "check MEMORY column"; echo "$chk" | grep -E "^(ROLE|em|w1|w2) "; }
 # Seats run the team's own copy of claude, made by up, never the shared install (#50).
 CP=$T/state/bin/claude-9.9.9/claude
 [ -x $CP ] && grep -qx "em $CP" $T/bin.log && grep -qx "w1 $CP" $T/bin.log && ok "seats run the team's copy of claude ($CP), made by up" || { bad "seats' claude copy"; cat $T/bin.log; ls -la $T/state/bin 2>&1; }
@@ -343,8 +376,45 @@ echo "$chk" | grep -qF "add to" && ok "check: says the rules add to the user's a
 hook=$(ruby -rjson -e 'j = JSON.parse(File.read(ARGV[0])); h = j.dig("hooks", "Stop", 0, "hooks", 0) || {}; puts [j["hooks"]["Stop"].size, h["type"], h["command"], *h["args"], h["timeout"], j["disableAllHooks"].inspect].join(" | ")' $T/state/settings/w1.json 2>&1)
 [ "$hook" = "1 | command | $SRC/lib/stop_gate.sh | $T/state | w1 | $VOL/$ROOT/team-w1 | make check | 120 | 2 | 150 | false" ] && ok "w1.json: one Stop hook running stop_gate.sh with state, role, workdir, gate, timeout, max blocks; disableAllHooks false" || { bad "w1 Stop hook"; echo "$hook"; }
 # w2 has not started yet at this point (its legacy worktree is refused above): ask the builder.
-nohooks() { ruby -rjson -e 'j = JSON.parse(STDIN.read); exit(j.key?("hooks") || j.key?("disableAllHooks") ? 1 : 0)'; }
-nohooks < $T/state/settings/em.json && TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml settings w2 | nohooks && ok "roles without gate_on_stop (em, w2) get no hooks and no disableAllHooks" || bad "a role without gate_on_stop got hooks"
+nostop() { ruby -rjson -e 'j = JSON.parse(STDIN.read); exit((j["hooks"] || {}).key?("Stop") ? 1 : 0)'; }
+nostop < $T/state/settings/em.json && TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml settings w2 | nostop && ok "roles without gate_on_stop (em, w2) get no Stop hook" || bad "a role without gate_on_stop got a Stop hook"
+# Every seat gets one SessionStart hook (#5), for every start source (no matcher: startup, resume,
+# clear and compact), that shows it its progress note, branch and recent commits.
+sshook() { ruby -rjson -e 'j = JSON.parse(STDIN.read); a = (j["hooks"] || {})["SessionStart"] || []; h = (a[0] || {}).fetch("hooks", [])[0] || {}
+  puts [a.size, (a[0] || {}).key?("matcher"), h["type"], h["command"], *h["args"], h["timeout"], j["disableAllHooks"].inspect].join(" | ")' 2>&1; }
+ss_em=$(sshook < $T/state/settings/em.json); ss_w1=$(sshook < $T/state/settings/w1.json); ss_w2=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml settings w2 | sshook)
+# disableAllHooks: false only for the gated seat (w1): the note is a convenience and does not
+# override a user who switched every hook off; the gate is a control and does.
+[ "$ss_em" = "1 | false | command | $SRC/lib/session_start.sh | $T/state | em | $T/proj | 10 | nil" ] \
+  && [ "$ss_w1" = "1 | false | command | $SRC/lib/session_start.sh | $T/state | w1 | $VOL/$ROOT/team-w1 | 10 | false" ] \
+  && [ "$ss_w2" = "1 | false | command | $SRC/lib/session_start.sh | $T/state | w2 | $VOL/$ROOT/team-w2 | 10 | nil" ] \
+  && ok "every seat (em, w1, w2): one SessionStart hook running session_start.sh with state, role, workdir; disableAllHooks false only for gated w1" || { bad "SessionStart hook"; echo "$ss_em"; echo "$ss_w1"; echo "$ss_w2"; }
+# A seat may write its own note without a prompt (it is outside its working directory), and only its
+# own: every other seat's note is denied, as exact paths in both spellings, since a note is put into
+# its seat's context at each start.
+na=""; for f in em w1; do for o in em w1 w2; do for sp in "$RT" "$T"; do
+  if [ $f = $o ]; then rules $T/state/settings/$f.json allow | grep -qxF "Edit(/$sp/state/notes/$o.md)" || na="$na $f-allows-$o($sp)"
+    rules $T/state/settings/$f.json deny | grep -qxF "Edit(/$sp/state/notes/$o.md)" && na="$na $f-denies-own($sp)"
+  else rules $T/state/settings/$f.json deny | grep -qxF "Edit(/$sp/state/notes/$o.md)" || na="$na $f-denies-$o($sp)"
+    rules $T/state/settings/$f.json allow | grep -qF "notes/$o.md" && na="$na $f-allows-other-$o"; fi
+done; done; done
+rules $T/state/settings/w1.json deny | grep -qF "state/notes/**" && na="$na notes/**-denied"
+[ -z "$na" ] && ok "em.json, w1.json: Edit allowed on the seat's own note, denied on every other seat's (both spellings, exact paths)" || { bad "note rules:$na"; rules $T/state/settings/w1.json deny | grep notes; rules $T/state/settings/w1.json allow; }
+sect em | grep -qF "added: Edit deny on" && sect em | grep -qF ", Edit allow on its own progress note and deny on the other seats'" && ! sect em | grep -E "^ +(allow|deny) *:" | grep -qF notes \
+  && ok "check: the note allow is listed as added by the launcher, not among the team's allow rules" || { bad "check: note allow line"; sect em; }
+# A user who switched every hook off keeps that choice in seats without a gate, which then get no
+# note: check says which. Throwaway config folders, so the owner's own settings play no part.
+mkdir -p $T/cfgoff $T/cfgon && echo '{"disableAllHooks": true}' > $T/cfgoff/settings.json && echo '{}' > $T/cfgon/settings.json
+hk=$(CLAUDE_CONFIG_DIR=$T/cfgoff $S -c $T/team.yaml check 2>&1 | grep "^hooks ")
+[ "$hk" = "hooks     : disableAllHooks is true in $T/cfgoff/settings.json, so em, w2 get no session-start note (a gated seat turns hooks back on for its gate)" ] \
+  && ! CLAUDE_CONFIG_DIR=$T/cfgon $S -c $T/team.yaml check 2>&1 | grep -q "^hooks " && ! CLAUDE_CONFIG_DIR=$T/no-such-cfg $S -c $T/team.yaml check 2>&1 | grep -q "^hooks " \
+  && ok "check: a hooks line naming the ungated seats when the user's settings disable all hooks, none otherwise" || { bad "check: hooks line"; echo "$hk"; }
+[ -d $T/state/notes ] && ok "up makes the notes folder under the state folder" || bad "no $T/state/notes after up"
+grep -qF "$T/state/notes/em.md" $T/state/prompts/em.md && ok "the rendered prompt names the seat's own note" || bad "the prompt does not name $T/state/notes/em.md"
+# The allow covers Edit (and Write), not a Bash redirect, which prompts outside bypass (qa, live on #90).
+grep -qF "Write it with the Write or Edit tool, not Bash" $T/state/prompts/em.md && ok "the prompt says to write the note with Write or Edit, not Bash" || bad "the prompt does not say how to write the note"
+grep -qF "progress note" $T/state/prompts/em.kickoff && ok "the default kickoff asks for the note's task and next step" || { bad "kickoff and the note"; cat $T/state/prompts/em.kickoff; }
+echo "Task: survive a restart" > $T/state/notes/em.md
 rules $T/state/settings/w1.json deny | grep -qxF "Edit(/$RT/state/gate/**)" && ok "the gate's own state (its failure counter) is Edit-protected" || bad "gate state not protected"
 echo "$chk" | grep -qE "^w1 .* on-stop " && echo "$chk" | grep -qE "^em .* - +[^ ]" && ok "check: GATE column (on-stop for w1 only)" || { bad "check GATE column"; echo "$chk" | head -14; }
 echo "$chk" | grep -qF "make check (timeout 120s; a seat may stop after 2 failed gates in a row)" && ok "check: gate command, timeout and limit in the header" || bad "check: gate header"
@@ -352,6 +422,7 @@ echo "$chk" | grep -qF "make check (timeout 120s; a seat may stop after 2 failed
 chmod u+w $T/state/settings/em.json && echo '{"permissions":{}}' > $T/state/settings/em.json && chmod 444 $T/state/settings/em.json
 $S -c $T/team.yaml down --yes em >/dev/null; TEAM_VIEW=0 $S -c $T/team.yaml up --no-view em >/dev/null 2>&1
 [ "$(perms $T/state/settings/em.json)" = "$want_em" ] && [ "$(stat -f %Lp $T/state/settings/em.json)" = 444 ] && ok "up rewrites a stale settings file" || { bad "up rewrites settings"; perms $T/state/settings/em.json; }
+[ "$(cat $T/state/notes/em.md 2>&1)" = "Task: survive a restart" ] && ok "a seat's progress note survives down and up" || { bad "progress note after down/up"; ls -la $T/state/notes 2>&1; }
 echo "--- say"
 TEAM_ROLE=em $S -c $T/team.yaml say w1 "hello w1 from em" && sleep 1
 echo "--- kickoff label"
@@ -445,6 +516,8 @@ $S -c $T/team.yaml migrate w2 2>&1 | grep -E "moved|REFUSE|skip" | cut -c1-150
 $S -c $T/team.yaml up --no-view w2 2>&1 | grep -E "start|error" | cut -c1-150
 case "$(git -C $T/repo worktree list)" in *"$VOL/$ROOT/team-w2"*) ok "w2 recreated on the volume";; *) bad "w2 recreated on the volume";; esac
 [ ! -d $T/repo/.claude/worktrees/team-w2 ] && ok "legacy w2 folder gone" || bad "legacy w2 folder gone"
+# w2 (auto_memory: true) starts only now: its launch script and environment leave auto memory alone.
+[ -f $T/state/launch/w2.sh ] && ! grep -q "export CLAUDE_CODE_DISABLE_AUTO_MEMORY" $T/state/launch/w2.sh && grep -qx "unset CLAUDE_CODE_DISABLE_AUTO_MEMORY" $T/state/launch/w2.sh && grep -qx "w2 CLAUDE_CODE_DISABLE_AUTO_MEMORY=unset" $T/env.log && ok "auto memory: w2 (auto_memory: true) runs without the variable: its launch script unsets it, whatever the tmux server holds" || { bad "auto memory: w2 launch"; grep AUTO_MEMORY $T/env.log; grep -H AUTO_MEMORY $T/state/launch/w2.sh 2>&1; }
 echo "--- status"; $S -c $T/team.yaml status | cut -c1-150
 echo "--- dirty legacy is refused"
 $S -c $T/team.yaml down --yes w1 >/dev/null; $S -c $T/team.yaml migrate w1 2>&1 | grep -c "removed 0" | grep -q 1 && true
@@ -481,7 +554,7 @@ echo "--- say delivers only to a seat showing its input box"
 # CLI that draws them differently shows up as a mismatch here. pu shows an invented select list
 # with no numbers and no key hint: any dialog say does not know must fail closed too.
 roles=""
-for r in pp pm pd ph pu pb pf ps pg px pk pq po ta tb tc td te; do roles="$roles  $r: { title: Seat $r, workdir: { type: project, path: $T/proj }, prompt_text: \"$r\" }
+for r in pp pm pd ph pu pb pf ps pg px pk pq po pn pz ta tb tc td te; do roles="$roles  $r: { title: Seat $r, workdir: { type: project, path: $T/proj }, prompt_text: \"$r\" }
 "; done
 cat > $T/tp.yaml <<Y
 team: tp
@@ -551,6 +624,7 @@ M
 echo tall > $T/fake-ta-mode.txt; echo tall > $T/fake-te-mode.txt; echo tall-dim > $T/fake-tb-mode.txt; echo tall-typed > $T/fake-tc-mode.txt; echo tall-short > $T/fake-td-mode.txt
 echo below > $T/fake-pb-mode.txt; echo prefill > $T/fake-pf-mode.txt; echo swallow > $T/fake-ps-mode.txt
 echo suggest > $T/fake-pg-mode.txt; echo mixed > $T/fake-px-mode.txt; echo sticky > $T/fake-pk-mode.txt
+echo mention > $T/fake-pn-mode.txt; echo mentionsel > $T/fake-pz-mode.txt
 { printf '%s\n' "$fake_prompt"; for i in $(seq 1 5); do echo "later output line $i"; done; } > $T/fake-pq-output.txt
 cat > $T/fake-po-output.txt <<'M'
 ⏺ The permission prompt asked "Do you want to proceed?" and the cursor sat on "❯ 1. Yes".
@@ -592,6 +666,17 @@ delivered pq "prompt text in the transcript above the box"
 delivered po "the seat's own output quoting prompt lines"
 TEAM_ROLE=em $S -c $T/tp.yaml say po "qa result: it asked 'Do you want to proceed?' with '❯ 1. Yes' and 'Esc to cancel · Tab to amend'" >/dev/null 2>&1; sleep 1
 delivered po "the message after one that quotes prompt text"
+# The @-mention list (#77). Claude Code 2.1.316 draws it above the box, and after a paste no row is
+# highlighted, so Enter submits the message as pasted; it completes the mention only when a row was
+# picked with the arrow keys, which leaves text in the box, and say refuses that before pasting.
+printf '%s' 'probe @src' | tmux load-buffer -b mn -; tmux paste-buffer -p -d -b mn -t '=tp-pn:'; sleep 1
+tmux capture-pane -p -t '=tp-pn:' | grep -qF '    + src/beta.txt' && ok "stand-in: a pasted message ending in an @ word opens the mention list above the box" || bad "stand-in: no mention list after the paste"
+tmux send-keys -t '=tp-pn:' C-u; sleep 1
+TEAM_ROLE=em $S -c $T/tp.yaml say pn "see @src" >/dev/null 2>&1; sleep 1
+mn=$(tmux capture-pane -p -t '=tp-pn:')
+echo "$mn" | grep -qF "❯ [from em] see @src" && ! echo "$mn" | grep -qF "see @src/" && tail -1 $T/state/messages.log | grep -q "	pn	delivered	see @src$" &&
+  ok "say delivers a message ending in an @ word whole (the mention list above the box is not read as footer)" || { bad "say to a seat with the mention list"; echo "$mn" | tail -8; tail -1 $T/state/messages.log; }
+refused pz "input box" "a seat whose box holds text with a highlighted @-mention row (Enter would complete it)"
 tmux copy-mode -t '=tp-pq:'; refused pq "copy mode" "a seat whose pane is in copy mode"; tmux send-keys -t '=tp-pq:' -X cancel
 # When tmux cannot read the seat's screen, say cannot tell what is up: it refuses.
 mkdir -p $T/shim && printf '#!/bin/sh\n[ "$1" = capture-pane ] && exit 1\nexec %s "$@"\n' "$(command -v tmux)" > $T/shim/tmux && chmod +x $T/shim/tmux
@@ -689,6 +774,12 @@ accept "an mcp server-scoped glob in allow" "" "$(rule allow '"mcp__puppeteer__*
 accept "a parameter rule on a non-main field" "" "$(rule deny '"Agent(model:opus)", "Bash(command -v *)", "Bash(ls:*)"')"
 accept "the manual alias" "permission_mode: manual"
 reject "gate_on_stop without repo.gate" "gate_on_stop needs repo.gate" "" "" ", gate_on_stop: true"
+reject "a non-boolean sessions.claude.auto_memory" "sessions.claude.auto_memory must be true or false" "auto_memory: maybe"
+reject "a non-boolean roles.<id>.auto_memory" "roles.em.auto_memory must be true or false" "" "" ", auto_memory: 1"
+mk "auto_memory: true" "" ", auto_memory: false"
+[ "$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml settings em | am)" = 'false "1"' ] && ok "auto memory: a role's auto_memory: false wins over sessions.claude.auto_memory: true" || bad "auto memory: role override"
+mk "auto_memory: true"
+$S -c $T/v.yaml check >/dev/null 2>&1 && [ "$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml settings em | am)" = 'nil nil' ] && ok "auto memory: sessions.claude.auto_memory: true turns it back on for every seat" || bad "auto memory: team switch"
 REPO_EXTRA='gate: "true"' reject "a non-boolean gate_on_stop" "gate_on_stop must be true or false" "" "" ", gate_on_stop: yes please"
 REPO_EXTRA='gate: ""' reject "an empty gate" "repo.gate must be a non-empty command" ""
 REPO_EXTRA='gate: "true", gate_timeout: 0' reject "a zero gate_timeout" "repo.gate_timeout must be a positive whole number of seconds" ""
@@ -795,7 +886,11 @@ held() {
   esac
 }
 w9() { echo "  w9: { title: N, workdir: { type: project, path: $T/proj }, prompt_text: \"p\"${1:+, $1} }" >> $T/v.yaml; }
-guard='"Bash(gh pr merge *)", "Bash(gh api *pulls/*/merge*)", "Bash(gh api graphql*mergePullRequest*)"'
+# The merge spellings tl chose in #85, in MERGE_PATTERNS order: as a YAML list (guard), and as
+# check names them (all; rest is all but the first).
+guard='"Bash(gh pr merge *)", "Bash(gh pr -* merge *)", "Bash(gh pr -* merge)", "Bash(gh api *pulls/*/merge*)", "Bash(gh api *repos/*/merges*)", "Bash(gh api graphql*mergePullRequest*)", "Bash(gh api graphql*enablePullRequestAutoMerge*)", "Bash(gh api graphql*mergeBranch*)"'
+rest='Bash(gh pr -* merge *), Bash(gh pr -* merge), Bash(gh api *pulls/*/merge*), Bash(gh api *repos/*/merges*), Bash(gh api graphql*mergePullRequest*), Bash(gh api graphql*enablePullRequestAutoMerge*), Bash(gh api graphql*mergeBranch*)'
+all="Bash(gh pr merge *), $rest"
 mk "permission_mode: bypassPermissions" "$(rule ask "$guard")"; w9 "permission_mode: auto"
 held "a bypass team with one auto seat" yes "w9 (auto)" "em (bypassPermissions)"
 mk "permission_mode: bypassPermissions" "$(rule ask "$guard")"; w9 "permission_mode: plan"
@@ -817,23 +912,42 @@ mk "permission_mode: auto" "$(rule deny "$guard")"; w9
 $S -c $T/v.yaml check 2>&1 | grep -qF "warning: " && bad "team-wide merge deny: unexpected warning" || ok "a team-wide deny on the merge patterns: no merge warning"
 mk "permission_mode: auto" "" ", permissions: { ask: [$guard] }"; w9
 mw=$($S -c $T/v.yaml check 2>&1)
-echo "$mw" | grep -qF "warning: w9 could merge a PR without being asked: no deny or ask rule matches Bash(gh pr merge *), Bash(gh api *pulls/*/merge*), Bash(gh api graphql*mergePullRequest*)." && ! echo "$mw" | grep -q "warning: em could merge" && ok "a role added without a merge deny or ask is named, with every missing pattern" || { bad "merge warning for w9"; echo "$mw" | grep warning; }
+echo "$mw" | grep -qF "warning: w9 could merge a PR without being asked: no deny or ask rule matches $all." && ! echo "$mw" | grep -q "warning: em could merge" && ok "a role added without a merge deny or ask is named, with every missing pattern" || { bad "merge warning for w9"; echo "$mw" | grep warning; }
 mk "permission_mode: auto" "" ", permissions: { ask: [$guard] }"; w9 "may_merge: true"
 $S -c $T/v.yaml check 2>&1 | grep -qF "could merge" && bad "may_merge: true still warned" || ok "a role marked may_merge: true is not warned about"
 mk "permission_mode: auto" "" ', permissions: { deny: ["Bash(gh pr merge *)"] }'
 mw=$($S -c $T/v.yaml check 2>&1)
-echo "$mw" | grep -qF "no deny or ask rule matches Bash(gh api *pulls/*/merge*), Bash(gh api graphql*mergePullRequest*). " && ok "a partial merge deny: only the patterns still open are named" || { bad "partial merge deny"; echo "$mw" | grep warning; }
+echo "$mw" | grep -qF "no deny or ask rule matches $rest. " && ok "a partial merge deny: only the patterns still open are named" || { bad "partial merge deny"; echo "$mw" | grep warning; }
 mk "permission_mode: auto" "" ', permissions: { deny: ["Bash(gh *)"] }'
 $S -c $T/v.yaml check 2>&1 | grep -qF "could merge" && bad "a broader deny (Bash(gh *)) still warned" || ok "a broader rule that covers the patterns (Bash(gh *)) counts"
 mk "permission_mode: auto" "" ', permissions: { deny: ["Bash(gh pr merge 12*)", "Bash(gh api repos/x/y/pulls/1/merge*)", "Bash(gh api graphql -f q=mergePullRequest*)"] }'
-$S -c $T/v.yaml check 2>&1 | grep -qF "warning: em could merge a PR without being asked: no deny or ask rule matches Bash(gh pr merge *), Bash(gh api *pulls/*/merge*), Bash(gh api graphql*mergePullRequest*)." && ok "narrower rules that leave other merges open do not count" || bad "narrower merge rules counted as covering"
+$S -c $T/v.yaml check 2>&1 | grep -qF "warning: em could merge a PR without being asked: no deny or ask rule matches $all." && ok "narrower rules that leave other merges open do not count" || bad "narrower merge rules counted as covering"
 # The legacy :* form keeps the space before *: Bash(ls:*) is Bash(ls *) (permissions docs), so a rule
 # that stops mid-word covers nothing here, and the whole-word ones still cover.
 mk "permission_mode: auto" "" ', permissions: { deny: ["Bash(gh pr mer:*)", "Bash(gh ap:*)", "Bash(gh api graphq:*)"] }'
-$S -c $T/v.yaml check 2>&1 | grep -qF "warning: em could merge a PR without being asked: no deny or ask rule matches Bash(gh pr merge *), Bash(gh api *pulls/*/merge*), Bash(gh api graphql*mergePullRequest*)." && ok "legacy :* rules that stop mid-word (gh pr mer:*, gh ap:*, gh api graphq:*) do not count" || bad "legacy mid-word :* rules counted as covering"
-mk "permission_mode: auto" "" ', permissions: { deny: ["Bash(gh pr merge:*)", "Bash(gh api:*)"] }'
-$S -c $T/v.yaml check 2>&1 | grep -qF "could merge" && bad "whole-word legacy rules (gh pr merge:*, gh api:*) not counted" || ok "whole-word legacy :* rules (gh pr merge:*, gh api:*) count"
+$S -c $T/v.yaml check 2>&1 | grep -qF "warning: em could merge a PR without being asked: no deny or ask rule matches $all." && ok "legacy :* rules that stop mid-word (gh pr mer:*, gh ap:*, gh api graphq:*) do not count" || bad "legacy mid-word :* rules counted as covering"
+mk "permission_mode: auto" "" ', permissions: { deny: ["Bash(gh pr merge:*)", "Bash(gh pr -* merge:*)", "Bash(gh pr -* merge)", "Bash(gh api:*)"] }'
+$S -c $T/v.yaml check 2>&1 | grep -qF "could merge" && bad "whole-word legacy rules (gh pr merge:*, gh pr -* merge:*, gh api:*) not counted" || ok "whole-word legacy :* rules (gh pr merge:*, gh pr -* merge:*, gh api:*) count"
 reject "a non-boolean may_merge" "roles.em.may_merge must be true or false" "" "" ", may_merge: yes please"
+# Which commands the example team's merge rules catch (#85), through matching_rules, which reads a
+# rule as the permissions docs describe it. tl denies; em has the team-wide ask.
+mr() { ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml matching_rules "$@"; }
+spell() { local want=$1; shift; [ "$(mr tl "$1")" = "deny $want" ] && ok "merge spelling caught: $1 (deny $want)" || { bad "merge spelling not caught as $want: $1"; mr tl "$1"; }; }
+spell 'Bash(gh pr merge *)' 'gh pr merge 5 --squash'
+spell 'Bash(gh pr merge *)' 'gh pr merge'
+spell 'Bash(gh pr -* merge *)' 'gh pr -R o/r merge 5'
+spell 'Bash(gh pr -* merge *)' 'gh pr --repo o/r merge 5'
+spell 'Bash(gh pr -* merge *)' 'gh pr --repo=o/r merge 5 --squash'
+spell 'Bash(gh pr -* merge)' 'gh pr -R o/r merge'
+spell 'Bash(gh api *pulls/*/merge*)' 'gh api -X PUT repos/o/r/pulls/5/merge'
+spell 'Bash(gh api *repos/*/merges*)' 'gh api -X POST repos/o/r/merges -f base=main -f head=x'
+spell 'Bash(gh api graphql*mergePullRequest*)' 'gh api graphql -f query="mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }"'
+spell 'Bash(gh api graphql*enablePullRequestAutoMerge*)' 'gh api graphql -f query="mutation { enablePullRequestAutoMerge(input: {pullRequestId: \"x\"}) { clientMutationId } }"'
+spell 'Bash(gh api graphql*mergeBranch*)' 'gh api graphql -f query="mutation { mergeBranch(input: {repositoryId: \"x\", base: \"main\", head: \"y\"}) { clientMutationId } }"'
+[ "$(mr em 'gh pr -R o/r merge 5')" = "ask Bash(gh pr -* merge *)" ] && ok "merge spelling: em gets the team-wide ask" || { bad "em merge ask"; mr em 'gh pr -R o/r merge 5'; }
+for c in 'gh pr comment 83 --body "ready to merge"' 'gh pr view 5 --json mergeable,mergeStateStatus' 'gh pr -R o/r view 5 --json mergeable' 'gh pr comment 83 --body "gh pr merge 5 after review"'; do
+  [ -z "$(mr tl "$c")" ] && ok "innocent command not caught: $c" || { bad "innocent command caught: $c"; mr tl "$c"; }
+done
 # A quoted "yes" is a string, not a boolean. (An unquoted yes is YAML 1.1's true, and is accepted.)
 reject "a quoted \"yes\" for may_merge" "roles.em.may_merge must be true or false" "" "" ', may_merge: "yes"'
 echo "--- stop gate hook (lib/stop_gate.sh, run directly with hook input on stdin)"
@@ -868,6 +982,38 @@ $SRC/lib/stop_gate.sh $T/gstate w9 $T/g $T/gate.sh 30 2 </dev/null >/dev/null 2>
 printf '#!/bin/sh\nsleep 60 &\necho $! > %s/bgpid\nsleep 60\n' $T > $T/slow.sh; chmod +x $T/slow.sh
 t0=$(date +%s); gate s3 $T/g $T/slow.sh 2; t1=$(date +%s); sleep 1
 [ $rc = 2 ] && echo "$err" | grep -q "timed out after 2s" && ! echo "$err" | grep -q "Terminated" && [ $((t1 - t0)) -lt 15 ] && ! kill -0 "$(cat $T/bgpid)" 2>/dev/null && ok "a gate past its timeout is killed with its children, and the stop is sent back" || { bad "gate timeout (rc=$rc, $((t1 - t0))s)"; echo "$err"; }
+echo "--- session start hook (lib/session_start.sh, run directly with hook input on stdin)"
+# sst <workdir>: runs the hook for role w9 with state $T/sstate; sets rc, out, err.
+sst() { printf '{"session_id":"s1","source":"%s"}' "${SRC_KIND:-startup}" | $SRC/lib/session_start.sh $T/sstate w9 "$1" >$T/sout 2>$T/serr; rc=$?; out=$(cat $T/sout); err=$(cat $T/serr); }
+mkdir -p $T/s && git -C $T/s init -q && git -C $T/s switch -q -c work && git -C $T/s commit -q --allow-empty -m "first commit" && git -C $T/s commit -q --allow-empty -m "second: the latest"
+sst $T/s; [ $rc = 0 ] && [ -z "$err" ] && echo "$out" | grep -qF "no progress note yet" && echo "$out" | grep -qF "$T/sstate/notes/w9.md" \
+  && ok "no note yet: exit 0, says so and names the file to write" || { bad "no note (rc=$rc)"; echo "$out$err"; }
+mkdir -p $T/sstate/notes && printf 'Task: #5 progress notes\nNext: open the PR\n' > $T/sstate/notes/w9.md && touch $T/s/dirty.txt
+sst $T/s; [ $rc = 0 ] && [ -z "$err" ] && echo "$out" | grep -qxF "Task: #5 progress notes" && echo "$out" | grep -qxF "Next: open the PR" && echo "$out" | grep -qF "Branch: work" \
+  && echo "$out" | grep -qF "second: the latest" && echo "$out" | grep -qF "first commit" && echo "$out" | grep -qF "?? dirty.txt" \
+  && ok "with a note: the note, the branch, recent commits and uncommitted files" || { bad "session start output (rc=$rc)"; echo "$out$err"; }
+SRC_KIND=compact sst $T/s; [ $rc = 0 ] && echo "$out" | grep -qxF "Task: #5 progress notes" && ok "the output does not depend on the start source (compact, as after a compaction)" || { bad "compact (rc=$rc)"; echo "$out"; }
+git -C $T/s switch -q --detach; sst $T/s; [ $rc = 0 ] && echo "$out" | grep -qE "Branch: \(detached at [0-9a-f]+\)" && ok "a detached HEAD is named as such" || { bad "detached (rc=$rc)"; echo "$out"; }
+sst $T/proj; [ $rc = 0 ] && echo "$out" | grep -qxF "Task: #5 progress notes" && echo "$out" | grep -qF "not a git work tree" && ok "a workdir that is not a git work tree: the note, and no git lines" || { bad "non-repo workdir (rc=$rc)"; echo "$out$err"; }
+sst $T/no-such-dir; [ $rc = 0 ] && echo "$out" | grep -qxF "Task: #5 progress notes" && ok "a missing workdir: the note still, exit 0" || { bad "missing workdir (rc=$rc)"; echo "$out$err"; }
+# A note that grew past its purpose is cut, so it cannot flood the seat's context.
+ruby -e '300.times { |i| puts "line #{i} " + "x" * 400 }' > $T/sstate/notes/w9.md
+sst $T/s; [ $rc = 0 ] && [ "$(printf %s "$out" | wc -c | tr -d ' ')" -lt 9000 ] && echo "$out" | grep -qF "note truncated" && echo "$out" | grep -qF "second: the latest" \
+  && ok "a long note is truncated (output under 9000 bytes), and the git lines still follow" || { bad "long note ($(printf %s "$out" | wc -c) bytes)"; echo "$out" | tail -5; }
+printf 'caf\xc3\xa9 ok\nbad \xff byte\n' > $T/sstate/notes/w9.md
+LC_ALL=C sst $T/s; [ $rc = 0 ] && echo "$out" | grep -qF "café ok" && ok "a note with UTF-8 and an invalid byte is shown under LC_ALL=C, exit 0" || { bad "non-ASCII note (rc=$rc)"; echo "$out$err"; }
+# Terminal escapes in a note or a commit subject come out as plain text: C0 controls other than tab
+# and newline, and DEL, are dropped from everything the hook prints.
+printf 'clip \033]52;c;ZXZpbA==\007 title \033]0;x\007 del \177 tab\tkept\n' > $T/sstate/notes/w9.md
+git -C $T/s commit -q --allow-empty -m "$(printf 'subject \033[31mred\033[0m end')"
+sst $T/s; [ $rc = 0 ] && ! LC_ALL=C grep -q "$(printf '[\001-\010\013-\037\177]')" $T/sout && grep -qF "$(printf 'clip ]52;c;ZXZpbA== title ]0;x del  tab\tkept')" $T/sout \
+  && grep -qF "subject [31mred[0m end" $T/sout && ok "control characters are stripped from the note and the git output; a tab is kept" || { bad "control characters in hook output (rc=$rc)"; od -c $T/sout | grep -E '033|007|177' | head -3; }
+# A git status past its own limit (4s) is cut, and the note still arrives: Claude Code drops all of a
+# hook's output when the hook itself runs past its timeout (10s).
+mkdir -p $T/slowgit && printf '#!/bin/sh\ncase " $* " in *" status "*) exec sleep 30;; esac\nexec %s "$@"\n' "$(command -v git)" > $T/slowgit/git && chmod +x $T/slowgit/git
+t0=$(date +%s); PATH=$T/slowgit:$PATH sst $T/s; t1=$(date +%s)
+[ $rc = 0 ] && [ $((t1 - t0)) -lt 9 ] && echo "$out" | grep -qF "clip" && echo "$out" | grep -qF "git status did not finish within 4s" && echo "$out" | grep -qF "subject" \
+  && ok "a git status that hangs is cut at 4s (the hook took $((t1 - t0))s): the note and recent commits still print" || { bad "slow git status (rc=$rc, $((t1 - t0))s)"; echo "$out"; }
 echo "--- the seats' claude copy: replaced, failed, mid-reinstall"
 cc -o $CP.new $T/c.c && mv $CP.new $CP
 $S -c $T/team.yaml status | grep -E "^em " | grep -q REPLACED && ok "status: a seat whose claude file was replaced under it shows REPLACED" || { bad "status REPLACED"; $S -c $T/team.yaml status; }
@@ -892,11 +1038,20 @@ for r in $(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml ids); do
   n=$(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render "$r" 2>/dev/null | wc -l | tr -d ' ')
   [ "${n:-0}" -gt 0 ] && [ "$n" -lt 200 ] && ok "example seat $r renders a prompt under 200 lines ($n)" || bad "example seat $r renders a prompt of ${n:-?} lines (limit 199)"
 done
+echo "--- the example team sets effort per role"
+# Effort is the main cost and depth control: the manager coordinates at medium, the seats that
+# write, test and review code run at high. Read from the flags each seat would be launched with.
+for pair in em:medium tl:high fs1:high fs2:high qa:high sec:high; do
+  r=${pair%%:*}; want=${pair#*:}
+  got=$(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml claude_args "$r" 2>&1 | grep -A1 -x -- --effort | tail -1)
+  [ "$got" = "$want" ] && ok "example seat $r launches with --effort $want" || bad "example seat $r launches with --effort '${got}' (want $want)"
+done
 echo "--- prompts render the same whatever the locale"
 # Under LC_ALL=C, or with no locale at all (cron, env -i), ruby would read files as US-ASCII and the
 # first non-ASCII byte in a prompt would stop the render (#72). The output must not depend on it.
-# env -i drops TEAM_SCRIPT and TEAM_LOG, which the prompts name, so every run gets the same values.
-pin="TEAM_SCRIPT=factory.sh TEAM_LOG=messages.log"
+# env -i drops TEAM_SCRIPT, TEAM_LOG and TEAM_STATE_DIR, which the prompts name (the state folder
+# through @@NOTE@@), so every run gets the same values.
+pin="TEAM_SCRIPT=factory.sh TEAM_LOG=messages.log TEAM_STATE_DIR=$T/state"
 for r in $(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml ids); do
   want=$(env $pin LC_ALL=en_US.UTF-8 ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render "$r" 2>&1)
   c=$(env $pin LC_ALL=C ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render "$r" 2>&1); rc=$?
