@@ -180,6 +180,7 @@ cmd_check() {
   echo "(MEMORY off = Claude Code's auto memory is off in that seat; (inherit) = auto_memory: true, Claude Code's own settings decide)"
   echo
   cfg permissions_report
+  cfg warnings
   echo "valid."
 }
 

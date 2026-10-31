@@ -131,7 +131,7 @@ permission modes. `bypassPermissions` is one class, and every other mode (`auto`
 | From, to | What happens |
 |---|---|
 | Seat to seat, both in one class (one `permission_mode` for every seat) | Delivered. |
-| Seat to seat, different classes (a role with its own `permission_mode`) | Held. An approval dialog opens in the receiver's pane, and if nobody answers it the message is dropped after `dialogExpiry` (5 minutes by default). In an unattended team, that means it is lost. `check` does not warn about this yet (#36). |
+| Seat to seat, different classes (a role with its own `permission_mode`) | Held. An approval dialog opens in the receiver's pane, and if nobody answers it the message is dropped after `dialogExpiry` (5 minutes by default). In an unattended team, that means it is lost. `check` warns when the seats fall into both classes, naming the roles in each. |
 | The owner's own Claude session to a seat | The same rule: delivered when both are in one class, held otherwise. |
 | Any other Claude session on the machine to a seat | The same rule. |
 | The owner typing into an attached seat, or `say` | Not a cross-session message, so it is never held. |
@@ -229,6 +229,11 @@ someone answers. `say` will not deliver to a seat at a permission prompt or any 
 [`say`](#say)): attach and answer it yourself. These rules add to the ones in `~/.claude/settings.json`
 and the repo's `.claude/` settings, which still apply. `check` shows each seat's mode and rules, and is
 where load-time errors (unknown modes, malformed rules, a permission flag in `args`) are reported.
+It also warns, without stopping a start, about seats whose modes would hold messages between them
+([Which messages are held](#which-messages-are-held)), and about any role whose rules have neither a
+deny nor an ask on each of the three merge patterns (`Bash(gh pr merge *)`, `Bash(gh api *pulls/*/merge*)`,
+`Bash(gh api graphql*mergePullRequest*)`), unless that role is marked `may_merge: true` (a YAML boolean, so an unquoted `yes` or `on`
+also counts as true).
 
 Claude Code's auto memory is off in every seat: the generated settings set `autoMemoryEnabled: false`
 and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, and the launch script exports the variable. Auto memory lives

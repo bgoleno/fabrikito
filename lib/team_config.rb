@@ -14,6 +14,7 @@
 #   team_config.rb <team.yaml> kickoff <id>        the seat's first message
 #   team_config.rb <team.yaml> settings <id>       the seat's generated Claude Code settings (JSON)
 #   team_config.rb <team.yaml> permissions_report  each seat's mode and rules, for `check`
+#   team_config.rb <team.yaml> warnings            what `check` warns about (held messages, merging)
 #
 # Ruby is used because it ships with macOS and parses YAML without installing anything.
 # Unknown keys are an error, not ignored: a misspelled `volume:` that silently fell back to a
@@ -47,7 +48,7 @@ SESSION_KEYS = %w[prefix claude].freeze
 CLAUDE_KEYS = %w[wrapper args model effort permission_mode plugin auto_memory].freeze
 PROMPT_KEYS = %w[common].freeze
 ROLE_KEYS = %w[title summary workdir prompt prompt_text kickoff session model effort permission_mode permissions
-               gate_on_stop skills auto_memory].freeze
+               gate_on_stop skills may_merge auto_memory].freeze
 WORKDIR_KEYS = %w[type path name].freeze
 ID_RE = /\A[a-z][a-z0-9]*\z/.freeze
 PREFIX_RE = /\A[a-z0-9][a-z0-9-]*\z/.freeze
@@ -70,6 +71,10 @@ PERMISSION_MODES = %w[default manual acceptEdits plan auto dontAsk bypassPermiss
 # Strongest first. Claude Code checks deny, then ask, then allow, across every settings source, and
 # the first match decides (https://code.claude.com/docs/en/permissions).
 PERMISSION_LISTS = %w[deny ask allow].freeze
+
+# The ways a seat could merge a PR from Bash. `check` warns about a role whose rules neither deny
+# nor ask on each of them, unless the team file says the role may merge (roles.<id>.may_merge).
+MERGE_PATTERNS = ['Bash(gh pr merge *)', 'Bash(gh api *pulls/*/merge*)', 'Bash(gh api graphql*mergePullRequest*)'].freeze
 
 # Flags factory.sh sets itself, or that would undo this file's permission keys. :always, or
 # :with_mode (only when a seat has a permission_mode; a legacy file may still pass them in args).
@@ -708,6 +713,90 @@ class TeamConfig
     out
   end
 
+  # The class Claude Code puts a seat's session in when no crossSessionInbound applies and it
+  # decides from the two sessions' modes whether to hold a message: "It groups sessions that bypass
+  # permission prompts into one class, and every other session into the other. Plan mode counts as
+  # bypassing in interactive terminal sessions with bypass permissions available, and auto,
+  # acceptEdits, and dontAsk count as prompting"
+  # (https://code.claude.com/docs/en/cross-session-messaging#control-inbound-messages).
+  # A seat with a permission_mode other than bypassPermissions has bypass switched off by its
+  # settings (disableBypassPermissionsMode, see #settings), so its plan mode prompts. A legacy
+  # plan mode in args has bypass available only with --allow-dangerously-skip-permissions there.
+  # 'bypass', 'prompting', or nil for a seat that inherits its mode from settings files check does
+  # not read.
+  def message_class(id)
+    mode = permission_mode(id)
+    available = mode == 'bypassPermissions'
+    if mode.nil?
+      label = mode_label(id)
+      return nil if label == '(inherit)'
+
+      mode = label.sub(/ \(args\)\z/, '')
+      available = mode == 'bypassPermissions' || args.include?('--allow-dangerously-skip-permissions')
+    end
+    mode == 'bypassPermissions' || (mode == 'plan' && available) ? 'bypass' : 'prompting'
+  end
+
+  def may_merge?(id)
+    role(id)['may_merge'] == true
+  end
+
+  # Whether a Bash permission rule matches every command a Bash pattern matches: the rule's `*`
+  # matches anything, so it covers the pattern when it matches the pattern's text with the
+  # pattern's own `*` taken literally. The legacy prefix form `cmd:*` is read as `cmd *`, space
+  # included: "`Bash(ls:*)` matches the same commands as `Bash(ls *)`", and "The space before a
+  # trailing `*` is part of the rule" (https://code.claude.com/docs/en/permissions). Read as `cmd*`,
+  # Bash(gh pr mer:*) would wrongly count as covering `gh pr merge *`.
+  def rule_covers?(rule, pattern)
+    return true if ['Bash', 'Bash(*)'].include?(rule)
+
+    spec = rule[/\ABash\((.*)\)\z/m, 1]
+    return false if spec.nil?
+
+    re = Regexp.new("\\A#{spec.sub(/:\*\z/, ' *').split('*', -1).map { |s| Regexp.escape(s) }.join('.*')}\\z", Regexp::MULTILINE)
+    re.match?(pattern[/\ABash\((.*)\)\z/m, 1])
+  end
+
+  # What `check` warns about. Warnings do not stop a start.
+  def warnings
+    held_message_warnings + merge_warnings
+  end
+
+  # Under the default inbound rule a message between the two classes is held in either direction:
+  # a prompting receiver holds a message from a bypass sender, and a bypass receiver holds one from
+  # any sender that is not bypassing (same page as #message_class). A held message waits at an
+  # approval dialog in the receiver's pane and is dropped when the dialog expires.
+  def held_message_warnings
+    by = roles.keys.group_by { |id| message_class(id) }
+    list = ->(ids) { ids.map { |id| "#{id} (#{mode_label(id)})" }.join(', ') }
+    out = []
+    if by['bypass'] && by['prompting']
+      out << "warning: seat-to-seat messages will be held. Prompting for permissions: #{list.call(by['prompting'])}. " \
+             "Bypassing them: #{list.call(by['bypass'])}."
+      out << '  Messages from a bypass seat to a prompting seat, and from a prompting seat to a bypass seat, wait at an ' \
+             "approval dialog in the receiver's pane and are dropped when it expires (dialogExpiry, 5 minutes by default). " \
+             'Messages between seats of the same class are delivered.'
+      out << '  Give every seat a permission_mode of the same class, or set crossSessionInbound (README: Which messages are held).'
+    end
+    if by[nil] && (by['bypass'] || by['prompting'])
+      out << "note: check cannot see the permission mode of #{by[nil].join(', ')} (inherited from settings), so it " \
+             'cannot tell whether messages between those seats and the others are held.'
+    end
+    out
+  end
+
+  def merge_warnings
+    roles.keys.reject { |id| may_merge?(id) }.map do |id|
+      merged = merged_permissions(id)
+      guards = merged['deny'] + merged['ask']
+      missing = MERGE_PATTERNS.reject { |p| guards.any? { |r| rule_covers?(r, p) } }
+      next if missing.empty?
+
+      "warning: #{id} could merge a PR without being asked: no deny or ask rule matches #{missing.join(', ')}. " \
+        "Deny them in roles.#{id}.permissions, or set roles.#{id}.may_merge: true if #{id} is meant to merge."
+    end.compact
+  end
+
   def validate
     bad = @c.keys - TOP_KEYS
     die "unknown top-level key(s): #{bad.join(', ')} (allowed: #{TOP_KEYS.join(', ')})" unless bad.empty?
@@ -769,6 +858,8 @@ class TeamConfig
       die "roles.#{id}.gate_on_stop must be true or false" if r.key?('gate_on_stop') && ![true, false].include?(r['gate_on_stop'])
       die "roles.#{id}.gate_on_stop needs repo.gate (the command to run)" if r['gate_on_stop'] == true && gate.nil?
       validate_skills(id, r['skills']) if r.key?('skills')
+      # A YAML boolean: the system ruby's YAML 1.1 also reads an unquoted yes or on as true.
+      die "roles.#{id}.may_merge must be true or false" if r.key?('may_merge') && ![true, false].include?(r['may_merge'])
       die "roles.#{id}.auto_memory must be true or false" if r.key?('auto_memory') && ![true, false].include?(r['auto_memory'])
       if r.key?('permission_mode') && !PERMISSION_MODES.include?(r['permission_mode'].to_s)
         die "roles.#{id}.permission_mode must be one of #{PERMISSION_MODES.join(', ')}"
@@ -846,5 +937,6 @@ when 'render' then puts cfg.render(args.fetch(0) { die 'render needs a role id' 
 when 'kickoff' then puts cfg.kickoff(args.fetch(0) { die 'kickoff needs a role id' })
 when 'settings' then puts JSON.pretty_generate(cfg.settings(args.fetch(0) { die 'settings needs a role id' }))
 when 'permissions_report' then puts cfg.permissions_report
+when 'warnings' then puts cfg.warnings
 else die "unknown command '#{cmd}'"
 end
