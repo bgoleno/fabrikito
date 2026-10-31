@@ -171,7 +171,10 @@ no Enter is sent and the text stays in the box, where it goes out with the next 
 The input box is recognised as Claude Code 2.1.316 draws it, so a CLI update that changes it makes `say`
 refuse every seat until `factory.sh` is updated. A refused message is logged as NOT-DELIVERED. Messages
 are labelled `[from <role>]`, and the owner's are `[from owner]`. The label is set by the sender (from
-`TEAM_ROLE`, or `owner` when it is unset) and is not authenticated.
+`TEAM_ROLE`, or `owner` when it is unset) and is not authenticated. When `TEAM_ROLE` is unset, `say`
+run from inside a seat (found from the terminals of the processes that started it) is labelled with
+that seat's role, never `[from owner]`; this stops a mislabel by accident, and the labels are still
+not authenticated ([#29](../../issues/29)).
 
 ### The kickoff
 
@@ -193,7 +196,7 @@ logs `SendMessage` too), it records `say` traffic only: read `SendMessage` traff
 transcript (`ctrl+o` in an attached seat).
 
 Each `say` (`say all` included) appends exactly one line of five tab-separated fields: the local time
-(`2026-10-30T14:05:09`), the sender (`TEAM_ROLE`, or `owner`), the recipient (a role id or `all`),
+(`2026-10-30T14:05:09`), the sender (`TEAM_ROLE`, the seat `say` ran inside, or `owner`), the recipient (a role id or `all`),
 `delivered` or `NOT-DELIVERED`, and the message as typed, without its `[from <role>]` label. The
 sender and the message are escaped so the record stays on one line and holds no terminal control
 codes: a backslash is written `\\`, a newline `\n`, a carriage return `\r`, a tab `\t`. Every other C0
@@ -217,7 +220,10 @@ role's (team first; a role can add or tighten a rule, never loosen one), plus tw
   `.claude/settings.local.json`, `.claude/CLAUDE.md`, and `.claude/hooks/`, `rules/`, `skills/`,
   `agents/` and `commands/` (not the root `CLAUDE.md`, which is project work), the
   seat's own `.claude/settings.json` and `settings.local.json`, and Claude Code's user settings, MCP
-  config, instructions and extensions under `~/.claude`. `.claude/worktrees/` stays editable: Claude
+  config, instructions, user-level rules (`rules/`) and extensions under `~/.claude` and in `~/.claude.json` (and, when
+  `CLAUDE_CONFIG_DIR` is set where `up` runs, under that folder too, with the `.claude.json` inside
+  it; each seat's launch script pins the same value, so a seat uses a folder its rules protect, and
+  the default folder stays protected for sessions started without the variable). `.claude/worktrees/` stays editable: Claude
   Code puts the worktrees it makes there, including those of a worktree seat's subagents, which land
   under the main checkout. A path that runs through a symlink is denied both as configured and as its
   real path, which stops `rm` and `mv` of a protected link; repointing a link with `ln -sf` is not a

@@ -359,8 +359,10 @@ class TeamConfig
       if s.is_a?(Hash)
         die "roles.#{id}.skills: a mapping entry must be one skill name and its note" unless s.size == 1
         name, note = s.first
-        unless note.is_a?(String) && !note.strip.empty? && !note.include?("\n")
-          die "roles.#{id}.skills: the note for '#{name}' must be one line of text"
+        # The note is written into the prompt as is, so any control character (a newline, but also a
+        # carriage return, tab or escape) would reach the seat raw.
+        unless note.is_a?(String) && !note.strip.empty? && note !~ /[[:cntrl:]]/
+          die "roles.#{id}.skills: the note for '#{name}' must be one line of text, with no control characters"
         end
       else
         name = s
@@ -480,8 +482,6 @@ class TeamConfig
   # gets an Edit deny on each (Edit also covers Write, NotebookEdit and shell redirects). This is not
   # a boundary: a script can still write them (see README, Safety, and #29).
   def protected_paths(id)
-    home = Dir.home
-    claude_home = File.join(home, '.claude')
     [
       # what factory.sh regenerates for each start (settings, launchers, prompts) and the message log
       *(GENERATED_DIRS + HOOK_DIRS).map { |d| File.join(state_dir, d, '**') },
@@ -509,10 +509,15 @@ class TeamConfig
       # project settings load from the seat's own folder without a trust prompt, hooks included;
       # the rest of its .claude/ (commands, agents, skills) is ordinary project work
       File.join(workdir(id), '.claude', 'settings.json'), File.join(workdir(id), '.claude', 'settings.local.json'),
-      # the user's own settings, MCP servers, instructions and extensions (not all of ~/.claude,
-      # where Claude Code's tools write legitimately)
-      File.join(claude_home, 'settings.json'), File.join(home, '.claude.json'), File.join(claude_home, 'CLAUDE.md'),
-      *%w[plugins skills agents commands hooks].map { |d| File.join(claude_home, d, '**') }
+      # the user's own settings, MCP servers, instructions, rules and extensions (not all of ~/.claude,
+      # where Claude Code's tools write legitimately), in every folder a session may load them from.
+      # rules/: "Personal rules in ~/.claude/rules/ apply to every project on your machine"
+      # (https://code.claude.com/docs/en/memory#user-level-rules); a live check on 2.1.316 showed them
+      # loaded at session start from <CLAUDE_CONFIG_DIR>/rules/ too (#68).
+      *claude_config_locations.flat_map do |claude_home, claude_json|
+        [File.join(claude_home, 'settings.json'), claude_json, File.join(claude_home, 'CLAUDE.md'),
+         *%w[plugins skills agents commands hooks rules].map { |d| File.join(claude_home, d, '**') }]
+      end
     ].flat_map do |p|
       glob = p.end_with?('/**')
       base = glob ? p[0...-3] : p
@@ -546,6 +551,29 @@ class TeamConfig
     w = expand(w)
     app = w[%r{\A(.*?\.app)/}, 1]
     [app ? File.join(app, '**') : w]
+  end
+
+  # Where Claude Code keeps the user's config: ~/.claude and ~/.claude.json, or, with
+  # CLAUDE_CONFIG_DIR set, that folder and the .claude.json inside it ("every ~/.claude path lives
+  # under that directory instead. The same applies to .claude.json":
+  # https://code.claude.com/docs/en/claude-directory). Read from the environment factory.sh runs in;
+  # each seat's launch script pins the same value (or unsets it), so a seat uses the folder its rules
+  # protect, whatever the tmux server's own environment holds.
+  def claude_config_paths
+    dir = ENV['CLAUDE_CONFIG_DIR'].to_s
+    return [File.join(Dir.home, '.claude'), File.join(Dir.home, '.claude.json')] if dir.empty?
+
+    dir = File.expand_path(dir.sub(/\A~(?=\/|\z)/, Dir.home))
+    [dir, File.join(dir, '.claude.json')]
+  end
+
+  # Every config folder whose files must stay protected: the one seats use (claude_config_paths)
+  # and, when CLAUDE_CONFIG_DIR moves it, the default ~/.claude and ~/.claude.json as well. The
+  # owner's own sessions started without the variable (another terminal, the desktop app) still
+  # load settings, hooks and MCP servers from the default folder.
+  def claude_config_locations
+    default = [File.join(Dir.home, '.claude'), File.join(Dir.home, '.claude.json')]
+    [claude_config_paths, default].uniq
   end
 
   def prompts_common_path
@@ -775,6 +803,7 @@ when 'get'
   when 'sessions.plugin' then puts(cfg.plugin? ? real_path(PLUGIN_DIR) : '')
   when 'sessions.wrapper' then puts(cfg.claude['wrapper'] ? cfg.expand(cfg.claude['wrapper']) : '')
   when 'state.dir' then puts cfg.state_dir
+  when 'claude.config_dir' then puts cfg.claude_config_paths.first
   when 'state.generated_dirs' then puts GENERATED_DIRS
   when 'repo.gate_summary'
     puts(cfg.gate ? "#{cfg.gate} (timeout #{cfg.gate_timeout}s; a seat may stop after #{cfg.gate_max_blocks} failed gates in a row)" : 'none')
