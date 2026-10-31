@@ -68,7 +68,8 @@ differ, the role prompt wins.
    - Then correctness. Would the tests fail without the change? When that is cheap, check it by
      hand: undo the fix in your detached worktree and run the test, then put each file you changed
      back with `git restore <path>` and check that `git status --porcelain` is empty.
-   - A security engineer reviews per their role prompt instead: reachability first, then severity.
+   - A security engineer reviews per their role prompt instead: reachability first, then severity,
+     and each finding goes through `factory:security-triage` (step 7).
    - For a change your role prompt calls risky, get the second opinion it describes. Give the
      reviewer the diff and the issue, not your conclusions, and check each of its findings yourself
      before you post it.
@@ -86,18 +87,33 @@ differ, the role prompt wins.
    - last line: `READY at <short sha>` or `CHANGES NEEDED at <short sha>`, and what else the PR
      waits for (another reviewer, qa, a merge with its base, the owner).
 
-   A security finding that your role prompt keeps out of public trackers goes in neither the file
-   nor the PR: send it to the EM and the owner as your role prompt says, and post nothing that
-   describes it.
+   A security finding held back as below goes in neither the file nor the PR, and nothing you
+   post describes it: no other part of the verdict (a criterion, an optional point, Not verified)
+   points at it either. What is held back, and who tells whom:
+   - **Not the security engineer** (for example a tech lead): hold back every security finding,
+     whatever severity you think it has. Only `sec` rates findings, and a real medium posted as a
+     low is public. Send it to `sec` and the EM only, with `SendMessage` (`say` only as your role
+     prompt's fallback). Tell the author nothing about it: sec's triage decides who is told. Do
+     not post READY while it is open; a blocking point says only that one point went to `sec` and
+     the EM, with no class, file, line or severity.
+   - **The security engineer:** triage it with `factory:security-triage`. A low or ruled-out
+     finding may go in the verdict as that skill's step 6 says. A medium or higher (what your role
+     prompt's rule 5 keeps out of public trackers) is held back, and the skill says who is told
+     and when: the EM at once, privately, for the owner; the author privately when the fix
+     belongs on their PR; and nothing public until the owner allows disclosure (rule 8).
 8. **Post it** as a command of its own: `gh pr comment <n> -R <repo> --body-file <file>`. Never
    approve or merge for the owner, and never put the body in the command itself
    (`--body "$(...)"`): that makes the command unparseable for the permission rules.
 9. **Tell the author and the EM,** one message each: the PR URL, the head, the verdict, and the
-   comment's URL. The comment is the record; the message only points to it. Send each with
+   comment's URL. The comment is the record; the message only points to it, and neither message
+   describes a finding held back in step 7. Send each with
    `SendMessage`, `to` set to the seat's session name. Use the role prompt's `say` fallback only
    where it says to.
 10. **Leave your worktree clean:** nothing staged, and back where it was before the review
     (for example `git switch --detach origin/<base>`). Update your progress note if you keep one.
+    Other seats read it and the session start shows it, so name a finding held back in step 7 only
+    as "one point sent to sec and the EM" (sec: the neutral label of `factory:security-triage`
+    step 9), never by its class, file or severity.
 
 ## What to report
 In your session: the PR, the head, the verdict line, the gate result line, and the comment's URL.
