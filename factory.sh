@@ -551,7 +551,7 @@ send_one() {
 log_field() {
   ruby --disable-gems -e '
     s = ARGV[0].dup.force_encoding("UTF-8")
-    re = s.valid_encoding? ? /[\\\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/ : (s = s.b; /[\\\x00-\x1f\x7f-\xff]/n)
+    re = s.valid_encoding? ? /[\\\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/ : (s = s.b; /[\\\x00-\x1f\x7f-\xff]/n)
     esc = { "\\" => "\\\\", "\n" => "\\n", "\r" => "\\r", "\t" => "\\t" }
     print s.gsub(re) { |c| esc[c] || c.bytes.map { |b| format("\\x%02X", b) }.join }' -- "$1" || printf '%s' '<log_field failed>'
 }

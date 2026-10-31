@@ -241,6 +241,16 @@ logged all delivered $'to all,\nfrom em' 'to all,\nfrom em' "a multi-line say al
 # C1 controls (CSI, OSC, ST) and bidi overrides are escaped by code point, as their UTF-8 bytes.
 logged w2 NOT-DELIVERED $'csi \xc2\x9b31m osc \xc2\x9d0;x\xc2\x9c rlo \xe2\x80\xae isolate \xe2\x81\xa6.' 'csi \xC2\x9B31m osc \xC2\x9D0;x\xC2\x9C rlo \xE2\x80\xAE isolate \xE2\x81\xA6.' "a message with C1 controls and bidi overrides"
 logged w2 NOT-DELIVERED $'not utf-8: \x9b, \xff' 'not utf-8: \x9B, \xFF' "a message that is not valid UTF-8"
+# No tracked file may hold a bidi embedding, override or isolate character itself (Trojan Source):
+# the escaper names those ranges with ASCII \u escapes, and so must anything else.
+bidi=$(cd $SRC && git ls-files -z | xargs -0 ruby --disable-gems -e 'ARGV.each { |f| next unless File.file?(f); File.binread(f).each_line.with_index(1) { |l, i| puts "#{f}:#{i}" if l =~ /\xE2\x80[\xAA-\xAE]|\xE2\x81[\xA6-\xA9]/n } }')
+[ -z "$bidi" ] && ok "no tracked file contains a bidi control character" || { bad "bidi control characters in: $bidi"; }
+# Outside a UTF-8 locale (a script, cron, env -i) ruby reads its -e program as US-ASCII, so the
+# escaper's source must be ASCII: the field is escaped, not the failure marker.
+n=$(wc -l < $T/state/messages.log)
+LC_ALL=C TEAM_ROLE=em $S -c $T/team.yaml say w2 $'c locale: csi \xc2\x9b, e-acute \xc3\xa9' >/dev/null 2>&1
+[ "$(wc -l < $T/state/messages.log)" -eq $((n + 1)) ] && [ "$(tail -1 $T/state/messages.log | cut -f5-)" = $'c locale: csi \\xC2\\x9B, e-acute \xc3\xa9' ] &&
+  ok "log: under LC_ALL=C the message is escaped, not logged as a failure" || { bad "log: LC_ALL=C"; tail -1 $T/state/messages.log; }
 # The sender comes from TEAM_ROLE, which nothing validates: it is escaped like the message.
 n=$(wc -l < $T/state/messages.log)
 TEAM_ROLE=$'e\tm\nx' $S -c $T/team.yaml say w2 "from an odd sender" >/dev/null 2>&1
