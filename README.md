@@ -301,7 +301,8 @@ are labelled `[from <role>]`, and the owner's are `[from owner]`. The label is s
 run from inside a seat (found from the terminals of the processes that started it) is labelled with
 that seat's role, never `[from owner]`; this stops a mislabel by accident, and the labels are still
 not authenticated ([#29](../../issues/29)). When it cannot tell, `say` refuses rather than guess: when
-`ps` cannot read its process or one of its ancestors, when tmux cannot list its panes, when it runs
+`ps` cannot read its process or one of its ancestors, when its walk up them stops at 100 processes
+before pid 1 ([#130](../../issues/130)), when tmux cannot list its panes, when it runs
 inside a seat of another team on the same tmux server (any session `up` started, which sets
 `TEAM_ROLE`), or when a tmux server other than the one `say` addresses is among its ancestors. The last
 is a pane of another server, whose seats `say` cannot see ([#115](../../issues/115)). It refuses a seat of
@@ -351,6 +352,13 @@ digits): U+009B is `\xC2\x9B`. Other text, such as `é` or `✓`, is written as 
 not valid UTF-8 has every byte from 0x80 up written as `\xHH`. If the escaping itself fails, the field
 reads `<log_field failed>`. The escaping is reversible: `printf '%b' "<field>"` in bash gives back
 the original text.
+
+`say` writes this line before it prints anything about the delivery, such as why a message was not
+delivered (#128). A write to a terminal or a pipe can fail (with EINTR under heavy load, into a closed
+stderr, or into a pipe whose reader has gone), and the failure ends `say`; written first, the record is
+kept all the same. If the line itself cannot be appended, `say` still prints its reason, then says the
+record could not be written and whether the message was delivered (so that a delivered message is not
+sent again), and exits with status 1.
 
 Each `SendMessage` from a seat appends one line in the same format, written by `lib/log_message.sh`, a
 `PostToolUse` and `PostToolUseFailure` hook on `SendMessage` in every seat's settings:
@@ -670,9 +678,21 @@ to the test's private server), and going ahead for a file in `teams/` or with `-
 did not make, one whose tmux folder resolves to `/tmp`, and one whose socket folder or socket is a link).
 It also covers `say` across tmux servers (#115): with `TEAM_ROLE` unset, a seat on one server and a pane of
 another are refused; a live-env driver sends `[from live-test]`; and `live-test` is refused on the default
-server before any tmux call.
+server before any tmux call. And it covers `say` writing its log line before its terminal message (#128):
+with stderr closed, or a pipe whose reader has gone, a refusal and a down seat are still logged
+`NOT-DELIVERED`; the reason is still shown and no held file is left; and a log that cannot be appended to
+still lets the reason through.
 
 The exit code is authoritative: `test/e2e.sh` exits 0 only when it reaches the end with every
 assertion passed (`RESULT pass=<n> fail=0`), and non-zero when any assertion fails or the run stops
 early (a setup error, a signal). A run that stops early still removes what it made and says
 `ABORTED` on stderr. That makes it safe as a `repo.gate` command, which is judged by its exit code.
+
+One failure is not ours to fix ([#101](../../issues/101)). Under heavy load (a load average of about
+40, many seats gating at once), a run can fail one assertion, and its output then shows
+`factory.sh: line <n>: echo: write error: Interrupted system call`. macOS's own bash (3.2) does not
+restart a write into a pipe that a child's exit (SIGCHLD) interrupts, and its `echo` does not retry.
+Under `set -e` the failed write then ends the command with exit 1. The same can happen to any
+factory.sh output into a pipe, such as a seat's Bash tool. Rerun when that exact message is in the
+output. It is the only failure where a green rerun is the right answer. For any other failure, a
+green rerun is not evidence.
