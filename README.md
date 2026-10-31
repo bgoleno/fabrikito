@@ -81,9 +81,13 @@ now it holds one placeholder, `/factory:ping`, which only proves the plugin load
 - A `--plugin-dir` of your own in `sessions.claude.args` is allowed: the flag repeats, so both load. Your
   installed plugins load as usual alongside it.
 - Seats get an `Edit` deny on `plugin/`, like `lib/` and `roles/` (see [Safety](#safety)), since it is
-  code every seat runs at its next start.
-- A plugin hook runs in every seat, and a skill steers every seat, so every pull request that adds or
-  changes a skill, agent or hook in `plugin/` gets a security review as well as the usual one.
+  code every seat runs at its next start, and on each plugin a team loads itself with `--plugin-dir` in
+  `args` (the folder with everything under it, or the `.zip`; a relative path is taken from the seat's
+  folder).
+- What the plugin carries runs in or steers every seat: skills, agents, commands, hooks and MCP
+  servers, including hooks and servers declared inline in `plugin.json`. So every pull request that
+  changes anything under `plugin/`, `plugin.json` included, gets a security review as well as the
+  usual one.
 - Managed settings can turn `--plugin-dir` off (Claude Code's docs say so; not tried here), and then the
   seats have no factory skills.
 
@@ -179,8 +183,8 @@ role's (team first; a role can add or tighten a rule, never loosen one), plus tw
 
 - an `Edit` deny on the files that would change a seat's next start or its live rules: the generated
   settings, launchers and prompts, the message log and the gate's state, the team file and its
-  prompts, the launcher (`factory.sh`, `lib/`, `roles/`, `plugin/`) and the claude `wrapper` (its whole
-  `.app` bundle, if it is in one), the main checkout's `.mcp.json`, `.claude/settings.json`,
+  prompts, the launcher (`factory.sh`, `lib/`, `roles/`, `plugin/`), any plugin given with `--plugin-dir`
+  in `args`, and the claude `wrapper` (its whole `.app` bundle, if it is in one), the main checkout's `.mcp.json`, `.claude/settings.json`,
   `.claude/settings.local.json`, `.claude/CLAUDE.md`, and `.claude/hooks/`, `rules/`, `skills/`,
   `agents/` and `commands/` (not the root `CLAUDE.md`, which is project work), the
   seat's own `.claude/settings.json` and `settings.local.json`, and Claude Code's user settings, MCP
