@@ -5,8 +5,8 @@
 # where a real team runs (#66).
 #
 #   test/live-env.sh new                 make one; prints its folder (/tmp/sf-live.XXXXXX)
-#   test/live-env.sh run <dir> <cmd...>  run cmd in it: TMUX unset, TMUX_TMPDIR=<dir>/tmux,
-#                                        TEAM_STATE_DIR=<dir>/state, TEAM_VIEW=0 (no iTerm tab)
+#   test/live-env.sh run <dir> <cmd...>  run cmd in it: TMUX_TMPDIR=<dir>/tmux, TEAM_STATE_DIR=<dir>/state
+#                                        (both absolute), TEAM_VIEW=0; TMUX, TEAM_CONFIG/ROLE/SCRIPT unset
 #   test/live-env.sh down <dir>          stop its tmux server and remove the folder
 #
 # For example:
@@ -25,6 +25,8 @@
 # /tmp, silently, when TMUX_TMPDIR is empty or names a folder that does not exist. A typo then reaches
 # the default server.
 set -euo pipefail
+# With CDPATH set, cd prints the folder it goes to, which would end up in the paths worked out below.
+unset CDPATH
 
 MARK=.live-env
 die() { echo "live-env: $*" >&2; exit 1; }
@@ -54,9 +56,13 @@ case ${1:-} in
   run)
     [ $# -ge 3 ] || usage
     d=$2; shift 2
-    private_tmux "$d" >/dev/null
-    unset TMUX
-    export TMUX_TMPDIR=$d/tmux TEAM_STATE_DIR=$d/state TEAM_VIEW=0
+    t=$(private_tmux "$d")
+    # Absolute, resolved folders: a relative one would point elsewhere once the command changes
+    # directory, and tmux would then fall back to /tmp. A seat's own TEAM_CONFIG is dropped too, or
+    # factory.sh without -c would start the seat's real team (on this private server).
+    s=$(cd "$d/state" && pwd -P)
+    unset TMUX TEAM_CONFIG TEAM_ROLE TEAM_SCRIPT
+    export TMUX_TMPDIR=$t TEAM_STATE_DIR=$s TEAM_VIEW=0
     exec "$@"
     ;;
   down)

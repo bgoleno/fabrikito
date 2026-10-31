@@ -36,7 +36,8 @@ and point the team file at them.
 
 `up` takes a team file outside `teams/` for a throwaway one (a test) and will not start its seats on your
 default tmux server, where a real team runs: run it on a private server (see Tests), or pass
-`up --default-socket` if that team is meant to run there.
+`up --default-socket` if that team is meant to run there. So a throwaway team file never goes in `teams/`,
+neither this checkout's nor a worktree's copy of it: there `up` takes it for a real one.
 
 ## The iTerm view
 
@@ -351,8 +352,11 @@ private tmux server through `test/live-env.sh`, never on the server you work in:
 ```
 d=$(test/live-env.sh new)                                  a private folder: tmux/, state/
 test/live-env.sh run "$d" ./factory.sh -c /path/to/throwaway.yaml up
-test/live-env.sh run "$d" tmux ls                          any command, with TMUX unset, TMUX_TMPDIR=$d/tmux,
-                                                           TEAM_STATE_DIR=$d/state and TEAM_VIEW=0
+test/live-env.sh run "$d" tmux ls                          any command, with TMUX_TMPDIR=$d/tmux and
+                                                           TEAM_STATE_DIR=$d/state (absolute), TEAM_VIEW=0,
+                                                           and TMUX and a seat's TEAM_CONFIG, TEAM_ROLE and
+                                                           TEAM_SCRIPT unset (so factory.sh without -c never
+                                                           finds the seat's real team)
 test/live-env.sh down "$d"                                 stop its tmux server, remove the folder
 ```
 

@@ -784,18 +784,27 @@ lt TMUX_TMPDIR=$T/tmux TMUX=$DEFSOCK,1,0 $S -c $T/lt.yaml up --no-view
 refused_default && ok "up refuses TMUX naming the default socket, even with a private TMUX_TMPDIR (tmux follows TMUX)" || { bad "up with TMUX on the default socket (rc=$rc, calls=$calls)"; echo "$out"; }
 lt TMUX_TMPDIR=$T/tmux $S -c $T/lt.yaml up --no-view
 [ "$calls" -gt 0 ] && ! echo "$out" | grep -qF "default tmux server" && ok "up goes ahead on a private TMUX_TMPDIR" || { bad "up on a private server was refused (rc=$rc, calls=$calls)"; echo "$out"; }
+lt CDPATH=/ TMUX_TMPDIR=tmp sh -c 'cd / && exec "$@"' sh $S -c $T/lt.yaml up --no-view
+refused_default && ok "up refuses a relative TMUX_TMPDIR that resolves to /tmp, with CDPATH set" || { bad "up with CDPATH and a relative TMUX_TMPDIR (rc=$rc, calls=$calls)"; echo "$out"; }
 lt $S -c $T/lt.yaml up --no-view --default-socket
 [ "$calls" -gt 0 ] && ! echo "$out" | grep -qF "default tmux server" && ok "up --default-socket goes ahead on the default server" || { bad "up --default-socket (rc=$rc, calls=$calls)"; echo "$out"; }
-ltin=$SRC/teams/_e2e-live-$$.yaml; cp $T/lt.yaml $ltin
-lt $S -c $ltin up --no-view
-rm -f $ltin
+# a team file in teams/ next to factory.sh: an install of links under $T, so nothing is written in the checkout
+mkdir -p $T/inst/teams; for p in factory.sh lib roles plugin; do ln -s $SRC/$p $T/inst/$p; done; cp $T/lt.yaml $T/inst/teams/lt.yaml
+lt $T/inst/factory.sh -c $T/inst/teams/lt.yaml up --no-view
 [ "$calls" -gt 0 ] && ! echo "$out" | grep -qF "default tmux server" && ok "up goes ahead on the default server for a team file in teams/" || { bad "up for a team file in teams/ (rc=$rc, calls=$calls)"; echo "$out"; }
 # test/live-env.sh: new makes a private environment, run runs a command in it, down removes it.
 LE=$SRC/test/live-env.sh
 le=$(env -u TMUX $LE new 2>&1); rc=$?
 [ $rc = 0 ] && [ -d "$le/tmux" ] && [ -d "$le/state" ] && [ -f "$le/.live-env" ] && [ "$(stat -f %Lp "$le")" = 700 ] && ok "live-env new: a private folder (0700) with tmux/ and state/" || { bad "live-env new (rc=$rc)"; echo "$le"; }
+lereal=$(cd "$le" 2>/dev/null && pwd -P)
 got=$(TMUX=$DEFSOCK,1,0 TMUX_TMPDIR=/tmp TEAM_STATE_DIR=/somewhere $LE run "$le" sh -c 'printf "%s|%s|%s|%s" "${TMUX-unset}" "$TMUX_TMPDIR" "$TEAM_STATE_DIR" "$TEAM_VIEW"' 2>&1)
-[ "$got" = "unset|$le/tmux|$le/state|0" ] && ok "live-env run: TMUX unset, TMUX_TMPDIR and TEAM_STATE_DIR in the environment, TEAM_VIEW=0, whatever the caller had" || bad "live-env run environment: $got"
+[ "$got" = "unset|$lereal/tmux|$lereal/state|0" ] && ok "live-env run: TMUX unset, TMUX_TMPDIR and TEAM_STATE_DIR (resolved) in the environment, TEAM_VIEW=0, whatever the caller had" || bad "live-env run environment: $got"
+# A seat has its real team in TEAM_CONFIG, which factory.sh uses when -c is missing: run must drop it.
+got=$(TEAM_CONFIG=$T/team.yaml TEAM_ROLE=em TEAM_SCRIPT=$S $LE run "$le" sh -c 'printf "%s|%s|%s" "${TEAM_CONFIG-unset}" "${TEAM_ROLE-unset}" "${TEAM_SCRIPT-unset}"' 2>&1)
+[ "$got" = "unset|unset|unset" ] && ok "live-env run: TEAM_CONFIG, TEAM_ROLE and TEAM_SCRIPT of the calling seat are unset" || bad "live-env run seat variables: $got"
+# A relative folder must reach the command as an absolute one, or a command that changes directory sends tmux to /tmp.
+got=$(cd "$(dirname "$le")" && $LE run "$(basename "$le")" sh -c 'cd / && printf "%s|%s" "$TMUX_TMPDIR" "$TEAM_STATE_DIR"' 2>&1)
+[ "$got" = "$lereal/tmux|$lereal/state" ] && ok "live-env run: a relative folder is exported as its absolute, resolved path" || bad "live-env run with a relative folder: $got"
 got=$($LE run "$le" tmux new-session -d -s le-probe 2>&1 && $LE run "$le" tmux display-message -p -t '=le-probe:' '#{socket_path}' 2>&1)
 [ "$got" = "$(cd "$le/tmux" && pwd -P)/tmux-$(id -u)/default" ] && ok "live-env run: tmux uses the private socket" || bad "live-env socket: $got"
 # refusals: the command must not run at all
