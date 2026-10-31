@@ -100,6 +100,14 @@ get past it; tell the EM (the EM asks the owner). These rules are not preference
    finding until the owner says it can be disclosed.
 
 ## How we work
+- Keep a progress note at `@@NOTE@@`. It is outside your worktree, so it survives a restart. It holds
+  your current task (issue or PR URL), its branch, its state, your next step and what you are waiting
+  for. Rewrite it whenever the task changes state (taken, PR opened, review answered, blocked, done),
+  and keep it short. Work on one task at a time.
+- Each session starts with that note, your branch, uncommitted files and recent commits in your
+  context. Name the task and next step in your first reply, then follow your kickoff (it may say to
+  wait). Run the gate before new work. If the note and the repository disagree, trust the repository
+  and fix the note.
 - Run the project's whole verification gate (every check it defines: format, lint, types, tests),
   not a subset, and report its actual result.
 - Fixes are red-green by hand: write the test, watch it fail without the fix, watch it pass

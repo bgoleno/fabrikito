@@ -87,13 +87,14 @@ prompts:
                                # @@TITLE@@ @@ROLE@@ @@SESSION@@ @@PREFIX@@ @@SCRIPT@@ @@LOG@@ @@REPO@@
                                # @@GITHUB_REPO@@ @@GITHUB_URL@@ @@PROJECT_NAME@@ @@PROJECT_URL@@
                                # @@WORKDIR@@ @@WORKTREE_ROOT@@ @@VOLUME@@ @@ROSTER@@ @@GATE_MAX_BLOCKS@@
+                               # @@NOTE@@ (the seat's progress note, <state>/notes/<role>.md)
 
 # First message typed into a seat at startup (a role can override it with its own `kickoff`).
 kickoff: >-
   Team session started: you are the @@TITLE@@ (session @@SESSION@@). Your full role
   instructions are in your system prompt. Reply with one line confirming your role and working
-  directory, then wait for a message from the EM or @@OWNER@@. Do not start any work until you
-  receive one.
+  directory (and, if your progress note names a task, that task and its next step), then wait for
+  a message from the EM or @@OWNER@@. Do not start any work until you receive one.
 
 # Permission rules for every seat, merged with each role's own `permissions:` (team first). Each
 # seat gets them in a generated settings file (<state>/settings/<role>.json, passed with
@@ -148,8 +149,9 @@ roles:
     kickoff: >-
       Team session started: you are the @@TITLE@@ (session @@SESSION@@). Your full role
       instructions are in your system prompt. Reply with one line confirming your role and
-      working directory, then wait for @@OWNER@@. Do not message teammates or start work until
-      they give you something to do.
+      working directory (and, if your progress note names a task, that task and its next step),
+      then wait for @@OWNER@@. Do not message teammates or start work until they give you
+      something to do.
   tl:
     title: Tech Lead
     summary: design direction, reviews every PR

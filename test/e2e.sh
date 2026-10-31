@@ -241,8 +241,27 @@ echo "$chk" | grep -qF "add to" && ok "check: says the rules add to the user's a
 hook=$(ruby -rjson -e 'j = JSON.parse(File.read(ARGV[0])); h = j.dig("hooks", "Stop", 0, "hooks", 0) || {}; puts [j["hooks"]["Stop"].size, h["type"], h["command"], *h["args"], h["timeout"], j["disableAllHooks"].inspect].join(" | ")' $T/state/settings/w1.json 2>&1)
 [ "$hook" = "1 | command | $SRC/lib/stop_gate.sh | $T/state | w1 | $VOL/$ROOT/team-w1 | make check | 120 | 2 | 150 | false" ] && ok "w1.json: one Stop hook running stop_gate.sh with state, role, workdir, gate, timeout, max blocks; disableAllHooks false" || { bad "w1 Stop hook"; echo "$hook"; }
 # w2 has not started yet at this point (its legacy worktree is refused above): ask the builder.
-nohooks() { ruby -rjson -e 'j = JSON.parse(STDIN.read); exit(j.key?("hooks") || j.key?("disableAllHooks") ? 1 : 0)'; }
-nohooks < $T/state/settings/em.json && TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml settings w2 | nohooks && ok "roles without gate_on_stop (em, w2) get no hooks and no disableAllHooks" || bad "a role without gate_on_stop got hooks"
+nostop() { ruby -rjson -e 'j = JSON.parse(STDIN.read); exit((j["hooks"] || {}).key?("Stop") ? 1 : 0)'; }
+nostop < $T/state/settings/em.json && TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml settings w2 | nostop && ok "roles without gate_on_stop (em, w2) get no Stop hook" || bad "a role without gate_on_stop got a Stop hook"
+# Every seat gets one SessionStart hook (#5), for every start source (no matcher: startup, resume,
+# clear and compact), that shows it its progress note, branch and recent commits.
+sshook() { ruby -rjson -e 'j = JSON.parse(STDIN.read); a = (j["hooks"] || {})["SessionStart"] || []; h = (a[0] || {}).fetch("hooks", [])[0] || {}
+  puts [a.size, (a[0] || {}).key?("matcher"), h["type"], h["command"], *h["args"], h["timeout"], j["disableAllHooks"].inspect].join(" | ")' 2>&1; }
+ss_em=$(sshook < $T/state/settings/em.json); ss_w1=$(sshook < $T/state/settings/w1.json); ss_w2=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml settings w2 | sshook)
+[ "$ss_em" = "1 | false | command | $SRC/lib/session_start.sh | $T/state | em | $T/proj | 10 | false" ] \
+  && [ "$ss_w1" = "1 | false | command | $SRC/lib/session_start.sh | $T/state | w1 | $VOL/$ROOT/team-w1 | 10 | false" ] \
+  && [ "$ss_w2" = "1 | false | command | $SRC/lib/session_start.sh | $T/state | w2 | $VOL/$ROOT/team-w2 | 10 | false" ] \
+  && ok "every seat (em, w1, w2): one SessionStart hook running session_start.sh with state, role, workdir; disableAllHooks false" || { bad "SessionStart hook"; echo "$ss_em"; echo "$ss_w1"; echo "$ss_w2"; }
+# A seat may write its own note without a prompt (it is outside its working directory), and only its own.
+rules $T/state/settings/em.json allow | grep -qxF "Edit(/$RT/state/notes/em.md)" && rules $T/state/settings/em.json allow | grep -qxF "Edit(/$T/state/notes/em.md)" \
+  && ! rules $T/state/settings/em.json allow | grep -qF "notes/w1" && ! rules $T/state/settings/em.json deny | grep -qF "state/notes" \
+  && ok "em.json: Edit allowed on em's own note (both spellings), not on another seat's, and no deny on notes" || { bad "note allow rules"; rules $T/state/settings/em.json allow; }
+sect em | grep -qF "added: Edit deny on" && sect em | grep -qF ", Edit allow on its own progress note" && ! sect em | grep -E "^ +allow:" | grep -qF notes \
+  && ok "check: the note allow is listed as added by the launcher, not among the team's allow rules" || { bad "check: note allow line"; sect em; }
+[ -d $T/state/notes ] && ok "up makes the notes folder under the state folder" || bad "no $T/state/notes after up"
+grep -qF "$T/state/notes/em.md" $T/state/prompts/em.md && ok "the rendered prompt names the seat's own note" || bad "the prompt does not name $T/state/notes/em.md"
+grep -qF "progress note" $T/state/prompts/em.kickoff && ok "the default kickoff asks for the note's task and next step" || { bad "kickoff and the note"; cat $T/state/prompts/em.kickoff; }
+echo "Task: survive a restart" > $T/state/notes/em.md
 rules $T/state/settings/w1.json deny | grep -qxF "Edit(/$RT/state/gate/**)" && ok "the gate's own state (its failure counter) is Edit-protected" || bad "gate state not protected"
 echo "$chk" | grep -qE "^w1 .* on-stop " && echo "$chk" | grep -qE "^em .* - +[^ ]" && ok "check: GATE column (on-stop for w1 only)" || { bad "check GATE column"; echo "$chk" | head -14; }
 echo "$chk" | grep -qF "make check (timeout 120s; a seat may stop after 2 failed gates in a row)" && ok "check: gate command, timeout and limit in the header" || bad "check: gate header"
@@ -250,6 +269,7 @@ echo "$chk" | grep -qF "make check (timeout 120s; a seat may stop after 2 failed
 chmod u+w $T/state/settings/em.json && echo '{"permissions":{}}' > $T/state/settings/em.json && chmod 444 $T/state/settings/em.json
 $S -c $T/team.yaml down --yes em >/dev/null; TEAM_VIEW=0 $S -c $T/team.yaml up --no-view em >/dev/null 2>&1
 [ "$(perms $T/state/settings/em.json)" = "$want_em" ] && [ "$(stat -f %Lp $T/state/settings/em.json)" = 444 ] && ok "up rewrites a stale settings file" || { bad "up rewrites settings"; perms $T/state/settings/em.json; }
+[ "$(cat $T/state/notes/em.md 2>&1)" = "Task: survive a restart" ] && ok "a seat's progress note survives down and up" || { bad "progress note after down/up"; ls -la $T/state/notes 2>&1; }
 echo "--- say"
 TEAM_ROLE=em $S -c $T/team.yaml say w1 "hello w1 from em" && sleep 1
 tmux capture-pane -p -t '=tt-w1:' | grep -q "from em\] hello w1" && ok "message arrived in w1's pane" || bad "message arrived"
@@ -643,6 +663,26 @@ $SRC/lib/stop_gate.sh $T/gstate w9 $T/g $T/gate.sh 30 2 </dev/null >/dev/null 2>
 printf '#!/bin/sh\nsleep 60 &\necho $! > %s/bgpid\nsleep 60\n' $T > $T/slow.sh; chmod +x $T/slow.sh
 t0=$(date +%s); gate s3 $T/g $T/slow.sh 2; t1=$(date +%s); sleep 1
 [ $rc = 2 ] && echo "$err" | grep -q "timed out after 2s" && ! echo "$err" | grep -q "Terminated" && [ $((t1 - t0)) -lt 15 ] && ! kill -0 "$(cat $T/bgpid)" 2>/dev/null && ok "a gate past its timeout is killed with its children, and the stop is sent back" || { bad "gate timeout (rc=$rc, $((t1 - t0))s)"; echo "$err"; }
+echo "--- session start hook (lib/session_start.sh, run directly with hook input on stdin)"
+# sst <workdir>: runs the hook for role w9 with state $T/sstate; sets rc, out, err.
+sst() { printf '{"session_id":"s1","source":"%s"}' "${SRC_KIND:-startup}" | $SRC/lib/session_start.sh $T/sstate w9 "$1" >$T/sout 2>$T/serr; rc=$?; out=$(cat $T/sout); err=$(cat $T/serr); }
+mkdir -p $T/s && git -C $T/s init -q && git -C $T/s switch -q -c work && git -C $T/s commit -q --allow-empty -m "first commit" && git -C $T/s commit -q --allow-empty -m "second: the latest"
+sst $T/s; [ $rc = 0 ] && [ -z "$err" ] && echo "$out" | grep -qF "no progress note yet" && echo "$out" | grep -qF "$T/sstate/notes/w9.md" \
+  && ok "no note yet: exit 0, says so and names the file to write" || { bad "no note (rc=$rc)"; echo "$out$err"; }
+mkdir -p $T/sstate/notes && printf 'Task: #5 progress notes\nNext: open the PR\n' > $T/sstate/notes/w9.md && touch $T/s/dirty.txt
+sst $T/s; [ $rc = 0 ] && [ -z "$err" ] && echo "$out" | grep -qxF "Task: #5 progress notes" && echo "$out" | grep -qxF "Next: open the PR" && echo "$out" | grep -qF "Branch: work" \
+  && echo "$out" | grep -qF "second: the latest" && echo "$out" | grep -qF "first commit" && echo "$out" | grep -qF "?? dirty.txt" \
+  && ok "with a note: the note, the branch, recent commits and uncommitted files" || { bad "session start output (rc=$rc)"; echo "$out$err"; }
+SRC_KIND=compact sst $T/s; [ $rc = 0 ] && echo "$out" | grep -qxF "Task: #5 progress notes" && ok "the output does not depend on the start source (compact, as after a compaction)" || { bad "compact (rc=$rc)"; echo "$out"; }
+git -C $T/s switch -q --detach; sst $T/s; [ $rc = 0 ] && echo "$out" | grep -qE "Branch: \(detached at [0-9a-f]+\)" && ok "a detached HEAD is named as such" || { bad "detached (rc=$rc)"; echo "$out"; }
+sst $T/proj; [ $rc = 0 ] && echo "$out" | grep -qxF "Task: #5 progress notes" && echo "$out" | grep -qF "not a git work tree" && ok "a workdir that is not a git work tree: the note, and no git lines" || { bad "non-repo workdir (rc=$rc)"; echo "$out$err"; }
+sst $T/no-such-dir; [ $rc = 0 ] && echo "$out" | grep -qxF "Task: #5 progress notes" && ok "a missing workdir: the note still, exit 0" || { bad "missing workdir (rc=$rc)"; echo "$out$err"; }
+# A note that grew past its purpose is cut, so it cannot flood the seat's context.
+ruby -e '300.times { |i| puts "line #{i} " + "x" * 400 }' > $T/sstate/notes/w9.md
+sst $T/s; [ $rc = 0 ] && [ "$(printf %s "$out" | wc -c | tr -d ' ')" -lt 9000 ] && echo "$out" | grep -qF "note truncated" && echo "$out" | grep -qF "second: the latest" \
+  && ok "a long note is truncated (output under 9000 bytes), and the git lines still follow" || { bad "long note ($(printf %s "$out" | wc -c) bytes)"; echo "$out" | tail -5; }
+printf 'caf\xc3\xa9 ok\nbad \xff byte\n' > $T/sstate/notes/w9.md
+LC_ALL=C sst $T/s; [ $rc = 0 ] && echo "$out" | grep -qF "café ok" && ok "a note with UTF-8 and an invalid byte is shown under LC_ALL=C, exit 0" || { bad "non-ASCII note (rc=$rc)"; echo "$out$err"; }
 echo "--- the seats' claude copy: replaced, failed, mid-reinstall"
 cc -o $CP.new $T/c.c && mv $CP.new $CP
 $S -c $T/team.yaml status | grep -E "^em " | grep -q REPLACED && ok "status: a seat whose claude file was replaced under it shows REPLACED" || { bad "status REPLACED"; $S -c $T/team.yaml status; }

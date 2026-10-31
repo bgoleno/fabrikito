@@ -192,6 +192,8 @@ cmd_up() {
   resolve_claude || die "$CLAUDE_ERR"
   for r in $roles; do check_role "$r"; done
   for a in $(cfg get state.generated_dirs); do mkdir -p "$STATE/$a"; done
+  # Progress notes (#5): seats write them, so up only makes the folder and never touches a note.
+  mkdir -p "$(cfg get state.notes_dir)"
   ensure_claude_copy
   # Roles start in the order given (file order by default).
   for r in $roles; do
