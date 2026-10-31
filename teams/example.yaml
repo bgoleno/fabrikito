@@ -215,6 +215,7 @@ roles:
     gate_on_stop: true
     skills:
       - "factory:start-task": when you take an assigned issue, before changing anything
+      - "factory:ready-for-review": when a change is done, or a new head goes back to review
       - "factory:handoff": before /clear, /compact, a restart or the end of a session
       - "superpowers:test-driven-development": before writing implementation code
       - "superpowers:systematic-debugging": on a bug or a failing test, before proposing a fix
@@ -239,6 +240,7 @@ roles:
     gate_on_stop: true
     skills:
       - "factory:start-task": when you take an assigned issue, before changing anything
+      - "factory:ready-for-review": when a change is done, or a new head goes back to review
       - "factory:handoff": before /clear, /compact, a restart or the end of a session
       - "superpowers:test-driven-development": before writing implementation code
       - "superpowers:systematic-debugging": on a bug or a failing test, before proposing a fix
