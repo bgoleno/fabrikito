@@ -1045,7 +1045,10 @@ cwd_users() {
   p=$(CDPATH= cd -- "$1" 2>/dev/null && pwd -P) || return 2
   out=$(lsof -w -d cwd -F pn 2>/dev/null)
   [ -n "$out" ] || return 2
-  printf '%s\n' "$out" | awk -v p="$p" '
+  # The path goes in through the environment: awk -v would read escapes in it ("\t" as a tab), and a
+  # path that no longer matches would hide the process.
+  printf '%s\n' "$out" | P=$p awk '
+    BEGIN { p = ENVIRON["P"] }
     /^p/ { pid = substr($0, 2) }
     /^n/ { n = substr($0, 2); if (n == p || index(n, p "/") == 1) printf "%s%s", (c++ ? " " : ""), pid }
     END { if (c) print "" }'
@@ -1061,9 +1064,9 @@ cwd_users() {
 # migrate ran is still seen. A process that enters the folder after that check is not.
 #
 # #105's rule (refuse a team file outside teams/ on the default tmux server) is not applied here: it
-# acts only on the default server, where `alive` already sees the real seats, while the gap #121
-# found is on a private server, which that rule lets through by design. The working-folder check
-# holds on any server.
+# acts only on the default server, while the gap #121 found is on a private server, which that rule
+# lets through by design. The working-folder check holds on any server, and for a copy with another
+# session prefix too, whose `alive` misses the real seats even on the default server.
 cmd_migrate() {
   local roles=${*:-$ROLES} r p dir name moved=0 users
   for r in $roles; do check_role "$r"; done

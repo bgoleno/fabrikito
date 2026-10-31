@@ -705,6 +705,15 @@ mig=$($S -c $T/team.yaml migrate w1 2>&1)
 kill $seatpid 2>/dev/null; wait $seatpid 2>/dev/null
 mig=$($S -c $T/team.yaml migrate w1 2>&1)
 [ ! -e $LW ] && echo "$mig" | grep -qE "moved  w1: removed .*/worktrees/team-w1;" && ok "the same worktree, idle once the process is gone, is migrated" || { bad "idle worktree not migrated"; echo "$mig" | head -4; }
+# The path is matched literally: a backslash in it (awk -v would read "\t" as a tab) must not hide
+# the process working there.
+BW="$T/back\\tslash/team-w1"; mkdir -p "$T/back\\tslash" && git -C $T/repo worktree add -q --detach "$BW" origin/main
+(cd "$BW" && exec sleep 600) & seatpid=$!
+sleep 1
+mig=$($S -c $T/team.yaml migrate w1 2>&1)
+[ -d "$BW" ] && echo "$mig" | grep -qF 'tslash/team-w1 is the working folder of a running process' && ok "migrate keeps a worktree in use whose path has a backslash in it" || { bad "worktree in use with a backslash in its path"; echo "$mig" | head -4; }
+kill $seatpid 2>/dev/null; wait $seatpid 2>/dev/null
+git -C $T/repo worktree remove --force "$BW" 2>/dev/null
 echo "--- unmounted volume"
 sed "s#volume: $VOL#volume: /Volumes/NotMounted#" $T/team.yaml > $T/team2.yaml
 $S -c $T/team.yaml down --yes w2 >/dev/null
