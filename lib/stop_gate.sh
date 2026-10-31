@@ -36,18 +36,39 @@ count="$dir/$role.count"
 # their command, like fsmonitor's, can only come from git config.
 g() { git -c core.fsmonitor=false "$@"; }
 
+# The .git (a folder, or the file a worktree has) of the working directory or the nearest folder
+# above it, as git's own search would find it; none means not in a repository.
+dotgit() {
+  local d=$PWD
+  while :; do
+    if [ -e "$d/.git" ] || [ -L "$d/.git" ]; then echo "$d/.git"; return 0; fi
+    [ "$d" = / ] && return 1
+    d=$(dirname "$d")
+  done
+}
+
 cd "$workdir" 2>/dev/null || exit 0
-g rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
+# Outside a repository the stop goes through ungated. But git says "not a git repository" for a
+# repository it cannot read too (a corrupt HEAD, a worktree's gitdir gone bad), so a failure with a
+# .git in place is not taken for no repository: the tree is gated, as for a failed status (#118).
+unreadable=""
+if ! git_err=$(g rev-parse --is-inside-work-tree 2>&1 >/dev/null); then
+  repo=$(dotgit) || exit 0
+  unreadable="git cannot read the repository at $repo: $(printf '%s\n' "$git_err" | head -n 1)"
+fi
 mkdir -p "$dir"
 # Only uncommitted work is gated (untracked files count; ignored ones do not). Committed work is
 # gated again when the reviewer runs the gate on the PR. A status that fails (a corrupt index, a
 # required clean filter that fails) is not read as a clean tree: the gate runs, so the hook fails
-# closed (#104).
-changes=$(g status --porcelain 2>/dev/null)
-status_rc=$?
-if [ "$status_rc" = 0 ] && [ -z "$changes" ]; then
-  [ -n "$session" ] && rm -f "$count"
-  exit 0
+# closed (#104). Nor is a repository git cannot read: there status is not run at all.
+status_rc=0
+if [ -z "$unreadable" ]; then
+  changes=$(g status --porcelain 2>/dev/null)
+  status_rc=$?
+  if [ "$status_rc" = 0 ] && [ -z "$changes" ]; then
+    [ -n "$session" ] && rm -f "$count"
+    exit 0
+  fi
 fi
 
 # Failures so far in this turn: none at the start of a turn, or in another session.
@@ -107,6 +128,7 @@ n=$((n + 1))
     echo "gate failed (exit $rc): $gate"
   fi
   [ "$status_rc" = 0 ] || echo "(git status failed in $workdir (exit $status_rc), so the tree was gated as if it had uncommitted changes.)"
+  [ -z "$unreadable" ] || echo "($unreadable. So the tree was gated as if it had uncommitted changes.)"
   echo "Last lines of its output (all of it is in $log):"
   tail -n 60 "$log"
   echo
