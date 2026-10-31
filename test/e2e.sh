@@ -399,6 +399,15 @@ smwant() { for e in PostToolUse PostToolUseFailure; do echo "$e | 1 | SendMessag
 sm_em=$(smhook < $T/state/settings/em.json); sm_w1=$(smhook < $T/state/settings/w1.json); sm_w2=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml settings w2 | smhook)
 [ "$sm_em" = "$(smwant em)" ] && [ "$sm_w1" = "$(smwant w1)" ] && [ "$sm_w2" = "$(smwant w2)" ] \
   && ok "every seat (em, w1, w2): SendMessage logging hooks on PostToolUse and PostToolUseFailure, with log, role and the session map" || { bad "SendMessage logging hooks"; echo "$sm_em"; echo "$sm_w1"; }
+# The log holds every native message in full, private reports to the EM included (owner decision on
+# #110): every seat but em has a Read deny on it, in both spellings. An accident guard only.
+lr=""; w2deny=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml settings w2 | ruby -rjson -e 'puts JSON.parse(STDIN.read)["permissions"]["deny"]')
+for sp in "$RT" "$T"; do
+  rules $T/state/settings/em.json deny | grep -qxF "Read(/$sp/state/messages.log)" && lr="$lr em-denied($sp)"
+  rules $T/state/settings/w1.json deny | grep -qxF "Read(/$sp/state/messages.log)" || lr="$lr w1-not-denied($sp)"
+  echo "$w2deny" | grep -qxF "Read(/$sp/state/messages.log)" || lr="$lr w2-not-denied($sp)"
+done
+[ -z "$lr" ] && ok "messages.log: Read denied to w1 and w2 (both spellings), readable by em" || { bad "messages.log read rules:$lr"; rules $T/state/settings/w1.json deny | grep messages; }
 # A seat may write its own note without a prompt (it is outside its working directory), and only its
 # own: every other seat's note is denied, as exact paths in both spellings, since a note is put into
 # its seat's context at each start.
@@ -1066,13 +1075,33 @@ LC_ALL=C hlogged tt-w2 $'caf\xc3\xa9 under C \xe2\x9c\x93' w2 sent $'caf\xc3\xa9
 # A uds: address held by a process in a roster seat's pane (em's) is logged as that seat's role.
 empid=$(tmux list-panes -t '=tt-em:' -F '#{pane_pid}' 2>/dev/null | head -1)
 hlogged "uds:/tmp/cc-socks/$empid.sock" 'reply by address' em sent 'reply by address' "a uds: address of a process in em's pane is logged as em"
-# Nothing else is ever logged, and a broken input or log never fails the tool call.
-smlog tt-w2 'x' PostToolUse; n=$(wc -l < $LG)
+# The uds: lookup has its own limit even when tmux hangs: the hook gives up on it in about 2s, kills
+# the stand-in, and logs the address as given (tl's review of #110: a block-form popen waited 20s).
+mkdir -p $T/hangtmux && printf '#!/bin/sh\necho $$ >> %s/hangtmux/pids\nexec sleep 30\n' $T > $T/hangtmux/tmux && chmod +x $T/hangtmux/tmux
+t0=$(date +%s); PATH=$T/hangtmux:$PATH hlogged "uds:/tmp/cc-socks/$empid.sock" 'tmux hangs' "uds:/tmp/cc-socks/$empid.sock" sent 'tmux hangs' "a hanging tmux: the address is logged as given"; t1=$(date +%s)
+hp=$(cat $T/hangtmux/pids 2>/dev/null); [ $((t1 - t0)) -lt 4 ] && [ -n "$hp" ] && ! kill -0 $hp 2>/dev/null \
+  && ok "the uds: lookup is cut at its limit (the hook took $((t1 - t0))s) and the hung tmux is killed" || bad "uds: lookup limit ($((t1 - t0))s, stand-in pid ${hp:-none} $(kill -0 ${hp:-0} 2>/dev/null && echo alive))"
+# smraw <JSON text>: runs the hook on hook input as given, not built by JSON.generate.
+smraw() { local n=$(wc -l < $LG); out=$(printf '%s' "$1" | $SRC/lib/log_message.sh $LG w9 tt-w2=w2 2>&1); rc=$?
+  line=$(tail -n +$((n + 1)) $LG); [ "$(wc -l < $LG)" -eq $((n + 1)) ] || line="<$(( $(wc -l < $LG) - n )) lines>"; }
+# A lone surrogate escape is valid JSON text that Ruby's json refuses: it becomes U+FFFD, and a valid
+# pair is kept, so the line is still logged (tl's review of #110: it was silently dropped).
+smraw '{"hook_event_name":"PostToolUse","tool_name":"SendMessage","tool_input":{"to":"tt-w2","message":"hidden \ud800 text, low \udc00, pair 😀, kept \\ud800"},"tool_response":{"success":true}}'
+[ $rc = 0 ] && [ -z "$out" ] && [ "$(printf '%s\n' "$line" | cut -f2-5)" = $'w9\tw2\tsent\thidden \xef\xbf\xbd text, low \xef\xbf\xbd, pair \xf0\x9f\x98\x80, kept \\\\ud800' ] \
+  && ok "SendMessage log: lone surrogates become U+FFFD, a pair and an escaped backslash stay, the line is logged" || { bad "lone surrogates (rc=$rc)"; printf '%s\n' "$line" | od -c | head -4; }
+# A message that is not a string is logged as its JSON text.
+smraw '{"hook_event_name":"PostToolUse","tool_name":"SendMessage","tool_input":{"to":"tt-w2","message":{"a":[1,"b"]}},"tool_response":{"success":true}}'
+[ $rc = 0 ] && [ "$(printf '%s\n' "$line" | cut -f5)" = '{"a":[1,"b"]}' ] && ok "SendMessage log: a message that is not a string is logged as JSON" || { bad "non-string message"; echo "$line"; }
+# Input that still cannot be read is logged as a placeholder line, so a message never goes unrecorded.
+smraw 'not json'
+[ $rc = 0 ] && [ -z "$out" ] && [ "$(printf '%s\n' "$line" | cut -f2-5)" = $'w9\t?\tUNREADABLE\t<hook input could not be read>' ] \
+  && ok "SendMessage log: unreadable hook input is logged as a placeholder line" || { bad "unreadable input (rc=$rc)"; echo "$line"; }
+# Nothing else is ever logged, and a broken log never fails the tool call.
+n=$(wc -l < $LG)
 printf '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}' | $SRC/lib/log_message.sh $LG w9 tt-w2=w2 >/dev/null 2>&1; r1=$?
-printf 'not json' | $SRC/lib/log_message.sh $LG w9 >/dev/null 2>&1; r2=$?
 o3=$(printf '{"hook_event_name":"PostToolUse","tool_name":"SendMessage","tool_input":{"to":"tt-w2","message":"m"}}' | $SRC/lib/log_message.sh $T/no-such-dir/messages.log w9 2>&1); r3=$?
-[ $r1 = 0 ] && [ $r2 = 0 ] && [ $r3 = 0 ] && [ -z "$o3" ] && [ "$(wc -l < $LG)" -eq "$n" ] && [ ! -e $T/no-such-dir ] \
-  && ok "another tool, input that is not JSON, and a log that cannot be written: exit 0, nothing printed, nothing logged" || { bad "log hook failure cases ($r1 $r2 $r3)"; echo "$o3"; }
+[ $r1 = 0 ] && [ $r3 = 0 ] && [ -z "$o3" ] && [ "$(wc -l < $LG)" -eq "$n" ] && [ ! -e $T/no-such-dir ] \
+  && ok "another tool, and a log that cannot be written: exit 0, nothing printed, nothing logged" || { bad "log hook failure cases ($r1 $r3)"; echo "$o3"; }
 echo "--- the seats' claude copy: replaced, failed, mid-reinstall"
 cc -o $CP.new $T/c.c && mv $CP.new $CP
 $S -c $T/team.yaml status | grep -E "^em " | grep -q REPLACED && ok "status: a seat whose claude file was replaced under it shows REPLACED" || { bad "status REPLACED"; $S -c $T/team.yaml status; }
