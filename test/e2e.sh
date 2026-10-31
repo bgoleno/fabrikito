@@ -1034,6 +1034,13 @@ tall ta ok "$(msg 60)"$'\n'"$(msg 60)"$'\n'"$(msg 60)"$'\n'"$(msg 60)" "a messag
 why() { grep -qF "$1" $T/tall.out && ok "the refusal says why: $2" || { bad "refusal reason: $2"; cat $T/tall.out; }; }
 tall tb refused "$(msg 490)" "a tall message with dim text after it"; why "dim text" "dim text was drawn next to the message"
 tall tc refused "$(msg 490)" "a tall message with text typed after it"; why "does not end with the message" "the box does not end with the message"
+# A placeholder passes only as the whole box (tl on #132): text typed after a long or 4-line paste
+# would go out with it. The box is cleared first, so each refusal is the one after its own paste.
+tmux send-keys -t '=tp-tc:' C-u; sleep 0.5
+tall tc refused "$(msg 900)" "a 900-character message (a placeholder) with text typed after it"; why "not just the message" "the box holds more than the placeholder"
+tmux send-keys -t '=tp-tc:' C-u; sleep 0.5
+tall tc refused "$(msg 60)"$'\n'"$(msg 60)"$'\n'"$(msg 60)"$'\n'"$(msg 60)" "a 4-line message (a placeholder) with text typed after it"; why "not just the message" "the box holds more than the placeholder"
+tmux send-keys -t '=tp-tc:' C-u; sleep 0.5
 tall td refused "$(msg 490)" "the end of a tall message in a box that is not full"; why "shows 2 of its 3 rows" "the box shows 2 of its 3 rows"
 # A full box whose visible end matches but is under 40 characters is too little to go on: refused.
 tall te refused "$(msg 110)"$'\n'"ok"$'\n'"go" "a tall message whose visible end is under 40 characters"; why "under the 40 say needs" "too little of the message's end is visible"
@@ -1092,6 +1099,11 @@ tmux resize-window -t '=tp-sd:' -x 80 -y 10; for i in $(seq 1 50); do [ "$(lastr
 tmux send-keys -t '=tp-sf:' C-u; tmux resize-window -t '=tp-sf:' -x 80 -y 10; sleep 1; gf=$(geo sf); : > $T/resize.log
 PATH=$T/rshim:$PATH tall sf refused "$(msg 400)" "a 400-character line with text typed after it, in an 80x10 pane (grown, then checked again)"; why "not just the message" "the box holds more than the message"
 [ "$(steps sf)" = "paste grow shrink " ] && [ "$(geo sf)" = "$gf" ] && ok "the 80x10 seat with typed text was grown after the paste, refused there, and put back ($gf)" || { bad "steps for the seat with typed text ($(steps sf); $(geo sf), was $gf)"; cat $T/resize.log; }
+tmux send-keys -t '=tp-sf:' C-u; sleep 0.5
+# The same with a placeholder (sec on #132): a 900-character line, grown after the paste, refused there.
+: > $T/resize.log
+PATH=$T/rshim:$PATH tall sf refused "$(msg 900)" "a 900-character line (a placeholder) with text typed after it, in an 80x10 pane (grown, then checked again)"; why "not just the message" "the box holds more than the placeholder"
+[ "$(steps sf)" = "paste grow shrink " ] && [ "$(geo sf)" = "$gf" ] && ok "the 80x10 seat with a placeholder and typed text was grown after the paste, refused there, and put back ($gf)" || { bad "steps for the seat with a placeholder and typed text ($(steps sf); $(geo sf), was $gf)"; cat $T/resize.log; }
 tmux send-keys -t '=tp-sf:' C-u; sleep 0.5
 [ "$(geo sa)" = "$ga" ] && [ "$(geo sb)" = "$gb" ] && ok "after each, the small seats' size and window-size are as before ($ga; $gb)" || bad "small seat geometry after say (sa $(geo sa), was $ga; sb $(geo sb), was $gb)"
 : > $T/resize.log; PATH=$T/rshim:$PATH tall sc ok "big pane" "a message to a seat in a 220x50 pane"
