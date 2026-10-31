@@ -104,6 +104,10 @@ GENERATED_DIRS = %w[settings launch prompts bin].freeze
 # GENERATED_DIRS, but not regenerated per start.
 HOOK_DIRS = %w[gate].freeze
 
+# Where each seat keeps its progress note, <state>/notes/<role>.md (#5). Outside the worktree, so it
+# survives the worktree being recreated, and in neither list above, so a seat may write it.
+NOTES_DIR = 'notes'.freeze
+
 # The field a tool's own specifier already covers. Claude Code ignores a `Tool(field:...)` rule on
 # it, with only a startup warning.
 PRIMARY_FIELDS = {
@@ -336,7 +340,7 @@ class TeamConfig
       'REPO' => repo_path, 'WORKDIR' => workdir(id), 'WORKTREE_ROOT' => worktree_root,
       'VOLUME' => volume, 'GITHUB_REPO' => github, 'GITHUB_URL' => "https://github.com/#{github}",
       'PROJECT_NAME' => project['name'].to_s, 'PROJECT_URL' => project['url'].to_s, 'TEAM' => @c['team'].to_s, 'OWNER' => owner, 'ROSTER' => roster,
-      'GATE_MAX_BLOCKS' => gate_max_blocks.to_s
+      'GATE_MAX_BLOCKS' => gate_max_blocks.to_s, 'NOTE' => note_path(id)
     }
   end
 
@@ -400,7 +404,7 @@ class TeamConfig
     r = role(id)
     tpl = r['kickoff'] || @c['kickoff'] ||
           'Team session started: you are the @@TITLE@@ (session @@SESSION@@). Your full role instructions are in your system prompt. ' \
-          'Reply with one line confirming your role and working directory, then wait for a message from the EM or @@OWNER@@. ' \
+          'Reply with one line confirming your role and working directory (and, if your progress note names a task, that task and its next step), then wait for a message from the EM or @@OWNER@@. ' \
           'Do not start any work until you receive one.'
     text = subst(tpl.to_s, id)
     # A label inside the text would make part of it read as another sender's (`[from owner]`). The
@@ -455,6 +459,16 @@ class TeamConfig
   # Generated prompts, launchers, settings and the message log live here.
   def state_dir
     File.expand_path(ENV['TEAM_STATE_DIR'] || File.join(INSTALL, '.state', @c['team'].to_s))
+  end
+
+  # The seat's progress note (#5). Seats write it; up only makes its folder; nothing deletes it.
+  def note_path(id)
+    File.join(state_dir, NOTES_DIR, "#{id}.md")
+  end
+
+  # Edit rules for a seat's note: as configured and as its real path, glob characters escaped.
+  def note_rules(id)
+    [File.expand_path(note_path(id)), real_path(note_path(id))].uniq.map { |p| "Edit(/#{glob_escape(p)})" }
   end
 
   # A `permissions:` mapping (team level or a role's), checked. `where` names it in errors.
@@ -606,7 +620,14 @@ class TeamConfig
     end
     add.call(permission_section(@c['permissions'], 'permissions'), 'team')
     add.call(permission_section(role(id)['permissions'], "roles.#{id}.permissions"), "roles.#{id}")
-    add.call({ 'deny' => protected_paths(id).map { |p| "Edit(/#{p})" }, 'ask' => base_push_rules }, 'factory.sh')
+    # The note is outside the seat's working directory, so writing it would prompt in a mode other
+    # than bypass: the seat may edit its own note. Every other seat's note is denied, because the
+    # session-start hook puts a note into its seat's context: a seat that could write another's would
+    # have a lasting channel into it. Exact paths, both spellings, not notes/** (that would also
+    # deny the seat's own note, since deny wins over allow).
+    own = note_rules(id)
+    others = (roles.keys - [id]).flat_map { |r| note_rules(r) }
+    add.call({ 'deny' => protected_paths(id).map { |p| "Edit(/#{p})" } + others, 'ask' => base_push_rules, 'allow' => own }, 'factory.sh')
     out
   end
 
@@ -661,6 +682,27 @@ class TeamConfig
       'timeout' => gate_timeout + 30 }
   end
 
+  # The SessionStart hook every seat gets (#5): it prints the seat's progress note, branch, recent
+  # commits and uncommitted files, which Claude Code adds to the seat's context. No matcher, so it
+  # runs for every source (startup, resume, clear, compact): after a compaction the note is shown again.
+  def session_start_hook(id)
+    { 'type' => 'command', 'command' => File.join(INSTALL, 'lib', 'session_start.sh'),
+      'args' => [state_dir, id, workdir(id)], 'timeout' => 10 }
+  end
+
+  # A line for check when the user's own settings switch every hook off: seats without a gate then
+  # get no session-start note. nil when hooks are on, or the file is missing or unreadable.
+  def hooks_note
+    path = File.join(claude_config_paths[0], 'settings.json')
+    j = JSON.parse(File.read(path)) rescue nil
+    return nil unless j.is_a?(Hash) && j['disableAllHooks'] == true
+
+    off = roles.keys.reject { |r| gate_on_stop?(r) }
+    who = off.empty? ? 'no seat gets' : "#{off.join(', ')} #{off.size == 1 ? 'gets' : 'get'}"
+    "disableAllHooks is true in #{path}, so #{who} no session-start note (a gated seat turns hooks " \
+      'back on for its gate)'
+  end
+
   # The seat's Claude Code settings, written to <state>/settings/<id>.json and passed with
   # --settings. Later features add their own top-level keys (hooks, for example) here.
   def settings(id)
@@ -674,11 +716,14 @@ class TeamConfig
     # working until a restart (#50). The launch script exports this too; a value here also outranks
     # one in a project's .claude/settings.json. Update deliberately instead (README).
     out['env'] = { 'DISABLE_AUTOUPDATER' => '1' }
+    out['hooks'] = { 'SessionStart' => [{ 'hooks' => [session_start_hook(id)] }] }
     if gate_on_stop?(id)
-      out['hooks'] = { 'Stop' => [{ 'hooks' => [stop_gate_hook(id)] }] }
+      out['hooks']['Stop'] = [{ 'hooks' => [stop_gate_hook(id)] }]
       # --settings outranks project and local settings, so a disableAllHooks: true written in the
       # seat's .claude/ cannot switch the gate off. It also turns on the user's own hooks for this
-      # seat if they had switched them all off in ~/.claude/settings.json.
+      # seat if they had switched them all off in ~/.claude/settings.json. Only the gate, a safety
+      # control, justifies that: the session-start note is a convenience, so a seat without a gate
+      # keeps the owner's choice and goes without the note (check says so, see hooks_note).
       out['disableAllHooks'] = false
     end
     out
@@ -696,9 +741,11 @@ class TeamConfig
         own = merged[list] - factory
         out << format('    %-5s: %s', list, own.empty? ? '(none)' : own.join(', '))
       end
-      added = merged['deny'].count { |r| factory.include?(r) }
+      notes = (roles.keys - [id]).flat_map { |r| note_rules(r) }
+      added = merged['deny'].count { |r| factory.include?(r) && !notes.include?(r) }
       asks = merged['ask'].count { |r| factory.include?(r) }
-      out << "    added: Edit deny on #{added} protected paths#{asks.positive? ? ", ask on #{asks} push-to-#{base_branch} patterns" : ''}"
+      note = merged['allow'].any? { |r| factory.include?(r) } ? ', Edit allow on its own progress note and deny on the other seats\'' : ''
+      out << "    added: Edit deny on #{added} protected paths#{asks.positive? ? ", ask on #{asks} push-to-#{base_branch} patterns" : ''}#{note}"
       out << '    note : allow rules have no effect in bypassPermissions' if mode.start_with?('bypassPermissions') && !(merged['allow'] - factory).empty?
       out << '    note : ask rules are refused in dontAsk mode, not asked' if mode == 'dontAsk' && !merged['ask'].empty?
     end
@@ -907,6 +954,8 @@ when 'get'
   when 'state.dir' then puts cfg.state_dir
   when 'claude.config_dir' then puts cfg.claude_config_paths.first
   when 'state.generated_dirs' then puts GENERATED_DIRS
+  when 'state.notes_dir' then puts File.join(cfg.state_dir, NOTES_DIR)
+  when 'hooks.note' then puts cfg.hooks_note.to_s
   when 'repo.gate_summary'
     puts(cfg.gate ? "#{cfg.gate} (timeout #{cfg.gate_timeout}s; a seat may stop after #{cfg.gate_max_blocks} failed gates in a row)" : 'none')
   else die "unknown key '#{key}'"

@@ -5,7 +5,7 @@ Closes #
 
 ## How it was tested
 <!-- The commands you ran and what they printed. This repository's gate is all three of:
-bash -n factory.sh test/e2e.sh lib/stop_gate.sh
+bash -n factory.sh test/e2e.sh lib/stop_gate.sh lib/session_start.sh
 ruby -c lib/team_config.rb
 env -u TMUX TEST_VOLUME=/Volumes/<a mounted, writable volume> test/e2e.sh   (all assertions must pass)
 Run the e2e with TMUX unset, as CLAUDE.md requires, so it never touches the tmux server you work in. -->

@@ -250,7 +250,7 @@ the original text. The hook that will log `SendMessage` traffic (#39) is to writ
 
 Each seat starts with a generated settings file, `.state/<team>/settings/<role>.json`, passed with
 `--settings` and rewritten read-only on every `up`. It holds the team's `permissions` merged with the
-role's (team first; a role can add or tighten a rule, never loosen one), plus two sets factory.sh adds:
+role's (team first; a role can add or tighten a rule, never loosen one), plus what factory.sh adds:
 
 - an `Edit` deny on the files that would change a seat's next start or its live rules: the generated
   settings, launchers and prompts, the message log and the gate's state, the team file and its
@@ -272,7 +272,11 @@ role's (team first; a role can add or tighten a rule, never loosen one), plus tw
 - an `ask` on any push to the base branch (from `repo.base`), forced or not, since changes land through
   PRs. It is an early warning for a project whose base branch has no protection. The real control is a
   ruleset on the base branch that blocks force-push and deletion and requires a PR; where one exists,
-  this ask is redundant.
+  this ask is redundant;
+- an `Edit` allow on the seat's own progress note (see [Progress notes](#progress-notes)), which is
+  outside its working directory and would otherwise prompt in a mode other than bypass, and an `Edit`
+  deny on every other seat's note: a note is put into its seat's context at each start, so a seat
+  that could write another's would have a lasting channel into it.
 
 `permission_mode` (in `sessions.claude`, or per role) picks the mode; the example uses `auto`.
 `bypassPermissions` skips every prompt and is meant for an isolated machine only. Deny rules hold in
@@ -363,6 +367,32 @@ Roles without the switch never run it. The example gives it to the engineers and
   cannot switch the gate off. That also turns the user's own hooks back on for that seat if
   `~/.claude/settings.json` had switched them all off.
 
+## Progress notes
+
+Each seat keeps a short progress note, `.state/<team>/notes/<role>.md`: its current task, branch,
+state, next step and what it is waiting for. The shared prompt tells it to rewrite the note whenever
+a task changes state and to work on one task at a time. The note is outside the worktree, so it
+survives `down` and `up` and a recreated worktree; `up` only makes the folder, and nothing removes a
+note.
+
+Every seat's generated settings have a `SessionStart` hook (`lib/session_start.sh`, no matcher, so
+it runs at startup, on resume, after `/clear` and after a compaction). It prints the note (cut at 80
+lines or 6000 bytes), the branch, uncommitted files and the last 10 commits of the seat's working
+directory, and Claude Code adds that to the seat's context. The default kickoff asks a seat to name
+the note's task and next step in its first reply. The note is the seat's own writing, so treat it as
+a reminder, not a record: when it and the repository disagree, the repository wins.
+
+- Control characters other than tab and newline (and DEL) are dropped from everything the hook
+  prints, so a terminal escape in a note or a commit subject arrives as plain text.
+- `git status` and `git log` each have their own time limit (4s and 3s), well inside the hook's 10s,
+  and a repository's fsmonitor program is not run. Claude Code drops all of a hook's output when the
+  hook runs past its timeout, so a slow status on a cold volume costs the seat its file list, not its
+  note.
+- Each seat may edit only its own note: the others are denied (see [Safety](#safety)).
+- The hook is a convenience, not a control, so it does not override a user who switched every hook
+  off: with `disableAllHooks: true` in `~/.claude/settings.json`, a seat without a gate gets no note,
+  and `check` prints a `hooks` line naming those seats.
+
 ## Updating Claude Code
 
 Claude Code's updater replaces its shared executable (the npm package's `bin/claude.exe`), even with
@@ -405,7 +435,11 @@ named `launcher` or `owner`), the load-time checks on modes, rules and `args`,
 `say` delivering only to a seat whose input box is showing (dialogs captured from Claude Code
 2.1.316, an unknown dialog, text in the box, copy mode, an unreadable screen), and the gate: the
 generated Stop hook, its load-time checks, and `lib/stop_gate.sh` itself (clean tree, failure, the
-limit, a new turn or session, a pass, a timeout that kills the gate's process group), and the
+limit, a new turn or session, a pass, a timeout that kills the gate's process group), progress notes
+(the `SessionStart` hook in every seat, `disableAllHooks` only where gated, the own-note allow and
+the other-note denies, `check`'s hooks line, a note surviving `down` and `up`, and
+`lib/session_start.sh` itself: no note, a note, a detached HEAD, no repository, a missing folder, a
+long note, a non-UTF-8 note under `LC_ALL=C`, control characters, a hanging `git status`), and the
 auto-updater being off in every seat and nowhere else, and the seats' own copy of claude (made by
 `up`, never the shared file; still intact after the shared file is replaced; `REPLACED` when its own
 file is swapped; a copy that cannot be made, or a shared install caught mid-reinstall, stops the
