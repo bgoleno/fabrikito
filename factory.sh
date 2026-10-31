@@ -178,7 +178,13 @@ cmd_check() {
   done
   echo "(inherit = flag omitted; the seat uses model, effortLevel and permissions.defaultMode from ~/.claude/settings.json)"
   echo
+  echo "kickoff (each seat's first message; the label marks it as team configuration, not the owner's voice):"
+  for r in $ROLES; do
+    TEAM_SCRIPT=$SELF TEAM_LOG=$LOG cfg kickoff "$r" | sed "1s/^/  [$r] /; 2,\$s/^/    /"
+  done
+  echo
   cfg permissions_report
+  cfg warnings
   echo "valid."
 }
 
@@ -526,7 +532,8 @@ has_claude() {
 #     <footer>           0 to 8 lines indented two spaces: status line(s), the mode line, notes
 # An empty box may show one dim line after the ❯: a hint ('Try "…"', "Press up to edit queued
 # messages") or a suggested next prompt. A dialog (permission prompt, menu, trust or held-message
-# dialog) replaces the box. Printed as "<state><TAB><dim characters in the box><TAB><text>". States:
+# dialog) replaces the box. A box taller than a full one scrolls: see box_full_rows. Printed as
+# "<state><TAB><dim characters in the box><TAB><rows the box shows><TAB><text>". States:
 #   empty       the box holds nothing, or only one line drawn entirely dim
 #   text        the box holds text: typed by someone, or left by a message that was not sent
 #   copy-mode   someone is scrolling the pane (capture-pane would still show the box)
@@ -535,9 +542,9 @@ has_claude() {
 box_state() {
   local sess screen
   sess="=$(session "$1"):"
-  screen=$(tmux display-message -p -t "$sess" '#{pane_in_mode}' 2>/dev/null) || { printf 'unreadable\t0\t\n'; return; }
-  [ "$screen" = 0 ] || { printf 'copy-mode\t0\t\n'; return; }
-  screen=$(tmux capture-pane -e -p -t "$sess" 2>/dev/null) || { printf 'unreadable\t0\t\n'; return; }
+  screen=$(tmux display-message -p -t "$sess" '#{pane_in_mode}' 2>/dev/null) || { printf 'unreadable\t0\t0\t\n'; return; }
+  [ "$screen" = 0 ] || { printf 'copy-mode\t0\t0\t\n'; return; }
+  screen=$(tmux capture-pane -e -p -t "$sess" 2>/dev/null) || { printf 'unreadable\t0\t0\t\n'; return; }
   printf '%s\n' "$screen" | LC_ALL=C awk -v name="$(session "$1")" '
     function plain(s) { gsub(/\033\[[0-9;]*m/, "", s); sub(/[ \t]+$/, "", s); return s }
     function rule(s) { return s ~ /^(─)+$/ && length(s) >= 60 }   # 20 or more, 3 bytes each
@@ -573,13 +580,13 @@ box_state() {
     END {
       j = n
       for (f = 0; j > 0 && !rule(line[j]); j--) {
-        if (++f > 8 || line[j] !~ /^  [^ ]/ || line[j] ~ /❯|Enter to|Esc to/) { print "unknown\t0\t"; exit }
+        if (++f > 8 || line[j] !~ /^  [^ ]/ || line[j] ~ /❯|Enter to|Esc to/) { print "unknown\t0\t0\t"; exit }
       }
-      if (j < 1) { print "unknown\t0\t"; exit }
+      if (j < 1) { print "unknown\t0\t0\t"; exit }
       for (k = j - 1; k > 0 && line[k] !~ /^❯/; k--) {
-        if (j - k > 60 || line[k] !~ /^  /) { print "unknown\t0\t"; exit }
+        if (j - k > 60 || line[k] !~ /^  /) { print "unknown\t0\t0\t"; exit }
       }
-      if (k < 2 || line[k] !~ /^❯(\302\240|$)/ || !top(line[k - 1])) { print "unknown\t0\t"; exit }
+      if (k < 2 || line[k] !~ /^❯(\302\240|$)/ || !top(line[k - 1])) { print "unknown\t0\t0\t"; exit }
       text = substr(line[k], 4); sub(/^\302\240/, "", text)
       for (i = k + 1; i < j; i++) text = text " " substr(line[i], 3)
       # One line drawn entirely dim comes from Claude Code itself: a hint (Try "…", Press up to
@@ -588,10 +595,11 @@ box_state() {
       # must be 0 once our message is in the box.
       isdim = 0; dimc = 0; normc = 0
       scan(raw[at[k]], 1); for (i = k + 1; i < j; i++) scan(raw[at[i]], 0)
+      rows = at[j] - at[k]                          # screen rows, a blank line in the text included
       if (text == "" || (k + 1 == j && normc == 0 && dimc > 0))
-        print "empty\t" dimc "\t"
+        print "empty\t" dimc "\t" rows "\t"
       else
-        print "text\t" dimc "\t" text
+        print "text\t" dimc "\t" rows "\t" text
     }'
 }
 
@@ -604,6 +612,40 @@ box_refusal() {
     unreadable) echo "could not read $1's screen" ;;
     *) echo "screen not recognised as ready (a permission prompt, a menu, a dialog?): attach $1 ($SELF attach $1)" ;;
   esac
+}
+
+# The most rows the input box of seat $1 shows before it scrolls. Claude Code 2.1.316 (measured
+# 2026-10-30 in panes of 12 to 70 rows) grows the box to floor((pane rows - 10) / 2) rows, never
+# fewer than 3, then scrolls to keep the cursor, at the end of a pasted message, in view: the first
+# visible row then starts with the prompt, mid-message, and nothing marks that rows are hidden. A
+# paste of more than 800 characters, or of 4 or more lines, is shown as "[Pasted text #N ...]"
+# instead, so only messages below both edges scroll.
+box_full_rows() {
+  local h
+  h=$(tmux display-message -p -t "=$(session "$1"):" '#{pane_height}' 2>/dev/null) || return 1
+  h=$(( (h - 10) / 2 )); [ "$h" -lt 3 ] && h=3; echo "$h"
+}
+
+# Whether box state $2 of seat $1 shows just message $3, after its paste: text with nothing drawn
+# dim, such as a suggestion left next to it, that starts with the message's "[from <role>]" (or is
+# the placeholder Claude Code shows for a long paste), or else shows the message's end in a full,
+# scrolled box. For the end: the visible text, all whitespace removed, is a suffix of the message,
+# likewise, of at least 40 characters (whitespace is where they may differ: the box wraps at spaces
+# and box_state joins rows with one), and the box shows as many rows as it can. A box only scrolls
+# once full, so a shorter box that does not start with the label holds something else. Text before
+# the message would show at the top and text after it at the end, so neither passes, except one gap:
+# a draft typed in the moment between the empty-box check and the paste, scrolled out of view by a
+# tall message, would go out with it (the README says so).
+box_has_message() {
+  local state dim rows vis full m v
+  IFS='	' read -r state dim rows vis <<EOF
+$2
+EOF
+  [ "$state" = text ] && [ "$dim" = 0 ] || return 1
+  case $vis in "${3%%]*}]"* | "[Pasted text #"*) return 0 ;; esac
+  full=$(box_full_rows "$1") && [ "$rows" = "$full" ] || return 1
+  m=$(printf '%s' "$3" | LC_ALL=C tr -d '[:space:]'); v=$(printf '%s' "$vis" | LC_ALL=C tr -d '[:space:]')
+  [ "${#v}" -ge 40 ] && [ "${m%"$v"}" != "$m" ]
 }
 
 # Deliver one message by bracketed paste (safe for multi-line text), then Enter. If the seat is
@@ -630,21 +672,16 @@ send_one() {
   printf '%s' "$text" | tmux load-buffer -b "$buf" -
   tmux paste-buffer -p -d -b "$buf" -t "=$sess:"
   sleep 0.5
-  # Enter only when the box now holds just this message: text that starts with its "[from <role>]"
-  # (or the placeholder Claude Code shows for a long paste), and nothing drawn dim, such as a
-  # suggestion left next to it, so the Enter can only submit the message. Otherwise a dialog came
-  # up, or the paste went nowhere. Still open: a dialog that appears between the first check and
+  # Enter only when the box now holds just this message (box_has_message), so the Enter can only
+  # submit the message. Otherwise a dialog came up, or the paste went nowhere. Still open: a dialog that appears between the first check and
   # the paste (the paste then lands in it; this check sees no box and sends no Enter), and one
   # that appears after this check, before the Enter.
   st=$(box_state "$to")
-  case $st in
-    "text	0	${text%%]*}]"* | "text	0	[Pasted text #"*) ;;
-    *)
-      why=$(box_refusal "$to" "$st")
-      echo "not delivered: the input box of $to does not show the message after the paste${why:+ ($why)}; text left in input box: it goes out with the next Enter" >&2
-      return 1
-      ;;
-  esac
+  if ! box_has_message "$to" "$st" "$text"; then
+    why=$(box_refusal "$to" "$st")
+    echo "not delivered: the input box of $to does not show the message after the paste${why:+ ($why)}; text left in input box: it goes out with the next Enter" >&2
+    return 1
+  fi
   tmux send-keys -t "=$sess:" Enter
 }
 
@@ -704,6 +741,8 @@ cmd_say() {
     from=$(caller_seat) || die "say: cannot tell whether this runs inside a seat (ps failed); set TEAM_ROLE"
     from=${from:-owner}
   fi
+  # [from launcher] marks the kickoff as team configuration; say never sends with it.
+  [ "$from" = launcher ] && die "the sender 'launcher' is reserved for the kickoff (TEAM_ROLE=launcher)"
   shift
   text="[from $from] $*"
   mkdir -p "$STATE"

@@ -76,8 +76,17 @@ time, before anything starts.
 and `skills/`) that `up` loads into every seat with `--plugin-dir <this checkout>/plugin`. Seats work in
 the target project's folders, where this repository's own `.claude/` is never read, so this is how the
 factory's skills reach them. Nothing is installed into your settings: a session the factory did not start
-does not have the plugin. Its skills are namespaced by the plugin name and show as `/factory:<skill>`. For
-now it holds one placeholder, `/factory:ping`, which only proves the plugin loaded.
+does not have the plugin. Its skills are namespaced by the plugin name and show as `/factory:<skill>`.
+
+Its skills are procedures for a role (assigning an issue, for example), loaded only when used instead of
+sitting in every prompt. The skill folders under [`plugin/skills/`](plugin/skills/) are the list, and each
+skill's `description` says whom it is for and when to use it. `/factory:ping` only proves the plugin loaded.
+Every seat loads every skill. A skill reaches its role through its description and through that role's
+`skills:` in the team file (`teams/example.yaml` names each one where it belongs). A skill only the owner
+may start sets `disable-model-invocation`. A skill is the procedure. The rules it applies (a brief's
+template, the review bar) stay in the role prompt, which the skill points to rather than copies, and a
+skill stops if the prompt lacks them. `test/e2e.sh` checks every skill's frontmatter, so adding one needs no
+new test code.
 
 - It is on by default. A team file without `sessions.claude.plugin` gets the plugin at its next `up`, and
   with it every skill (and, later, every hook or agent) added to `plugin/` after that. Set
@@ -131,7 +140,7 @@ permission modes. `bypassPermissions` is one class, and every other mode (`auto`
 | From, to | What happens |
 |---|---|
 | Seat to seat, both in one class (one `permission_mode` for every seat) | Delivered. |
-| Seat to seat, different classes (a role with its own `permission_mode`) | Held. An approval dialog opens in the receiver's pane, and if nobody answers it the message is dropped after `dialogExpiry` (5 minutes by default). In an unattended team, that means it is lost. `check` does not warn about this yet (#36). |
+| Seat to seat, different classes (a role with its own `permission_mode`) | Held. An approval dialog opens in the receiver's pane, and if nobody answers it the message is dropped after `dialogExpiry` (5 minutes by default). In an unattended team, that means it is lost. `check` warns when the seats fall into both classes, naming the roles in each. |
 | The owner's own Claude session to a seat | The same rule: delivered when both are in one class, held otherwise. |
 | Any other Claude session on the machine to a seat | The same rule. |
 | The owner typing into an attached seat, or `say` | Not a cross-session message, so it is never held. |
@@ -168,6 +177,12 @@ message. Anything else fails closed, with a reason:
 
 Attach to the seat, deal with it, and send again. If the box does not show the message after the paste,
 no Enter is sent and the text stays in the box, where it goes out with the next Enter; `say` says so.
+A message taller than the box (up to 800 characters and 3 lines; a longer paste shows as a `[Pasted
+text #N]` placeholder) scrolls it, so only the message's end is visible. `say` then sends it only when
+the box is full (floor((pane rows - 10) / 2) rows, at least 3) and its visible text is the message's
+last 40 or more characters. One gap remains: if someone starts typing in the moment between `say`'s
+empty-box check and the paste, and the message scrolls that text out of view, it goes out with the
+message.
 The input box is recognised as Claude Code 2.1.316 draws it, so a CLI update that changes it makes `say`
 refuse every seat until `factory.sh` is updated. A refused message is logged as NOT-DELIVERED. Messages
 are labelled `[from <role>]`, and the owner's are `[from owner]`. The label is set by the sender (from
@@ -175,6 +190,19 @@ are labelled `[from <role>]`, and the owner's are `[from owner]`. The label is s
 run from inside a seat (found from the terminals of the processes that started it) is labelled with
 that seat's role, never `[from owner]`; this stops a mislabel by accident, and the labels are still
 not authenticated ([#29](../../issues/29)).
+
+### The kickoff
+
+`up` gives each seat its kickoff (`kickoff` in the team file, or a role's own) as its first message,
+labelled `[from launcher]`. Seats know the owner's voice as input with no label, so without the label
+a team file's kickoff would read as the owner typing, at every start, to anyone who can edit the team
+file. The shared prompt (`roles/common.md`) tells seats a `[from launcher]` message is team
+configuration: it can say how to start, but it is never an owner instruction or approval, and the
+EM's prompt never takes one as a merge instruction. `check` shows each seat's kickoff with its label.
+`say` never sends as `launcher` (it refuses `TEAM_ROLE=launcher`, and `launcher` is not a valid role
+id), and a kickoff may not contain a `[from …]` label of its own. For the same reason `owner` is not a
+valid role id either: a seat named `owner` would send `[from owner]`, the owner's own label. Like every label, it is not
+authenticated (#29): it keeps the kickoff from looking like owner input, nothing more.
 
 ### The message log
 
@@ -229,6 +257,11 @@ someone answers. `say` will not deliver to a seat at a permission prompt or any 
 [`say`](#say)): attach and answer it yourself. These rules add to the ones in `~/.claude/settings.json`
 and the repo's `.claude/` settings, which still apply. `check` shows each seat's mode and rules, and is
 where load-time errors (unknown modes, malformed rules, a permission flag in `args`) are reported.
+It also warns, without stopping a start, about seats whose modes would hold messages between them
+([Which messages are held](#which-messages-are-held)), and about any role whose rules have neither a
+deny nor an ask on each of the three merge patterns (`Bash(gh pr merge *)`, `Bash(gh api *pulls/*/merge*)`,
+`Bash(gh api graphql*mergePullRequest*)`), unless that role is marked `may_merge: true` (a YAML boolean, so an unquoted `yes` or `on`
+also counts as true).
 
 These rules are an accident guard, not a security boundary: every seat runs as the owner's OS user,
 with the owner's GitHub credential, and can change what loads. [#29](../../issues/29) tracks making
@@ -342,7 +375,9 @@ effort, message delivery, migrating a legacy worktree (clean and dirty), and ref
 volume is not mounted. It also covers the generated settings files (merged rules, protected paths,
 base-branch rules, permission mode and launch flags), the factory plugin (its manifest, `--plugin-dir`
 with the plugin's real path, `sessions.claude.plugin: false`, a bad value, a missing manifest, a team's
-own `--plugin-dir` in `args`), the load-time checks on modes, rules and `args`,
+own `--plugin-dir` in `args`), the kickoff's `[from launcher]` label (in the rendered file, as the seat
+receives it, in `check`, `say` refusing to send as `launcher`, a kickoff with a label of its own, a role
+named `launcher` or `owner`), the load-time checks on modes, rules and `args`,
 `say` delivering only to a seat whose input box is showing (dialogs captured from Claude Code
 2.1.316, an unknown dialog, text in the box, copy mode, an unreadable screen), and the gate: the
 generated Stop hook, its load-time checks, and `lib/stop_gate.sh` itself (clean tree, failure, the
@@ -351,3 +386,8 @@ auto-updater being off in every seat and nowhere else, and the seats' own copy o
 `up`, never the shared file; still intact after the shared file is replaced; `REPLACED` when its own
 file is swapped; a copy that cannot be made, or a shared install caught mid-reinstall, stops the
 start).
+
+The exit code is authoritative: `test/e2e.sh` exits 0 only when it reaches the end with every
+assertion passed (`RESULT pass=<n> fail=0`), and non-zero when any assertion fails or the run stops
+early (a setup error, a signal). A run that stops early still removes what it made and says
+`ABORTED` on stderr. That makes it safe as a `repo.gate` command, which is judged by its exit code.
