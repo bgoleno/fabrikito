@@ -1165,9 +1165,15 @@ mkdir -p $T/g && git -C $T/g init -q && git -C $T/g commit -q --allow-empty -m i
 printf '#!/bin/sh\necho ran >> %s/gate-runs\n[ -f %s/g-pass ] && { echo all green; exit 0; }\necho "FAKE FAILURE: 1 test failed"\nexit 1\n' $T $T > $T/gate.sh; chmod +x $T/gate.sh
 # gate <session> [workdir] [gate] [timeout]: runs the hook with max blocks 2; sets rc, out, err.
 # ACTIVE=true marks a stop in a turn the hook has already sent back (stop_hook_active).
+# Every send-back (exit 2) must say how to stop on purpose and give the limit: the text moved there
+# from the shared prompt (#117), and the let-through stopReason is shown to the user, not to Claude.
+# gate() records each send-back that lacks it in nopurp, and counts send-backs in bounces.
+purp='If you are stopping on purpose (waiting for an answer or a review, or with a test red on purpose), say so in your report: the gate lets you stop after it has failed 2 times in a row in one turn.'
+nopurp=""; bounces=0
 gate() {
   printf '{"session_id":"%s","stop_hook_active":%s,"cwd":"/"}' "$1" "${ACTIVE:-false}" | $SRC/lib/stop_gate.sh $T/gstate w9 "${2:-$T/g}" "${3:-$T/gate.sh}" "${4:-30}" 2 >$T/gout 2>$T/gerr; rc=$?
   out=$(cat $T/gout); err=$(cat $T/gerr)
+  if [ $rc = 2 ]; then bounces=$((bounces + 1)); echo "$err" | grep -qF "$purp" || nopurp="$nopurp $1"; fi
 }
 runs() { [ -f $T/gate-runs ] && wc -l < $T/gate-runs | tr -d ' ' || echo 0; }
 gate s1; [ $rc = 0 ] && [ "$(runs)" = 0 ] && ok "clean tree: the stop goes through and the gate does not run" || bad "clean tree (rc=$rc, runs=$(runs))"
@@ -1209,9 +1215,17 @@ before=$(runs); gate s5 $T/gb
   && ok "a git status that fails (garbage index): the gate runs and its failure sends the seat back, saying status failed" || { bad "failed git status (rc=$rc, gate runs $before -> $(runs))"; echo "$err"; }
 touch $T/g-pass; gate s5 $T/gb; rm $T/g-pass
 [ $rc = 0 ] && ok "a git status that fails, passing gate: the stop goes through" || { bad "failed git status, passing gate (rc=$rc)"; echo "$err"; }
+# Every send-back above (first, last, new turn, new session, timeout, failed status) carried it.
+[ "$bounces" -ge 8 ] && [ -z "$nopurp" ] && ok "every send-back ($bounces) says how to stop on purpose and gives the limit (2)" || bad "send-backs without the stop-on-purpose sentence and limit (sessions:$nopurp; $bounces send-backs)"
 echo "--- session start hook (lib/session_start.sh, run directly with hook input on stdin)"
 # sst <workdir>: runs the hook for role w9 with state $T/sstate; sets rc, out, err.
-sst() { printf '{"session_id":"s1","source":"%s"}' "${SRC_KIND:-startup}" | $SRC/lib/session_start.sh $T/sstate w9 "$1" >$T/sout 2>$T/serr; rc=$?; out=$(cat $T/sout); err=$(cat $T/serr); }
+# The hook also prints what a seat does with what it starts with (moved there from the shared prompt,
+# #117), on every path: sst records each run whose output lacks it in nostart, and counts runs in ssts.
+sp1='Name the task and next step in your first reply, then follow your kickoff (it may say to wait).'
+sp2='If the note and the repository disagree, trust the repository and fix the note.'
+nostart=""; ssts=0
+sst() { printf '{"session_id":"s1","source":"%s"}' "${SRC_KIND:-startup}" | $SRC/lib/session_start.sh $T/sstate w9 "$1" >$T/sout 2>$T/serr; rc=$?; out=$(cat $T/sout); err=$(cat $T/serr)
+  ssts=$((ssts + 1)); { echo "$out" | grep -qF "$sp1" && echo "$out" | grep -qF "$sp2"; } || nostart="$nostart $ssts:$(basename "$1")"; }
 mkdir -p $T/s && git -C $T/s init -q && git -C $T/s switch -q -c work && git -C $T/s commit -q --allow-empty -m "first commit" && git -C $T/s commit -q --allow-empty -m "second: the latest"
 sst $T/s; [ $rc = 0 ] && [ -z "$err" ] && echo "$out" | grep -qF "no progress note yet" && echo "$out" | grep -qF "$T/sstate/notes/w9.md" \
   && ok "no note yet: exit 0, says so and names the file to write" || { bad "no note (rc=$rc)"; echo "$out$err"; }
@@ -1241,6 +1255,14 @@ mkdir -p $T/slowgit && printf '#!/bin/sh\ncase " $* " in *" status "*) exec slee
 t0=$(date +%s); PATH=$T/slowgit:$PATH sst $T/s; t1=$(date +%s)
 [ $rc = 0 ] && [ $((t1 - t0)) -lt 9 ] && echo "$out" | grep -qF "clip" && echo "$out" | grep -qF "git status did not finish within 4s" && echo "$out" | grep -qF "subject" \
   && ok "a git status that hangs is cut at 4s (the hook took $((t1 - t0))s): the note and recent commits still print" || { bad "slow git status (rc=$rc, $((t1 - t0))s)"; echo "$out"; }
+# The early paths: an empty note, a note that cannot be read, and no note with a missing workdir.
+: > $T/sstate/notes/w9.md; sst $T/s; [ $rc = 0 ] && echo "$out" | grep -qF "no progress note yet" && ok "an empty note counts as no note" || { bad "empty note (rc=$rc)"; echo "$out"; }
+printf 'Task: secret\n' > $T/sstate/notes/w9.md && chmod 000 $T/sstate/notes/w9.md
+sst $T/s; chmod 600 $T/sstate/notes/w9.md
+[ $rc = 0 ] && echo "$out" | grep -qF "(could not read $T/sstate/notes/w9.md)" && ok "a note that cannot be read: says so, exit 0" || { bad "unreadable note (rc=$rc)"; echo "$out"; }
+rm -f $T/sstate/notes/w9.md; sst $T/no-such-dir; [ $rc = 0 ] && echo "$out" | grep -qF "does not exist" && ok "no note and a missing workdir: exit 0, says the folder does not exist" || { bad "no note, missing workdir (rc=$rc)"; echo "$out"; }
+[ "$ssts" -ge 13 ] && [ -z "$nostart" ] && ok "every session-start run ($ssts, early paths included) says to name the task and next step, follow the kickoff, and trust the repository over the note" \
+  || { bad "session-start runs without the start instructions (run:workdir$nostart; $ssts runs)"; echo "$out"; }
 echo "--- SendMessage log hook (lib/log_message.sh, run directly with hook input on stdin)"
 # smlog <to> <message> [event] [tool_response JSON]: runs the hook as seat w9 of a roster whose
 # sessions are tt-em, tt-w1 and tt-w2; sets rc, out (stdout and stderr) and line (what it appended).
@@ -1331,12 +1353,20 @@ for r in $(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml ids); do
   n=$(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render "$r" 2>/dev/null | wc -l | tr -d ' ')
   [ "${n:-0}" -gt 0 ] && [ "$n" -lt 200 ] && ok "example seat $r renders a prompt under 200 lines ($n)" || bad "example seat $r renders a prompt of ${n:-?} lines (limit 199)"
 done
+# em's prompt is the longest and the one most often added to: #117 brought it to 180 lines or fewer,
+# so the next change to it has room. Make room by moving procedure out, not by raising this.
+n=$(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render em 2>/dev/null | wc -l | tr -d ' ')
+[ "${n:-0}" -gt 0 ] && [ "$n" -le 180 ] && ok "example seat em renders at most 180 lines ($n)" || bad "example seat em renders ${n:-?} lines (limit 180, #117)"
 # A push chained with other commands can be matched as one text, when Claude Code cannot split it
 # (an expansion or heredoc in a later part): `git push origin <feature>; gh pr create --base main
 # --body "$(cat <<EOF ...)"` then hits the base-branch ask through the later `main` (#91, #103).
 flat=$(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render fs1 2>&1 | tr '\n' ' ' | tr -s ' ')
-echo "$flat" | grep -qF 'run `git push` as a command of its own, never chained' && echo "$flat" | grep -qF '`gh pr create --base <base>`' \
-  && ok "the shared prompt says to run git push alone, never chained (gh pr create named)" || bad "the shared prompt does not say to run git push alone"
+# The push names its refspec, and the branch is cut without tracking: a branch cut with
+# `git switch -c <b> origin/main` has the base as its upstream, so under push.default=upstream a bare
+# `git push` (or `git push origin <b>`) would go to the base branch (sec, #117).
+echo "$flat" | grep -qF 'run `git push origin <branch>:<branch>` as a command of its own, never chained' && echo "$flat" | grep -qF '`gh pr create --base <base>`' \
+  && echo "$flat" | grep -qF '`git switch --no-track -c <branch> origin/main`' \
+  && ok "the shared prompt says to run git push origin <branch>:<branch> alone, never chained (gh pr create named), on a branch cut with --no-track" || bad "the shared prompt does not say to run git push origin <branch>:<branch> alone, or to cut with --no-track"
 echo "--- the example team sets effort per role"
 # Effort is the main cost and depth control: the manager coordinates at medium, the seats that
 # write, test and review code run at high. Read from the flags each seat would be launched with.
