@@ -1093,8 +1093,11 @@ PATH=$T/rshim:$PATH refused se "screen not recognised as ready" "a seat at a dia
 [ "$(steps se)" = "grow shrink " ] && [ "$(geo se)" = "$ge" ] && ok "the seat at a dialog was grown once, then put back ($ge), and nothing was pasted" || { bad "steps for the seat at a dialog ($(steps se); $(geo se), was $ge)"; cat $T/resize.log; }
 rm $T/fake-se-prompt.txt; tmux send-keys -t '=tp-se:' C-l; sleep 0.5
 # A seat whose session ends mid-delivery: a TERM still runs the whole trap and ends say with 143
-# (tl on #132: under set -e the trap stopped at the failing resize-window and say exited 1).
-PATH=$T/pshim:$PATH TEAM_ROLE=em $S -c $T/tp.yaml say se "session gone" >$T/se.out 2>&1 & ep=$!
+# (tl on #132: under set -e the trap stopped at the failing resize-window and say exited 1). se grows
+# only after the paste (its check there refuses at 80x10), so it is the Enter that is held up here,
+# which keeps the window grown while the session is killed.
+mkdir -p $T/kshim && printf '#!/bin/sh\n[ "$1" = send-keys ] && sleep 3\nexec %s "$@"\n' "$(command -v tmux)" > $T/kshim/tmux && chmod +x $T/kshim/tmux
+PATH=$T/kshim:$PATH TEAM_ROLE=em $S -c $T/tp.yaml say se "session gone" >$T/se.out 2>&1 & ep=$!
 for i in $(seq 1 100); do case "$(tmux display-message -p -t '=tp-se:' '#{window_width}x#{window_height}' 2>/dev/null)" in 220x50) break ;; esac; sleep 0.1; done; sleep 0.5
 tmux kill-session -t '=tp-se'; kill -TERM $ep; wait $ep; erc=$?
 [ $erc = 143 ] && ok "a say stopped with TERM after its seat's session ended exits 143 (the trap runs to its end)" || { bad "TERM after the session ended (rc=$erc)"; cat $T/se.out; }
