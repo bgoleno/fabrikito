@@ -417,7 +417,6 @@ class TeamConfig
   # gets an Edit deny on each (Edit also covers Write, NotebookEdit and shell redirects). This is not
   # a boundary: a script can still write them (see README, Safety, and #29).
   def protected_paths(id)
-    claude_home, claude_json = claude_config_paths
     [
       # what factory.sh regenerates for each start (settings, launchers, prompts) and the message log
       *(GENERATED_DIRS + HOOK_DIRS).map { |d| File.join(state_dir, d, '**') },
@@ -442,9 +441,11 @@ class TeamConfig
       # the rest of its .claude/ (commands, agents, skills) is ordinary project work
       File.join(workdir(id), '.claude', 'settings.json'), File.join(workdir(id), '.claude', 'settings.local.json'),
       # the user's own settings, MCP servers, instructions and extensions (not all of ~/.claude,
-      # where Claude Code's tools write legitimately)
-      File.join(claude_home, 'settings.json'), claude_json, File.join(claude_home, 'CLAUDE.md'),
-      *%w[plugins skills agents commands hooks].map { |d| File.join(claude_home, d, '**') }
+      # where Claude Code's tools write legitimately), in every folder a session may load them from
+      *claude_config_locations.flat_map do |claude_home, claude_json|
+        [File.join(claude_home, 'settings.json'), claude_json, File.join(claude_home, 'CLAUDE.md'),
+         *%w[plugins skills agents commands hooks].map { |d| File.join(claude_home, d, '**') }]
+      end
     ].flat_map do |p|
       glob = p.end_with?('/**')
       base = glob ? p[0...-3] : p
@@ -476,6 +477,15 @@ class TeamConfig
 
     dir = File.expand_path(dir.sub(/\A~(?=\/|\z)/, Dir.home))
     [dir, File.join(dir, '.claude.json')]
+  end
+
+  # Every config folder whose files must stay protected: the one seats use (claude_config_paths)
+  # and, when CLAUDE_CONFIG_DIR moves it, the default ~/.claude and ~/.claude.json as well. The
+  # owner's own sessions started without the variable (another terminal, the desktop app) still
+  # load settings, hooks and MCP servers from the default folder.
+  def claude_config_locations
+    default = [File.join(Dir.home, '.claude'), File.join(Dir.home, '.claude.json')]
+    [claude_config_paths, default].uniq
   end
 
   def prompts_common_path

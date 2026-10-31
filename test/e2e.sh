@@ -450,12 +450,15 @@ REPO_EXTRA='gate: "true"' accept "a gate that no role runs" ""
 mk; ws=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml settings em)
 echo "$ws" | grep -q "wrap\|\.app" && bad "no wrapper configured, but a wrapper deny was added" || ok "no wrapper configured: no wrapper deny"
 # With CLAUDE_CONFIG_DIR set, Claude Code keeps the user's config there, .claude.json included
-# (code.claude.com/docs/en/claude-directory), so that is what is protected instead of ~/.claude.
+# (code.claude.com/docs/en/claude-directory), so that folder is protected too. ~/.claude and
+# ~/.claude.json stay protected: the owner's sessions started without the variable still load them.
 mk; cc=$(CLAUDE_CONFIG_DIR=$T/cfg TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml settings em | ruby -rjson -e 'puts JSON.parse(STDIN.read)["permissions"]["deny"]')
 missing=""
 for p in settings.json .claude.json CLAUDE.md plugins/** skills/** agents/** commands/** hooks/**; do echo "$cc" | grep -qxF "Edit(/$RT/cfg/$p)" || missing="$missing $p"; done
 [ -z "$missing" ] && ok "CLAUDE_CONFIG_DIR set: the user's config paths, .claude.json included, are built from it" || { bad "CLAUDE_CONFIG_DIR paths missing:$missing"; echo "$cc" | grep cfg; }
-echo "$cc" | grep -qF -e "Edit(/$RHC/settings.json)" -e "Edit(/$RH/.claude.json)" && bad "CLAUDE_CONFIG_DIR set, but ~/.claude is still the one protected" || ok "CLAUDE_CONFIG_DIR set: ~/.claude and ~/.claude.json are not the protected ones"
+missing=""
+for p in $RHC/settings.json $RH/.claude.json $RHC/CLAUDE.md "$RHC/plugins/**" "$RHC/skills/**" "$RHC/agents/**" "$RHC/commands/**" "$RHC/hooks/**"; do echo "$cc" | grep -qxF "Edit(/$p)" || missing="$missing $p"; done
+[ -z "$missing" ] && ok "CLAUDE_CONFIG_DIR set: ~/.claude and ~/.claude.json stay protected too" || bad "CLAUDE_CONFIG_DIR set, default config paths no longer denied:$missing"
 # The seat uses the folder its rules protect: the launch script pins CLAUDE_CONFIG_DIR, or unsets it.
 grep -qx "unset CLAUDE_CONFIG_DIR" $T/state/launch/em.sh && ok "unset when up ran: the launch script unsets CLAUDE_CONFIG_DIR" || { bad "launch script without CLAUDE_CONFIG_DIR"; grep CLAUDE_CONFIG_DIR $T/state/launch/em.sh; }
 CLAUDE_CONFIG_DIR=$T/cfg TEAM_STATE_DIR=$T/state3 TEAM_VIEW=0 $S -c $T/v.yaml up --no-view >/dev/null 2>&1
