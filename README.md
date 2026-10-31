@@ -269,3 +269,8 @@ base-branch rules, permission mode and launch flags), the load-time checks on mo
 2.1.316, an unknown dialog, text in the box, copy mode, an unreadable screen), and the gate: the
 generated Stop hook, its load-time checks, and `lib/stop_gate.sh` itself (clean tree, failure, the
 limit, a new turn or session, a pass, a timeout that kills the gate's process group).
+
+The exit code is authoritative: `test/e2e.sh` exits 0 only when it reaches the end with every
+assertion passed (`RESULT pass=<n> fail=0`), and non-zero when any assertion fails or the run stops
+early (a setup error, a signal). A run that stops early still removes what it made and says
+`ABORTED` on stderr. That makes it safe as a `repo.gate` command, which is judged by its exit code.
