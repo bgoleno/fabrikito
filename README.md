@@ -322,7 +322,9 @@ What the rules cannot do:
   generated file, so it is refused.
 - Claude Code matches permission rules against each part of a compound command (`;`, `&&`, `|`), but
   against the whole command text when it can't parse the command (for example `"$(...)"` in an
-  argument, or `${...}` next to quotes), and a subshell `( ... )` gets a "can't be checked" prompt
+  argument, or `${...}` next to quotes). In a mode other than bypass, a subshell `( ... )` or a command
+  it can't parse prompts even when no rule matches (the reason varies: "can't be checked before it
+  runs", "shell operators that require approval"). In bypass it prompts only when a rule matches
   (measured on 2.1.316, [#103](../../issues/103)). So seats run `git push` as its own simple command:
   chained with an unparseable part, a `main` elsewhere in the command makes it match the base-branch
   ask.
