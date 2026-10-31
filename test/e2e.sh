@@ -1191,6 +1191,24 @@ $SRC/lib/stop_gate.sh $T/gstate w9 $T/g $T/gate.sh 30 2 </dev/null >/dev/null 2>
 printf '#!/bin/sh\nsleep 60 &\necho $! > %s/bgpid\nsleep 60\n' $T > $T/slow.sh; chmod +x $T/slow.sh
 t0=$(date +%s); gate s3 $T/g $T/slow.sh 2; t1=$(date +%s); sleep 1
 [ $rc = 2 ] && echo "$err" | grep -q "timed out after 2s" && ! echo "$err" | grep -q "Terminated" && [ $((t1 - t0)) -lt 15 ] && ! kill -0 "$(cat $T/bgpid)" 2>/dev/null && ok "a gate past its timeout is killed with its children, and the stop is sent back" || { bad "gate timeout (rc=$rc, $((t1 - t0))s)"; echo "$err"; }
+# The hook's git calls never run a repository's fsmonitor program (#104), with the tree clean or
+# dirty. The repo has a tracked file, because git asks fsmonitor only when the index has entries.
+mkdir -p $T/gf && echo a > $T/gf/f && git -C $T/gf init -q && git -C $T/gf add f && git -C $T/gf commit -q -m init
+printf '#!/bin/sh\necho ran >> %s/fsm-runs\nexit 1\n' $T > $T/fsm.sh; chmod +x $T/fsm.sh; git -C $T/gf config core.fsmonitor $T/fsm.sh
+git -C $T/gf status --porcelain >/dev/null 2>&1; [ -s $T/fsm-runs ] || bad "test setup: a plain git status did not run the fsmonitor script"; rm -f $T/fsm-runs
+touch $T/g-pass; before=$(runs)
+gate s4 $T/gf; r1=$rc; echo b >> $T/gf/f; gate s4 $T/gf; r2=$rc; rm $T/g-pass
+[ $r1 = 0 ] && [ $r2 = 0 ] && [ "$(runs)" = $((before + 1)) ] && [ ! -e $T/fsm-runs ] && ok "core.fsmonitor set: the hook's git calls do not run it (clean tree: no gate; dirty tree: the gate ran and passed)" \
+  || bad "fsmonitor (rc $r1/$r2, gate runs $before -> $(runs), fsmonitor runs: $([ -f $T/fsm-runs ] && wc -l < $T/fsm-runs | tr -d ' ' || echo 0))"
+# A git status that fails is not read as a clean tree (#104): the gate runs (fail closed), and the
+# send-back says status failed. A garbage index makes status fail; rev-parse does not read it.
+mkdir -p $T/gb && echo a > $T/gb/f && git -C $T/gb init -q && git -C $T/gb add f && git -C $T/gb commit -q -m init && printf 'not an index' > $T/gb/.git/index
+git -C $T/gb status --porcelain >/dev/null 2>&1 && bad "test setup: a garbage index did not make git status fail"
+before=$(runs); gate s5 $T/gb
+[ $rc = 2 ] && [ "$(runs)" = $((before + 1)) ] && echo "$err" | grep -qF "git status failed" && echo "$err" | grep -qF "FAKE FAILURE" \
+  && ok "a git status that fails (garbage index): the gate runs and its failure sends the seat back, saying status failed" || { bad "failed git status (rc=$rc, gate runs $before -> $(runs))"; echo "$err"; }
+touch $T/g-pass; gate s5 $T/gb; rm $T/g-pass
+[ $rc = 0 ] && ok "a git status that fails, passing gate: the stop goes through" || { bad "failed git status, passing gate (rc=$rc)"; echo "$err"; }
 echo "--- session start hook (lib/session_start.sh, run directly with hook input on stdin)"
 # sst <workdir>: runs the hook for role w9 with state $T/sstate; sets rc, out, err.
 sst() { printf '{"session_id":"s1","source":"%s"}' "${SRC_KIND:-startup}" | $SRC/lib/session_start.sh $T/sstate w9 "$1" >$T/sout 2>$T/serr; rc=$?; out=$(cat $T/sout); err=$(cat $T/serr); }
