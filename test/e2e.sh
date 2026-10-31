@@ -703,6 +703,64 @@ for r in $(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml ids); do
   [ $rc = 0 ] && [ $rn = 0 ] && [ -n "$want" ] && [ "$c" = "$want" ] && [ "$none" = "$want" ] \
     && ok "example seat $r renders the same under LC_ALL=C and with no locale" || { bad "example seat $r under LC_ALL=C (rc=$rc) or no locale (rc=$rn)"; echo "$c" | tail -2; }
 done
+echo "--- live tests: up refuses the default tmux server for a throwaway team; test/live-env.sh (#66)"
+# Every up below runs with a stand-in tmux first on PATH that logs its arguments and fails, so no case
+# can reach a real tmux server, the user's default one included, even when the refusal is missing.
+mkdir -p $T/notmux $T/ltproj
+printf '#!/bin/sh\necho "$*" >> %s/notmux.log\nexit 1\n' $T > $T/notmux/tmux; chmod +x $T/notmux/tmux
+printf 'team: lt\nrepo: { path: %s/repo, github: local/origin.git }\nproject: { name: B, url: "https://github.com/users/x/projects/9" }\nstorage: { volume: %s, root: %s }\nsessions: { prefix: lt, claude: { wrapper: %s/bin/wrap } }\nroles:\n  x: { title: X, workdir: { type: project, path: %s/ltproj }, prompt_text: "x" }\n' $T $VOL $ROOT $T $T > $T/lt.yaml
+DEFSOCK=/tmp/tmux-$(id -u)/default
+# lt <env assignments...>: up for lt.yaml through the stand-in tmux; sets out, rc and calls (stand-in calls)
+lt() {
+  : > $T/notmux.log
+  out=$(env -u TMUX -u TMUX_TMPDIR "PATH=$T/notmux:$PATH" TEAM_STATE_DIR=$T/ltstate TEAM_VIEW=0 "$@" 2>&1); rc=$?
+  calls=$(wc -l < $T/notmux.log | tr -d ' ')
+}
+refused_default() { [ $rc -ne 0 ] && [ "$calls" = 0 ] && echo "$out" | grep -qF "default tmux server" && echo "$out" | grep -qF -- "--default-socket"; }
+lt $S -c $T/lt.yaml up --no-view
+refused_default && echo "$out" | grep -qF "$T/lt.yaml" && ok "up refuses a team file outside teams/ on the default tmux server (TMUX and TMUX_TMPDIR unset), before any tmux call" || { bad "up on the default server, unset (rc=$rc, tmux calls=$calls)"; echo "$out"; }
+lt TMUX_TMPDIR=/tmp $S -c $T/lt.yaml up --no-view
+refused_default && ok "up refuses TMUX_TMPDIR=/tmp (the default socket's folder)" || { bad "up with TMUX_TMPDIR=/tmp (rc=$rc, calls=$calls)"; echo "$out"; }
+lt TMUX_TMPDIR=/private/tmp/ $S -c $T/lt.yaml up --no-view
+refused_default && ok "up refuses another spelling of /tmp (/private/tmp/)" || { bad "up with TMUX_TMPDIR=/private/tmp/ (rc=$rc, calls=$calls)"; echo "$out"; }
+lt TMUX_TMPDIR= $S -c $T/lt.yaml up --no-view
+refused_default && ok "up refuses an empty TMUX_TMPDIR (tmux then uses /tmp)" || { bad "up with an empty TMUX_TMPDIR (rc=$rc, calls=$calls)"; echo "$out"; }
+lt TMUX_TMPDIR=$T/no-such-dir $S -c $T/lt.yaml up --no-view
+refused_default && ok "up refuses a TMUX_TMPDIR that does not exist (tmux falls back to /tmp)" || { bad "up with a missing TMUX_TMPDIR (rc=$rc, calls=$calls)"; echo "$out"; }
+lt TMUX_TMPDIR=$T/tmux TMUX=$DEFSOCK,1,0 $S -c $T/lt.yaml up --no-view
+refused_default && ok "up refuses TMUX naming the default socket, even with a private TMUX_TMPDIR (tmux follows TMUX)" || { bad "up with TMUX on the default socket (rc=$rc, calls=$calls)"; echo "$out"; }
+lt TMUX_TMPDIR=$T/tmux $S -c $T/lt.yaml up --no-view
+[ "$calls" -gt 0 ] && ! echo "$out" | grep -qF "default tmux server" && ok "up goes ahead on a private TMUX_TMPDIR" || { bad "up on a private server was refused (rc=$rc, calls=$calls)"; echo "$out"; }
+lt $S -c $T/lt.yaml up --no-view --default-socket
+[ "$calls" -gt 0 ] && ! echo "$out" | grep -qF "default tmux server" && ok "up --default-socket goes ahead on the default server" || { bad "up --default-socket (rc=$rc, calls=$calls)"; echo "$out"; }
+ltin=$SRC/teams/_e2e-live-$$.yaml; cp $T/lt.yaml $ltin
+lt $S -c $ltin up --no-view
+rm -f $ltin
+[ "$calls" -gt 0 ] && ! echo "$out" | grep -qF "default tmux server" && ok "up goes ahead on the default server for a team file in teams/" || { bad "up for a team file in teams/ (rc=$rc, calls=$calls)"; echo "$out"; }
+# test/live-env.sh: new makes a private environment, run runs a command in it, down removes it.
+LE=$SRC/test/live-env.sh
+le=$(env -u TMUX $LE new 2>&1); rc=$?
+[ $rc = 0 ] && [ -d "$le/tmux" ] && [ -d "$le/state" ] && [ -f "$le/.live-env" ] && [ "$(stat -f %Lp "$le")" = 700 ] && ok "live-env new: a private folder (0700) with tmux/ and state/" || { bad "live-env new (rc=$rc)"; echo "$le"; }
+got=$(TMUX=$DEFSOCK,1,0 TMUX_TMPDIR=/tmp TEAM_STATE_DIR=/somewhere $LE run "$le" sh -c 'printf "%s|%s|%s|%s" "${TMUX-unset}" "$TMUX_TMPDIR" "$TEAM_STATE_DIR" "$TEAM_VIEW"' 2>&1)
+[ "$got" = "unset|$le/tmux|$le/state|0" ] && ok "live-env run: TMUX unset, TMUX_TMPDIR and TEAM_STATE_DIR in the environment, TEAM_VIEW=0, whatever the caller had" || bad "live-env run environment: $got"
+got=$($LE run "$le" tmux new-session -d -s le-probe 2>&1 && $LE run "$le" tmux display-message -p -t '=le-probe:' '#{socket_path}' 2>&1)
+[ "$got" = "$(cd "$le/tmux" && pwd -P)/tmux-$(id -u)/default" ] && ok "live-env run: tmux uses the private socket" || bad "live-env socket: $got"
+# refusals: the command must not run at all
+leref() { rm -f $T/le-ran; out=$($LE run "$1" touch $T/le-ran 2>&1); rc=$?; [ $rc -ne 0 ] && [ ! -e $T/le-ran ] && echo "$out" | grep -qF -- "$2"; }
+leref $T/le-missing "does not exist" && ok "live-env run refuses a folder that does not exist" || { bad "live-env missing folder (rc=$rc)"; echo "$out"; }
+mkdir -p $T/le-plain/tmux $T/le-plain/state
+leref $T/le-plain "not made by" && ok "live-env run refuses a folder that live-env new did not make" || { bad "live-env plain folder (rc=$rc)"; echo "$out"; }
+le2=$(env -u TMUX $LE new 2>/dev/null); [ -d "$le2/tmux" ] || { le2=$T/le2-none; mkdir -p $le2/tmux; }   # never act on an empty path
+rmdir "$le2/tmux"; ln -s /tmp "$le2/tmux"
+leref "$le2" "default tmux server" && ok "live-env run refuses a folder whose tmux/ resolves to /tmp (the default socket)" || { bad "live-env tmux -> /tmp (rc=$rc)"; echo "$out"; }
+out=$($LE down $T/le-plain 2>&1); rc=$?
+[ $rc -ne 0 ] && [ -d $T/le-plain/tmux ] && ok "live-env down refuses a folder that live-env new did not make, and leaves it" || { bad "live-env down on a plain folder (rc=$rc)"; echo "$out"; }
+out=$($LE down "$le2" 2>&1); rc=$?
+[ $rc -ne 0 ] && [ -L "$le2/tmux" ] && ok "live-env down refuses a folder whose tmux/ resolves to /tmp, and leaves it" || { bad "live-env down with tmux -> /tmp (rc=$rc)"; echo "$out"; }
+rm "$le2/tmux"; mkdir "$le2/tmux"; $LE down "$le2" >/dev/null 2>&1
+srvsock="$(cd "$le/tmux" && pwd -P)/tmux-$(id -u)/default"
+out=$($LE down "$le" 2>&1); rc=$?
+[ $rc = 0 ] && [ ! -e "$le" ] && [ ! -e "$le2" ] && ! tmux -S "$srvsock" has-session 2>/dev/null && ok "live-env down stops the private server and removes the folder" || { bad "live-env down (rc=$rc)"; echo "$out"; ls -la "$le" 2>&1 | head -3; }
 echo "--- iTerm"
 [ ! -e $T/osascript.log ] && ok "nothing in this run called osascript, so no iTerm window was opened" || { bad "osascript was called $(wc -l < $T/osascript.log | tr -d ' ') time(s)"; cut -c1-120 $T/osascript.log | head -5; }
 echo "--- cleanup"

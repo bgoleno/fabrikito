@@ -8,7 +8,8 @@
 #   factory.sh [-c team.yaml] <command>
 #
 #   check                      validate the team file and show where everything will live
-#   up [--no-view] [role...]   start the team (default: every role, in file order); skips seats that are up,
+#   up [--no-view] [--default-socket] [role...]
+#                              start the team (default: every role, in file order); skips seats that are up,
 #                              then opens the iTerm tab (see `view`) unless --no-view or display.iterm is false
 #   titles                     set each running seat's terminal title to "<role> | <title> | <session>" (up and
 #                              view do this too); it is what iTerm shows in each pane's header
@@ -94,6 +95,39 @@ check_role() {
   esac
 }
 alive() { tmux has-session -t "=$(session "$1")" 2>/dev/null; }
+
+# The socket a plain `tmux` command run from here reaches, worked out the way tmux 3.7 picks it: the
+# one named in $TMUX when that is set, else tmux-<uid>/default under TMUX_TMPDIR. tmux falls back to
+# /tmp, silently, when TMUX_TMPDIR is empty or names a folder that does not exist (seen 2026-10-30),
+# so those count as /tmp. A value with a colon is taken as /tmp too, since it cannot be told apart.
+tmux_socket() {
+  local d s
+  if [ -n "${TMUX:-}" ]; then
+    s=${TMUX%%,*}
+    # its tmux-<uid> folder may not exist yet, so resolve the folder above it if need be (/tmp)
+    if d=$(cd "$(dirname "$s")" 2>/dev/null && pwd -P); then s=$d/$(basename "$s")
+    elif d=$(cd "$(dirname "$(dirname "$s")")" 2>/dev/null && pwd -P); then s=$d/$(basename "$(dirname "$s")")/$(basename "$s"); fi
+    echo "$s"
+    return
+  fi
+  d=${TMUX_TMPDIR:-}
+  case $d in "" | *:*) d=/tmp ;; esac
+  d=$(cd "$d" 2>/dev/null && pwd -P) || d=$(cd /tmp && pwd -P)
+  echo "$d/tmux-$(id -u)/default"
+}
+default_tmux_socket() { echo "$(cd /tmp && pwd -P)/tmux-$(id -u)/default"; }
+
+# A team file outside teams/ next to this script is taken for a throwaway one (a test), which must
+# not start seats on the default tmux server, where the real team runs (#66). `up --default-socket`
+# overrides it for a team that is meant to run there.
+refuse_default_tmux() {
+  local teams dir
+  teams=$(cd "$HERE/teams" 2>/dev/null && pwd -P) || teams=$HERE/teams
+  dir=$(cd "$(dirname "$CONFIG")" && pwd -P)
+  case $dir/ in "$teams"/*) return 0 ;; esac
+  [ "$(tmux_socket)" = "$(default_tmux_socket)" ] || return 0
+  die "refusing to start seats for $CONFIG on the default tmux server ($(default_tmux_socket)), where your real team runs: the team file is outside $HERE/teams/, so it looks like a throwaway team. Run it on a private server: d=\$($HERE/test/live-env.sh new); $HERE/test/live-env.sh run \"\$d\" $SELF -c $CONFIG up (or unset TMUX and point TMUX_TMPDIR at a folder that exists). If this team is meant to run on the default server, pass up --default-socket."
+}
 
 # The worktree volume is proven from the mount table, at the moment a worktree is created, and
 # the target folder is proven to be on it. `mkdir -p` under an unmounted /Volumes path would
@@ -183,10 +217,16 @@ cmd_check() {
 }
 
 cmd_up() {
-  local want_view=1 started=0 args="" roles r sess dir launch a args_q settings
+  local want_view=1 started=0 args="" roles r sess dir launch a args_q settings default_ok=0
   for a in "$@"; do
-    if [ "$a" = --no-view ]; then want_view=0; else args="$args $a"; fi
+    case $a in
+      --no-view) want_view=0 ;;
+      --default-socket) default_ok=1 ;;
+      *) args="$args $a" ;;
+    esac
   done
+  # Before anything else, tmux included: the refusal must not depend on what a tmux call would do.
+  [ "$default_ok" = 1 ] || refuse_default_tmux
   roles=${args:-$ROLES}
   command -v tmux >/dev/null || die "tmux not found"
   resolve_claude || die "$CLAUDE_ERR"
@@ -794,5 +834,5 @@ case "${1:-}" in
   attach) shift; cmd_attach "$@" ;;
   migrate) shift; cmd_migrate "$@" ;;
   down) shift; cmd_down "$@" ;;
-  *) sed -n '3,30p' "$0" | sed 's/^# \{0,1\}//'; exit 64 ;;
+  *) sed -n '3,31p' "$0" | sed 's/^# \{0,1\}//'; exit 64 ;;
 esac
