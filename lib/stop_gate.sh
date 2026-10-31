@@ -99,7 +99,7 @@ n=$((n + 1))
   echo
   echo "Fix the cause. Run $gate in $workdir yourself (not lib/stop_gate.sh) and report the command and its output."
   if [ "$n" -eq "$max" ]; then
-    echo "This is the last time the gate sends you back in this session. If you are stopping on purpose" \
+    echo "This is the last time the gate sends you back in this turn. If you are stopping on purpose" \
       "(waiting for an answer or a review, or with a test red on purpose), say so in your report."
   fi
 } >&2
