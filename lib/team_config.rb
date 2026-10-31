@@ -64,10 +64,11 @@ RESERVED_FLAGS = {
   '--allow-dangerously-skip-permissions' => [:with_mode, 'use permission_mode']
 }.freeze
 
-# Folders factory.sh regenerates under the state folder for every start. Seats may not edit them
-# (see protected_paths), so a folder added here is protected without further changes. Files seats
-# are meant to write (such as progress notes) belong in a folder that is not listed.
-GENERATED_DIRS = %w[settings launch prompts].freeze
+# Folders factory.sh owns under the state folder: settings, launch and prompts are rewritten for every
+# start; bin holds the copies of claude the seats run, made by up when missing (#50). Seats may not
+# edit them (see protected_paths), so a folder added here is protected without further changes.
+# Files seats are meant to write (such as progress notes) belong in a folder that is not listed.
+GENERATED_DIRS = %w[settings launch prompts bin].freeze
 
 # Folders under the state folder that hooks write, and seats must not: the gate's failure counter
 # lives in gate/, so a seat that could edit it could switch its own gate off. Protected like
@@ -542,6 +543,11 @@ class TeamConfig
     # A seat started in another mode cannot be switched into bypass from inside the session.
     perms['disableBypassPermissionsMode'] = 'disable' if mode && mode != 'bypassPermissions'
     out = perms.empty? ? {} : { 'permissions' => perms }
+    # Claude Code's auto-updater reinstalls its package under a running seat, and macOS then cannot
+    # tell which process the seat's claude is, so its privacy grants (the worktree volume) stop
+    # working until a restart (#50). The launch script exports this too; a value here also outranks
+    # one in a project's .claude/settings.json. Update deliberately instead (README).
+    out['env'] = { 'DISABLE_AUTOUPDATER' => '1' }
     if gate_on_stop?(id)
       out['hooks'] = { 'Stop' => [{ 'hooks' => [stop_gate_hook(id)] }] }
       # --settings outranks project and local settings, so a disableAllHooks: true written in the
