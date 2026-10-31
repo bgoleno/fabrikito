@@ -248,6 +248,11 @@ message. Anything else fails closed, with a reason:
   recognised as ready"), where the Enter would pick an answer;
 - an input box that already holds text (someone typing, or an earlier message that was not sent);
 - a pane in copy mode (someone scrolling);
+- Claude Code's diff panel notice ("Resize your terminal to at least 110 columns to show the diff
+  panel") in a pane of 13 rows or fewer, where it pushes the end of the input box off the screen.
+  With 16 rows or more the notice is harmless and `say` delivers (at 14 or 15 only a one-line
+  message fits). Widen the pane to 110 columns, give it 16 rows or more, or close the diff panel in
+  the seat;
 - a screen tmux cannot read.
 
 Attach to the seat, deal with it, and send again. If the box does not show the message after the paste,
