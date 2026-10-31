@@ -868,51 +868,58 @@ EOF
 # puts back exactly the size and window-size option it found. A window at 110x12 or more is never
 # touched. Meanwhile the owner's view of that seat shows a clipped part of the bigger window.
 SAY_MIN_COLS=110 SAY_MIN_ROWS=12 SAY_COLS=220 SAY_ROWS=50
-GROWN_SESS="" GROWN_W="" GROWN_H="" GROWN_OPT="" LOCK_WHY=""
+GROWN_WIN="" GROWN_W="" GROWN_H="" GROWN_OPT="" LOCK_WHY=""
 
 # Grows seat $1's window if it is under SAY_MIN_COLS x SAY_MIN_ROWS, recording what to put back,
 # and waits for Claude Code to redraw at the new size. The traps put it back on every exit but
 # SIGKILL; the README names the recovery for that. Bash runs a trap once the command it is
 # waiting for returns, and every tmux call here returns at once.
 grow_window() {
-  local sess w h opt i st
-  sess="=$(session "$1"):"
-  IFS=x read -r w h <<EOF
-$(tmux display-message -p -t "$sess" '#{window_width}x#{window_height}' 2>/dev/null)
+  local win w h opt i
+  # The window by its id, not =<session>:, which is whichever window is current when it is put
+  # back (tl on #132).
+  IFS=' x' read -r win w h <<EOF
+$(tmux display-message -p -t "=$(session "$1"):" '#{window_id} #{window_width}x#{window_height}' 2>/dev/null)
 EOF
   case "$w$h" in '' | *[!0-9]*) return 0 ;; esac
+  case $win in @*) ;; *) return 0 ;; esac
   [ "$w" -lt "$SAY_MIN_COLS" ] || [ "$h" -lt "$SAY_MIN_ROWS" ] || return 0
   # The window's own window-size (empty: unset, so the global one applies). resize-window sets it
   # to manual, so it is put back as found, not unset.
-  opt=$(tmux show-options -w -v -t "$sess" window-size 2>/dev/null)
-  GROWN_SESS=$sess GROWN_W=$w GROWN_H=$h GROWN_OPT=$opt
+  opt=$(tmux show-options -w -v -t "$win" window-size 2>/dev/null) || opt=""
+  GROWN_WIN=$win GROWN_W=$w GROWN_H=$h GROWN_OPT=$opt
   trap 'shrink_window' EXIT
   trap 'shrink_window; exit 129' HUP
   trap 'shrink_window; exit 130' INT
   trap 'shrink_window; exit 143' TERM
   [ "$w" -ge "$SAY_COLS" ] || w=$SAY_COLS
   [ "$h" -ge "$SAY_ROWS" ] || h=$SAY_ROWS
-  tmux resize-window -t "$sess" -x "$w" -y "$h" 2>/dev/null || return 0
-  # Claude Code redraws on SIGWINCH; until it has, the screen is the old one, drawn small.
-  sleep 0.3 9>&-
-  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13; do
-    st=$(box_state "$1")
-    case ${st%%	*} in empty | text) break ;; esac
+  tmux resize-window -t "$win" -x "$w" -y "$h" 2>/dev/null || return 0
+  # Claude Code redraws on SIGWINCH. Until it has, the screen is the old frame, drawn small, which
+  # can read as an empty box (tl on #132), so the wait ends only when a rule as wide as the grown
+  # window is drawn (Claude Code draws the box's rules across the pane), or after about 3 seconds.
+  # The checks that follow decide either way.
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
     sleep 0.2 9>&-
+    tmux capture-pane -p -t "$win" 2>/dev/null | LC_ALL=C awk -v w="$w" '
+      { sub(/[ \t]+$/, "") } /^(\342\224\200)+$/ && length($0) == 3 * w { f = 1 } END { exit !f }' && break
   done
+  return 0
 }
 
 # Puts back what grow_window changed, if anything: the size first (resize-window sets the window's
 # window-size to manual), then window-size as it was, set or unset.
+# Each tmux call may fail (the window may be gone) without stopping the rest: set -e applies inside
+# trap actions too (tl on #132).
 shrink_window() {
-  [ -n "$GROWN_SESS" ] || return 0
-  tmux resize-window -t "$GROWN_SESS" -x "$GROWN_W" -y "$GROWN_H" 2>/dev/null
+  [ -n "$GROWN_WIN" ] || return 0
+  tmux resize-window -t "$GROWN_WIN" -x "$GROWN_W" -y "$GROWN_H" 2>/dev/null || true
   if [ -n "$GROWN_OPT" ]; then
-    tmux set-option -w -t "$GROWN_SESS" window-size "$GROWN_OPT" 2>/dev/null
+    tmux set-option -w -t "$GROWN_WIN" window-size "$GROWN_OPT" 2>/dev/null || true
   else
-    tmux set-option -w -u -t "$GROWN_SESS" window-size 2>/dev/null
+    tmux set-option -w -u -t "$GROWN_WIN" window-size 2>/dev/null || true
   fi
-  GROWN_SESS=""
+  GROWN_WIN=""
   trap - EXIT HUP INT TERM
 }
 
@@ -927,15 +934,21 @@ shrink_window() {
 # and opening a FIFO to append blocks with no limit. It is opened read-write, which does not block
 # even on a FIFO swapped in after the check; flock then fails there, and the wait runs out.
 seat_lock() {
-  local f="$STATE/say/$1.lock"
+  local f="$STATE/say/$1.lock" rc
   if [ -L "$f" ] || { [ -e "$f" ] && [ ! -f "$f" ]; }; then
     LOCK_WHY="$f is not a regular file: remove it"
     return 1
   fi
   mkdir -p "$STATE/say" 2>/dev/null && exec 9<>"$f" || { LOCK_WHY="could not open $f"; return 1; }
-  perl -MFcntl=:flock -e 'open(my $f, "+<&=", 9) or exit 70; for (1 .. 80) { exit 0 if flock($f, LOCK_EX | LOCK_NB); select(undef, undef, undef, 0.1) } exit 75' && return 0
+  rc=0
+  perl -MFcntl=:flock -e 'open(my $f, "+<&=", 9) or exit 70; for (1 .. 80) { exit 0 if flock($f, LOCK_EX | LOCK_NB); select(undef, undef, undef, 0.1) } exit 75' || rc=$?
+  [ "$rc" = 0 ] && return 0
   exec 9>&-
-  LOCK_WHY="another say is typing into $1 and did not finish within 8 seconds; try again"
+  if [ "$rc" = 75 ]; then
+    LOCK_WHY="another say is typing into $1 and did not finish within 8 seconds; try again"
+  else
+    LOCK_WHY="could not take the lock on $f (perl exited $rc)"
+  fi
   return 1
 }
 seat_unlock() { exec 9>&-; }
