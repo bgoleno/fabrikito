@@ -74,8 +74,8 @@ the base branch (for example `git branch -M trunk`), and run `git push` as a com
 chained with `;`, `&&` or `|` to another, in particular not with `gh pr create --base <base>`. Rules
 are matched per part of a chain, but against the whole text when a part cannot be parsed (`$(...)` in
 an argument, such as a PR body from `$(cat <<EOF ...)`, or `${...}` next to quotes), so a later `main`
-can make a push of another branch ask, and, outside bypass mode, a subshell `( ... )` prompts even when
-no rule matches. A permission rule that stops a command is the answer, not an obstacle: do not rewrite
+can make a push of another branch ask, and, in default mode, a subshell `( ... )` prompts even when no
+rule matches. A permission rule that stops a command is the answer, not an obstacle: do not rewrite
 the command to get past it; tell the EM (the EM asks the owner). These rules are not preferences.
 1. **Never merge a PR, and never approve one on the owner's behalf.** The owner merges. The EM may
    merge only a PR the owner has told it to merge, using the repository's own merge procedure.
