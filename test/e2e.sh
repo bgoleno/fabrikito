@@ -506,6 +506,10 @@ reject "a role kickoff that carries a [from ...] label" "must not contain a [fro
 mk; sed -i '' 's/^  em: /  launcher: /' $T/v.yaml
 out=$($S -c $T/v.yaml check 2>&1); rc=$?
 [ $rc != 0 ] && echo "$out" | grep -qF "role id 'launcher' is reserved" && ok "rejects a role named launcher" || { bad "role named launcher (rc=$rc)"; echo "$out" | tail -2; }
+# A seat named owner would send [from owner] through say, the owner's own label.
+mk; sed -i '' 's/^  em: /  owner: /' $T/v.yaml
+out=$($S -c $T/v.yaml check 2>&1); rc=$?
+[ $rc != 0 ] && echo "$out" | grep -qF "role id 'owner' is reserved" && ok "rejects a role named owner" || { bad "role named owner (rc=$rc)"; echo "$out" | tail -2; }
 reject "a non-boolean sessions.claude.plugin" "sessions.claude.plugin must be true or false" "plugin: yes please"
 mk "plugin: false"; pa=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml claude_args em)
 [ $? = 0 ] && ! echo "$pa" | grep -q -- "--plugin-dir" && $S -c $T/v.yaml check 2>&1 | grep -qxF "plugin    : off (sessions.claude.plugin: false)" && ok "plugin: false omits --plugin-dir, and check says off" || { bad "plugin: false"; echo "$pa"; }

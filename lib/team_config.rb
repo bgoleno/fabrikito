@@ -654,6 +654,7 @@ class TeamConfig
     roles.each do |id, r|
       die "role id '#{id}' must match #{ID_RE.source}" unless id.to_s =~ ID_RE
       die "role id 'launcher' is reserved: a seat's say messages would carry the kickoff's #{KICKOFF_LABEL} label" if id.to_s == 'launcher'
+      die "role id 'owner' is reserved: a seat's say messages would carry the owner's [from owner] label" if id.to_s == 'owner'
       die "role '#{id}' must be a mapping" unless r.is_a?(Hash)
       bad = r.keys - ROLE_KEYS
       die "unknown key(s) under roles.#{id}: #{bad.join(', ')} (allowed: #{ROLE_KEYS.join(', ')})" unless bad.empty?

@@ -178,7 +178,8 @@ file. The shared prompt (`roles/common.md`) tells seats a `[from launcher]` mess
 configuration: it can say how to start, but it is never an owner instruction or approval, and the
 EM's prompt never takes one as a merge instruction. `check` shows each seat's kickoff with its label.
 `say` never sends as `launcher` (it refuses `TEAM_ROLE=launcher`, and `launcher` is not a valid role
-id), and a kickoff may not contain a `[from …]` label of its own. Like every label, it is not
+id), and a kickoff may not contain a `[from …]` label of its own. For the same reason `owner` is not a
+valid role id either: a seat named `owner` would send `[from owner]`, the owner's own label. Like every label, it is not
 authenticated (#29): it keeps the kickoff from looking like owner input, nothing more.
 
 ### The message log
@@ -318,7 +319,7 @@ base-branch rules, permission mode and launch flags), the factory plugin (its ma
 with the plugin's real path, `sessions.claude.plugin: false`, a bad value, a missing manifest, a team's
 own `--plugin-dir` in `args`), the kickoff's `[from launcher]` label (in the rendered file, as the seat
 receives it, in `check`, `say` refusing to send as `launcher`, a kickoff with a label of its own, a role
-named `launcher`), the load-time checks on modes, rules and `args`,
+named `launcher` or `owner`), the load-time checks on modes, rules and `args`,
 `say` delivering only to a seat whose input box is showing (dialogs captured from Claude Code
 2.1.316, an unknown dialog, text in the box, copy mode, an unreadable screen), and the gate: the
 generated Stop hook, its load-time checks, and `lib/stop_gate.sh` itself (clean tree, failure, the
