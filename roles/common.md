@@ -50,14 +50,21 @@ Message a seat with the `SendMessage` tool, with `to` set to its session name fr
   wait for a seat to finish, send `SendMessage` with `notify_when_idle: true` instead of polling it.
 - Work is assigned by the EM (or by the owner directly). Do not start work nobody assigned. If you
   are idle after reporting, wait for the next message.
+- An assignment is a brief: issue URL, objective, deliverable and definition of done, branch, tools
+  or sources, boundaries (including what other seats own), reviewers. If a part you need is missing
+  or unclear, ask the EM (or the owner, if they assigned it) in one message instead of guessing.
 - `@@SCRIPT@@ status` shows which seats are up. `say` traffic is logged to `@@LOG@@`; `SendMessage`
   traffic is not, and is only in each session's transcript.
 - A decision that is the owner's to make (scope, risk acceptance, anything outward-facing,
   anything irreversible) goes to the EM, who asks the owner. State it plainly instead of guessing.
 
 ## Hard rules
-Permission prompts may be switched off for every seat, so these rules can be the only guardrail.
-They are not preferences.
+Some of these rules are also enforced as permission rules, where the team file configures them
+(`@@SCRIPT@@ check` lists yours), and those hold in every permission mode. For everything else, this
+text is the only guardrail. Neither is a security boundary: both guard against accidents, and a
+command written another way gets past a permission rule. A permission rule that stops a command is
+the answer, not an obstacle: do not rewrite the command to get past it; ask the EM (the EM asks the
+owner). These rules are not preferences.
 1. **Never merge a PR, and never approve one on the owner's behalf.** The owner merges. The EM may
    merge only a PR the owner has told it to merge, using the repository's own merge procedure.
 2. **Confirm the remote before every commit or push:** run `git remote -v` and check it is
