@@ -25,6 +25,7 @@ cp teams/example.yaml teams/team.yaml     then edit it: repo, project, storage, 
 ./factory.sh say <role|all> "..."         type a message into a seat (seats use SendMessage)
 ./factory.sh attach <role>                attach your terminal (detach: ctrl-b d)
 ./factory.sh migrate [role...]            remove clean worktrees that are not on the storage volume
+                                          (never one a running process works in)
 ./factory.sh down --yes [role...]         kill seats (worktrees are kept)
 ./factory.sh -c path/to/other.yaml up     use a different team file
 ```
@@ -36,11 +37,12 @@ and point the team file at them.
 
 `up` takes a team file outside `teams/` for a throwaway one (a test) and will not start its seats on your
 default tmux server, where a real team runs: run it on a private server (see Tests), or pass
-`up --default-socket` if that team is meant to run there. `down` (with or without `--yes`), `say`, `attach`
-and `view` apply the same rule before any tmux call, because a copy of a real team file shares its session
-prefix and would reach the real seats: kill them, type into them, or show them
-([#105](../../issues/105)). Each takes `--default-socket` too (`say` and `attach`: as the first argument),
-and `up --default-socket` passes it on to the view it opens. So a throwaway team file never goes in `teams/`,
+`up --default-socket` if that team is meant to run there. `down` (with or without `--yes`), `say`, `attach`,
+`view` and `titles` apply the same rule before any tmux call, because a copy of a real team file shares its
+session prefix and would reach the real seats: kill them, type into them, show them or relabel them
+([#105](../../issues/105), [#124](../../issues/124)). `status` only reads, and `migrate` keeps any worktree a
+running process works in, on whatever server ([#121](../../issues/121)). Each takes `--default-socket` too
+(`say` and `attach`: as the first argument), and `up --default-socket` passes it on to the view it opens. So a throwaway team file never goes in `teams/`,
 neither this checkout's nor a worktree's copy of it: there every command takes it for a real one. Put it
 in a temporary folder and run it on a private server.
 
@@ -468,12 +470,20 @@ What the rules cannot do:
   generated file, so it is refused.
 - Claude Code matches permission rules against each part of a compound command (`;`, `&&`, `|`), but
   against the whole command text when it can't parse the command (for example `"$(...)"` in an
-  argument, or `${...}` next to quotes). In default mode, a subshell `( ... )` or a command it can't
-  parse prompts even when no rule matches (the reason varies: "can't be checked before it runs",
-  "shell operators that require approval"); in bypass mode it prompts only when a rule matches
-  (measured on 2.1.316, [#103](../../issues/103); other modes not measured). So seats run `git push`
-  as its own simple command: chained with an unparseable part, a `main` elsewhere in the command makes
-  it match the base-branch ask.
+  argument, such as a PR body from `$(cat <<EOF ...)`, or `${...}` next to quotes). In default mode, a
+  subshell `( ... )` or a command it can't parse prompts even when no rule matches (the reason varies:
+  "can't be checked before it runs", "shell operators that require approval"); in bypass mode it
+  prompts only when a rule matches (measured on 2.1.316, [#103](../../issues/103); other modes not
+  measured). So seats run `git push` as its own simple command: chained with an unparseable part, a
+  `main` elsewhere in the command makes it match the base-branch ask. A prompt that names a rule
+  (`Permission rule ... requires confirmation`) means the command's text matched an ask rule, even
+  when the reason it shows is about parsing ("expansion obfuscation", "shell operators that require
+  approval"): that reason only says why Claude Code could not narrow the prompt to the matching part.
+  The shared prompt keeps the instructions (push alone, avoid a subshell, a named rule means a match)
+  and leaves this mechanism here ([#117](../../issues/117)).
+- Seats push with `git push origin <branch>:<branch>` on a branch cut with `--no-track`. A branch cut
+  with `git switch -c <branch> origin/main` has the base as its upstream, so under
+  `push.default=upstream` a bare `git push`, or even `git push origin <branch>`, would push to the base.
 
 The [sandbox](https://code.claude.com/docs/en/sandboxing) is the OS-level control that would hold
 whatever the command text, but the launcher does not turn it on: seats run without one unless settings
@@ -505,9 +515,11 @@ Roles without the switch never run it. The example gives it to the engineers and
   PR stays the real check.
 - A seat also stops on purpose: to wait for an answer or a review, or with a test red before the fix.
   After `repo.gate_max_blocks` (default 3) failed gates in a row in one turn, the next stop in that turn
-  goes through without running the gate again, with a note that the gate is still failing, and the seat
-  is told to say so in its report. Each new turn starts from zero, so a seat that lives for days is
-  never gated off for good. The count is in the state folder, which seats cannot edit through Claude
+  goes through without running the gate again, with a note that the gate is still failing. Every
+  send-back tells the seat that, if it is stopping on purpose, it should say so in its report, and
+  gives the limit (this moved here from the shared prompt, [#117](../../issues/117); the let-through's
+  note is shown to the user, not to the seat). Each new turn starts from zero, so a seat that lives
+  for days is never gated off for good. The count is in the state folder, which seats cannot edit through Claude
   Code's tools; a passing gate or a clean tree resets it. A script can still write it, or run the hook
   with made-up input, like every other "a script can do it" limit under [Safety](#safety). Run by hand
   with no hook input, `lib/stop_gate.sh` runs the gate and reports but leaves the count alone. Claude
@@ -535,9 +547,12 @@ note.
 Every seat's generated settings have a `SessionStart` hook (`lib/session_start.sh`, no matcher, so
 it runs at startup, on resume, after `/clear` and after a compaction). It prints the note (cut at 80
 lines or 6000 bytes), the branch, uncommitted files and the last 10 commits of the seat's working
-directory, and Claude Code adds that to the seat's context. The default kickoff asks a seat to name
-the note's task and next step in its first reply. The note is the seat's own writing, so treat it as
-a reminder, not a record: when it and the repository disagree, the repository wins.
+directory, and Claude Code adds that to the seat's context. After the note it prints what to do with
+it, on every path (no note, an unreadable note, a missing or non-git folder): name the task and next
+step in the first reply, follow the kickoff, and trust the repository over the note. That text moved
+here from the shared prompt ([#117](../../issues/117)), so a seat whose hooks are all off goes without
+it, as it goes without the note. The note is the seat's own writing, so treat it as a reminder, not
+a record: when it and the repository disagree, the repository wins.
 
 - Control characters other than tab and newline (and DEL) are dropped from everything the hook
   prints, so a terminal escape in a note or a commit subject arrives as plain text.
@@ -602,7 +617,7 @@ exist. A throwaway team's worktrees on the volume are not removed by `down`; rem
 
 `TEST_VOLUME=/Volumes/YourDrive test/e2e.sh` runs the launcher against a throwaway repo with a stand-in
 `claude` on a private tmux server. It covers worktree placement on the volume, per-role model and
-effort (and the example team's effort per role), message delivery, migrating a legacy worktree (clean and dirty), and refusing to run when the
+effort (and the example team's effort per role), message delivery, migrating a legacy worktree (clean, dirty, and kept while a running process works in it), and refusing to run when the
 volume is not mounted. It also covers the generated settings files (merged rules, protected paths,
 base-branch rules, permission mode and launch flags), the factory plugin (its manifest, `--plugin-dir`
 with the plugin's real path, `sessions.claude.plugin: false`, a bad value, a missing manifest, a team's
@@ -623,7 +638,7 @@ file is swapped; a copy that cannot be made, or a shared install caught mid-rein
 start). It also covers `up` refusing a throwaway team on the default tmux server (TMUX and TMUX_TMPDIR
 unset, `/tmp` by two spellings, an empty or missing TMUX_TMPDIR, a relative one under CDPATH, TMUX naming
 the default socket) before any tmux call, going ahead on a private server, for a team file in `teams/` and
-with `--default-socket`; `down`, `down --yes`, `say`, `attach` and `view` refusing a copy of a running
+with `--default-socket`; `down`, `down --yes`, `say`, `attach`, `view` and `titles` refusing a copy of a running
 team's file there before any tmux call, with the seats left as they were (a stand-in tmux passes every call
 to the test's private server), and going ahead for a file in `teams/` or with `--default-socket`; and
 `test/live-env.sh` (its environment, with a seat's TEAM_CONFIG and TEAM_SCRIPT unset, TEAM_ROLE

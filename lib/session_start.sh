@@ -2,8 +2,8 @@
 #
 # SessionStart hook that factory.sh puts in every seat's generated settings (#5). Claude Code adds what
 # it prints to the seat's context at startup, on resume, after /clear and after a compaction, so a
-# restarted seat can carry on: its progress note, the branch it is on, recent commits and uncommitted
-# files.
+# restarted seat can carry on: its progress note, what to do with it, the branch it is on, recent
+# commits and uncommitted files.
 #
 #   session_start.sh <state dir> <role> <workdir>
 #
@@ -41,6 +41,12 @@ report() {
   else
     echo "(no progress note yet: write one at $note when you take a task)"
   fi
+  echo
+  # What to do with it. This moved here from the shared prompt (#117), so it is printed on every path,
+  # before the working-directory checks that can return early.
+  echo "Each session starts with your progress note, your branch, uncommitted files and recent commits in"
+  echo "your context. Name the task and next step in your first reply, then follow your kickoff (it may say to wait)."
+  echo "If the note and the repository disagree, trust the repository and fix the note."
   echo
 
   echo "## Working directory: $workdir"
