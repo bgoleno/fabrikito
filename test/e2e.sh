@@ -284,6 +284,8 @@ hk=$(CLAUDE_CONFIG_DIR=$T/cfgoff $S -c $T/team.yaml check 2>&1 | grep "^hooks ")
   && ok "check: a hooks line naming the ungated seats when the user's settings disable all hooks, none otherwise" || { bad "check: hooks line"; echo "$hk"; }
 [ -d $T/state/notes ] && ok "up makes the notes folder under the state folder" || bad "no $T/state/notes after up"
 grep -qF "$T/state/notes/em.md" $T/state/prompts/em.md && ok "the rendered prompt names the seat's own note" || bad "the prompt does not name $T/state/notes/em.md"
+# The allow covers Edit (and Write), not a Bash redirect, which prompts outside bypass (qa, live on #90).
+grep -qF "Write it with the Write or Edit tool, not Bash" $T/state/prompts/em.md && ok "the prompt says to write the note with Write or Edit, not Bash" || bad "the prompt does not say how to write the note"
 grep -qF "progress note" $T/state/prompts/em.kickoff && ok "the default kickoff asks for the note's task and next step" || { bad "kickoff and the note"; cat $T/state/prompts/em.kickoff; }
 echo "Task: survive a restart" > $T/state/notes/em.md
 rules $T/state/settings/w1.json deny | grep -qxF "Edit(/$RT/state/gate/**)" && ok "the gate's own state (its failure counter) is Edit-protected" || bad "gate state not protected"

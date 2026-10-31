@@ -103,7 +103,8 @@ get past it; tell the EM (the EM asks the owner). These rules are not preference
 - Keep a progress note at `@@NOTE@@`. It is outside your worktree, so it survives a restart. It holds
   your current task (issue or PR URL), its branch, its state, your next step and what you are waiting
   for. Rewrite it whenever the task changes state (taken, PR opened, review answered, blocked, done),
-  and keep it short. Work on one task at a time.
+  and keep it short. Write it with the Write or Edit tool, not Bash (which may prompt). Work on one
+  task at a time.
 - Each session starts with that note, your branch, uncommitted files and recent commits in your
   context. Name the task and next step in your first reply, then follow your kickoff (it may say to
   wait). Run the gate before new work. If the note and the repository disagree, trust the repository
