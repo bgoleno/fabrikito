@@ -631,6 +631,19 @@ n=$(wc -l < $T/state/messages.log); k=$(wc -c < $T/keys-w1.log)
 pout=$(PATH=$T/psparent:$PATH sh -c 'echo $$ > "$1/psparent.pid"; env -u TEAM_ROLE "$2" -c "$1/team.yaml" say w1 "ps cannot read the parent"; rc=$?; exit $rc' sh "$T" "$S" 2>&1); rc=$?; sleep 1
 [ $rc -ne 0 ] && echo "$pout" | grep -q "ps could not read" && lastlog '?' w1 'ps cannot read the parent' && [ "$(wc -c < $T/keys-w1.log)" = "$k" ] &&
   ok "say with TEAM_ROLE unset refuses when ps fails for an ancestor, and logs NOT-DELIVERED" || { bad "say when ps fails for the parent (rc=$rc)"; echo "$pout"; tail -1 $T/state/messages.log; }
+# The walk reads at most 100 processes (#130). A stand-in ps gives say a made-up chain with no tty
+# and no tmux server: say's own process, then pids 900000, 900001, ... up to 900000+K, whose parent
+# is pid 1. With K=98 the 100th process read is 900098, whose parent is 1: the walk is complete and
+# say is the owner. With K=99 the walk stops at the cap before pid 1: refuse, whatever it saw.
+mkdir -p $T/pschain && printf '#!/bin/sh\ncase "$*" in "-o ppid=,tty=,comm= -p "*) for p; do :; done; k=$(cat %s/pschain.k)\n  if [ "$p" -lt 900000 ]; then echo "900000 ?? sh"; elif [ "$p" -ge $((900000 + k)) ]; then echo "1 ?? sh"; else echo "$((p + 1)) ?? sh"; fi; exit 0 ;; esac\nexec /bin/ps "$@"\n' "$T" > $T/pschain/ps && chmod +x $T/pschain/ps
+echo 99 > $T/pschain.k; n=$(wc -l < $T/state/messages.log); k=$(wc -c < $T/keys-w1.log)
+pout=$(PATH=$T/pschain:$PATH env -u TEAM_ROLE $S -c $T/team.yaml say w1 "ancestry past the cap" 2>&1); rc=$?; sleep 1
+[ $rc -ne 0 ] && echo "$pout" | grep -q "cap of 100" && [ "$(wc -l < $T/state/messages.log)" -eq $((n + 1)) ] && lastlog '?' w1 'ancestry past the cap' && [ "$(wc -c < $T/keys-w1.log)" = "$k" ] &&
+  ok "say with TEAM_ROLE unset refuses when the ancestry walk stops at its cap before pid 1 (no keys, NOT-DELIVERED)" || { bad "say past the ancestry cap (rc=$rc)"; echo "$pout"; tail -1 $T/state/messages.log; }
+echo 98 > $T/pschain.k; n=$(wc -l < $T/state/messages.log)
+pout=$(PATH=$T/pschain:$PATH env -u TEAM_ROLE $S -c $T/team.yaml say w1 "ancestry at the cap" 2>&1); rc=$?; sleep 1
+[ $rc -eq 0 ] && [ "$(tail -n +$((n + 1)) $T/state/messages.log | cut -f2-4)" = "owner	w1	delivered" ] && tmux capture-pane -p -t '=tt-w1:' | grep -qF "[from owner] ancestry at the cap" &&
+  ok "say with TEAM_ROLE unset whose walk reaches pid 1 at the cap is still [from owner]" || { bad "say at the ancestry cap (rc=$rc)"; echo "$pout"; tail -1 $T/state/messages.log; }
 # Inside a seat of another team on the same server (here w1, running say with a file for team to):
 # its pane matches none of that team's seats, but it is a seat, so it is not the owner either.
 sed 's/^  prefix: tt$/  prefix: to/' $T/team.yaml > $T/other.yaml
