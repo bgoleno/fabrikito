@@ -328,6 +328,13 @@ not valid UTF-8 has every byte from 0x80 up written as `\xHH`. If the escaping i
 reads `<log_field failed>`. The escaping is reversible: `printf '%b' "<field>"` in bash gives back
 the original text.
 
+`say` writes this line before it prints anything about the delivery, such as why a message was not
+delivered (#128). A write to a terminal or a pipe can fail (with EINTR under heavy load, into a closed
+stderr, or into a pipe whose reader has gone), and the failure ends `say`; written first, the record is
+kept all the same. If the line itself cannot be appended, `say` still prints its reason, then says the
+record could not be written and whether the message was delivered (so that a delivered message is not
+sent again), and exits with status 1.
+
 Each `SendMessage` from a seat appends one line in the same format, written by `lib/log_message.sh`, a
 `PostToolUse` and `PostToolUseFailure` hook on `SendMessage` in every seat's settings:
 
@@ -646,7 +653,10 @@ to the test's private server), and going ahead for a file in `teams/` or with `-
 did not make, one whose tmux folder resolves to `/tmp`, and one whose socket folder or socket is a link).
 It also covers `say` across tmux servers (#115): with `TEAM_ROLE` unset, a seat on one server and a pane of
 another are refused; a live-env driver sends `[from live-test]`; and `live-test` is refused on the default
-server before any tmux call.
+server before any tmux call. And it covers `say` writing its log line before its terminal message (#128):
+with stderr closed, or a pipe whose reader has gone, a refusal and a down seat are still logged
+`NOT-DELIVERED`; the reason is still shown and no held file is left; and a log that cannot be appended to
+still lets the reason through.
 
 The exit code is authoritative: `test/e2e.sh` exits 0 only when it reaches the end with every
 assertion passed (`RESULT pass=<n> fail=0`), and non-zero when any assertion fails or the run stops

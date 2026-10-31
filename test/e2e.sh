@@ -653,6 +653,33 @@ n=$(wc -l < $T/state/messages.log)
 TEAM_ROLE=w1 $S -c $T/team.yaml say w1 "to myself" >/dev/null 2>&1; rc=$?
 [ $rc -ne 0 ] && [ "$(wc -l < $T/state/messages.log)" -eq $((n + 1)) ] && lastlog w1 w1 'to myself' &&
   ok "say from a seat to itself is refused and logged NOT-DELIVERED" || { bad "say to itself (rc=$rc)"; tail -1 $T/state/messages.log; }
+# Record before report (#128): when the terminal write fails, the NOT-DELIVERED line is still logged.
+# Two stand-ins for a failed write: stderr closed (the write fails with EBADF, and set -e ends say),
+# and stderr a pipe whose reader has already gone (the write kills say with SIGPIPE). The pipe is
+# made by perl, which closes its read end before it starts say, so the write fails every time.
+# Two paths: a refusal decided in cmd_say (w1 to itself) and one in send_one (w2 is down).
+brokenpipe() { perl -e '$SIG{PIPE} = "DEFAULT"; pipe(R, W) or die; close R; open(STDERR, ">&", \*W) or die; close W; exec @ARGV or die' "$@"; }
+for c in "w1 closed" "w1 pipe" "w2 closed" "w2 pipe"; do
+  to=${c% *} how=${c#* }; n=$(wc -l < $T/state/messages.log)
+  if [ $how = closed ]; then TEAM_ROLE=w1 $S -c $T/team.yaml say $to "terminal write fails ($c)" >/dev/null 2>&-; rc=$?
+  else TEAM_ROLE=w1 brokenpipe $S -c $T/team.yaml say $to "terminal write fails ($c)" >/dev/null; rc=$?; fi
+  [ $rc -ne 0 ] && [ "$(wc -l < $T/state/messages.log)" -eq $((n + 1)) ] && lastlog w1 $to "terminal write fails ($c)" &&
+    ok "say still logs NOT-DELIVERED when its terminal write fails (to $to, stderr $how)" || { bad "say with a failed terminal write ($c, rc=$rc)"; tail -1 $T/state/messages.log; }
+done
+# send_one's reasons, held until the log line is written, are still shown, and the file that held
+# them is never left behind.
+out=$(TEAM_ROLE=w1 $S -c $T/team.yaml say w2 "held reason" 2>&1 >/dev/null); rc=$?
+[ $rc -ne 0 ] && [ "$out" = "not delivered: w2 is down (tt-w2)" ] && lastlog w1 w2 "held reason" && [ -z "$(ls -A $T/state | grep '^say\.')" ] &&
+  ok "say shows send_one's reason once it has logged, and leaves no held file" || { bad "say's held reason (rc=$rc)"; echo "$out"; ls -A $T/state; }
+# The other way round: a log that cannot be appended to does not lose the terminal message.
+mkdir -p $T/unlogstate/messages.log
+out=$(TEAM_STATE_DIR=$T/unlogstate TEAM_ROLE=w1 $S -c $T/team.yaml say w2 "log cannot be written" 2>&1); rc=$?
+[ $rc -ne 0 ] && echo "$out" | grep -qF "not delivered: w2 is down" && echo "$out" | grep -qF "record could not be written to $T/unlogstate/messages.log (the message was not delivered)" &&
+  ok "say whose log cannot be written still shows why it did not deliver, and fails" || { bad "say with an unwritable log (rc=$rc)"; echo "$out"; }
+# Delivered, with the log unwritable: the note says it went out, so the caller does not send it again.
+out=$(TEAM_STATE_DIR=$T/unlogstate TEAM_ROLE=w1 $S -c $T/team.yaml say em "delivered, log cannot be written" 2>&1); rc=$?; sleep 1
+[ $rc -ne 0 ] && echo "$out" | grep -qF "(the message was delivered)" && tmux capture-pane -p -t "=tt-em:" | grep -qF "[from w1] delivered, log cannot be written" &&
+  ok "say whose log cannot be written after delivering says the message was delivered" || { bad "say delivered with an unwritable log (rc=$rc)"; echo "$out"; }
 echo "--- say across tmux servers (#115): never [from owner] from a pane of another server"
 # Server 2 is a live-env environment (test/live-env.sh) with one stand-in seat on it, tx-em, of a
 # copy of the team with prefix tx. Its log is the environment's own.
