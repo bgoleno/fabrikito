@@ -13,7 +13,7 @@
 #                              then opens the iTerm tab (see `view`) unless --no-view or display.iterm is false
 #   titles                     set each running seat's terminal title to "<role> | <title> | <session>" (up and
 #                              view do this too); it is what iTerm shows in each pane's header
-#   view                       open a new iTerm tab with every running seat in a pane: the primary seat
+#   view [--print]             open a new iTerm tab with every running seat in a pane: the primary seat
 #                              (display.primary, default the first role) on the left at full height, the others
 #                              in rows on the right; the window is sized to its screen (display.window)
 #   status                     which seats are up, and where each one works
@@ -22,6 +22,10 @@
 #   migrate [role...]          remove clean worktrees that are not under the configured storage
 #                              volume, so `up` recreates them there (stop the seat first)
 #   down --yes [role...]       kill seats (worktrees are kept)
+#
+# up, view, say, attach and down refuse a team file outside teams/ on the default tmux server, where
+# the real team runs: it looks like a throwaway copy. Run it on a private server (test/live-env.sh), or
+# pass --default-socket (say and attach: as the first argument) for a team meant to run there.
 #
 # The team file is -c, else $TEAM_CONFIG, else teams/team.yaml next to this script.
 #
@@ -129,15 +133,18 @@ real_path() {
 }
 
 # A team file outside teams/ next to this script is taken for a throwaway one (a test), which must
-# not start seats on the default tmux server, where the real team runs (#66). `up --default-socket`
-# overrides it for a team that is meant to run there.
+# not reach seats on the default tmux server, where the real team runs (#66). A copy of the real
+# team file shares its session prefix, so it would reach the real seats: up would start beside
+# them, down kill them, say type into them, attach and view show them. So every command that
+# reaches seats calls this first, before any tmux call (#105). --default-socket overrides it for a
+# team that is meant to run there. Usage: refuse_default_tmux <command> <what it would do>.
 refuse_default_tmux() {
-  local teams dir
+  local cmd=$1 what=$2 teams dir
   teams=$(CDPATH= cd -- "$HERE/teams" 2>/dev/null && pwd -P) || teams=$HERE/teams
   dir=$(CDPATH= cd -- "$(dirname "$CONFIG")" && pwd -P)
   case $dir/ in "$teams"/*) return 0 ;; esac
   [ "$(tmux_socket)" = "$(default_tmux_socket)" ] || return 0
-  die "refusing to start seats for $CONFIG on the default tmux server ($(default_tmux_socket)), where your real team runs: the team file is outside $HERE/teams/, so it looks like a throwaway team. Run it on a private server: d=\$($HERE/test/live-env.sh new); $HERE/test/live-env.sh run \"\$d\" $SELF -c $CONFIG up (or unset TMUX and point TMUX_TMPDIR at a folder that exists). If this team is meant to run on the default server, pass up --default-socket."
+  die "refusing to $what for $CONFIG on the default tmux server ($(default_tmux_socket)), where your real team runs: the team file is outside $HERE/teams/, so it looks like a throwaway team. Run it on a private server: d=\$($HERE/test/live-env.sh new); $HERE/test/live-env.sh run \"\$d\" $SELF -c $CONFIG $cmd (or unset TMUX and point TMUX_TMPDIR at a folder that exists). If this team is meant to run on the default server, pass $cmd --default-socket."
 }
 
 # The worktree volume is proven from the mount table, at the moment a worktree is created, and
@@ -347,7 +354,7 @@ cmd_up() {
     esac
   done
   # Before anything else, tmux included: the refusal must not depend on what a tmux call would do.
-  [ "$default_ok" = 1 ] || refuse_default_tmux
+  [ "$default_ok" = 1 ] || refuse_default_tmux up "start seats"
   roles=${args:-$ROLES}
   command -v tmux >/dev/null || die "tmux not found"
   resolve_claude || die "$CLAUDE_ERR"
@@ -435,7 +442,9 @@ cmd_up() {
   echo "Attach with: $SELF attach <role>"
   # Show the team: one iTerm tab with every running seat. A failure here never fails `up`.
   if [ "$started" -gt 0 ] && [ "$want_view" = 1 ] && [ "$VIEW_ITERM" = true ] && [ "${TEAM_VIEW:-1}" != 0 ]; then
-    cmd_view || echo "warning: could not open the iTerm view (the seats are running; try: $SELF view)" >&2
+    # up's own --default-socket carries over to the view, which applies the same rule (#105).
+    if [ "$default_ok" = 1 ]; then set -- --default-socket; else set --; fi
+    cmd_view "$@" || echo "warning: could not open the iTerm view (the seats are running; try: $SELF view)" >&2
   fi
 }
 
@@ -557,8 +566,16 @@ EOF2
 }
 
 cmd_view() {
-  local print=0 list="" ordered r wid
-  [ "${1:-}" = --print ] && print=1
+  local print=0 default_ok=0 list="" ordered r wid a
+  for a in "$@"; do
+    case $a in
+      --print) print=1 ;;
+      --default-socket) default_ok=1 ;;
+      *) die "usage: view [--print] [--default-socket]" ;;
+    esac
+  done
+  # --print touches no seat, but is refused too: one rule for the whole command (#105).
+  [ "$default_ok" = 1 ] || refuse_default_tmux view "open a view of the seats"
   # --print shows the layout for every role in the file, up or not (used by the tests)
   for r in $ROLES; do
     if [ $print -eq 1 ] || alive "$r"; then list="$list $r"; fi
@@ -935,6 +952,8 @@ sender_refusal() {
 }
 
 cmd_say() {
+  # Before anything else, tmux, caller_seat and the log included (#105).
+  if [ "${1:-}" = --default-socket ]; then shift; else refuse_default_tmux say "type into seats"; fi
   local to=${1:-} from=${TEAM_ROLE:-} why="" text r rc=0
   [ -n "$to" ] && [ $# -ge 2 ] || die "usage: say <role|all> <message...>"
   [ "$to" = all ] || check_role "$to"
@@ -970,6 +989,7 @@ cmd_say() {
 }
 
 cmd_attach() {
+  if [ "${1:-}" = --default-socket ]; then shift; else refuse_default_tmux attach "attach to a seat"; fi
   local r=${1:-}
   [ -n "$r" ] || r=${ROLES%% *}
   check_role "$r"
@@ -1010,10 +1030,16 @@ cmd_migrate() {
 }
 
 cmd_down() {
-  local yes=0 roles="" a r
+  local yes=0 default_ok=0 roles="" a r
   for a in "$@"; do
-    if [ "$a" = --yes ]; then yes=1; else roles="$roles $a"; fi
+    case $a in
+      --yes) yes=1 ;;
+      --default-socket) default_ok=1 ;;
+      *) roles="$roles $a" ;;
+    esac
   done
+  # With or without --yes: even the dry run lists the real seats (#105).
+  [ "$default_ok" = 1 ] || refuse_default_tmux down "stop seats"
   roles=${roles:-$ROLES}
   for r in $roles; do check_role "$r"; done
   for r in $roles; do
@@ -1037,5 +1063,5 @@ case "${1:-}" in
   attach) shift; cmd_attach "$@" ;;
   migrate) shift; cmd_migrate "$@" ;;
   down) shift; cmd_down "$@" ;;
-  *) sed -n '3,31p' "$0" | sed 's/^# \{0,1\}//'; exit 64 ;;
+  *) sed -n '3,36p' "$0" | sed 's/^# \{0,1\}//'; exit 64 ;;
 esac
