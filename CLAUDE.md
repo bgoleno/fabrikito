@@ -10,6 +10,7 @@ together in one iTerm tab. Read `README.md` for use and `teams/example.yaml` for
 - `lib/screen_bounds.js`: usable area of the screen a point is on, for sizing the iTerm window.
 - `roles/`: generic prompts. `teams/example.yaml`: documented example team file.
 - `test/e2e.sh`: end-to-end test with a stand-in `claude`, a private tmux server and a throwaway repo.
+- `test/live-env.sh`: a private tmux server and state folder for a live test (README: Tests).
 - Git-ignored, local to each project: `teams/*` other than the example, `projects/`, `.state/`.
 
 ## Rules for this repo

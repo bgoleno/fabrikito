@@ -34,6 +34,11 @@ key. Team files other than the example, and anything under `projects/`, are git-
 project's specifics stay out of this repository. Keep a project's own prompts under `projects/<name>/`
 and point the team file at them.
 
+`up` takes a team file outside `teams/` for a throwaway one (a test) and will not start its seats on your
+default tmux server, where a real team runs: run it on a private server (see Tests), or pass
+`up --default-socket` if that team is meant to run there. So a throwaway team file never goes in `teams/`,
+neither this checkout's nor a worktree's copy of it: there `up` takes it for a real one.
+
 ## The iTerm view
 
 `up` opens a new iTerm tab showing every running seat, unless `--no-view` is given or `display.iterm`
@@ -93,6 +98,11 @@ a good start.
 
 Unknown keys, missing prompt files, duplicate session names and unknown placeholders are errors at load
 time, before anything starts.
+
+Text is UTF-8 whatever the locale (`LC_ALL=C`, cron, `env -i`): the team and prompt files, and the
+values the launcher fills in from outside them (`TEAM_SCRIPT`, `TEAM_LOG`, `TEAM_STATE_DIR`,
+`CLAUDE_CONFIG_DIR`, the home folder, the team file's own path), so non-ASCII paths and names work in
+prompts, kickoffs and settings. Invalid UTF-8 in any of them is an error that names where it came from.
 
 ## The factory plugin
 
@@ -218,7 +228,9 @@ are labelled `[from <role>]`, and the owner's are `[from owner]`. The label is s
 `TEAM_ROLE`, or `owner` when it is unset) and is not authenticated. When `TEAM_ROLE` is unset, `say`
 run from inside a seat (found from the terminals of the processes that started it) is labelled with
 that seat's role, never `[from owner]`; this stops a mislabel by accident, and the labels are still
-not authenticated ([#29](../../issues/29)).
+not authenticated ([#29](../../issues/29)). A `TEAM_ROLE` that is set must be one of the team's role
+ids: `say` refuses any other value, and the reserved `owner` and `launcher`, sending no keys and
+logging NOT-DELIVERED.
 
 ### The kickoff
 
@@ -453,6 +465,25 @@ example `rm -r .state/<team>/bin/claude-2.1.314`.
 
 ## Tests
 
+A live test (a throwaway team with a real `claude`, or anything else that starts tmux sessions) runs on a
+private tmux server through `test/live-env.sh`, never on the server you work in:
+
+```
+d=$(test/live-env.sh new)                                  a private folder: tmux/, state/
+test/live-env.sh run "$d" ./factory.sh -c /path/to/throwaway.yaml up
+test/live-env.sh run "$d" tmux ls                          any command, with TMUX_TMPDIR=$d/tmux and
+                                                           TEAM_STATE_DIR=$d/state (absolute), TEAM_VIEW=0,
+                                                           and TMUX and a seat's TEAM_CONFIG, TEAM_ROLE and
+                                                           TEAM_SCRIPT unset (so factory.sh without -c never
+                                                           finds the seat's real team)
+test/live-env.sh down "$d"                                 stop its tmux server, remove the folder
+```
+
+Each call checks the folder on its own (made by `new`, its tmux folder not `/tmp`), so it works from a fresh
+shell each time. Setting `TMUX_TMPDIR` by hand is easy to get wrong: tmux 3.7 follows `$TMUX` when it is set,
+and falls back to the default server, silently, when `TMUX_TMPDIR` is empty or names a folder that does not
+exist. A throwaway team's worktrees on the volume are not removed by `down`; remove them by their paths.
+
 `TEST_VOLUME=/Volumes/YourDrive test/e2e.sh` runs the launcher against a throwaway repo with a stand-in
 `claude` on a private tmux server. It covers worktree placement on the volume, per-role model and
 effort (and the example team's effort per role), message delivery, migrating a legacy worktree (clean and dirty), and refusing to run when the
@@ -473,7 +504,12 @@ long note, a non-UTF-8 note under `LC_ALL=C`, control characters, a hanging `git
 auto-updater being off in every seat and nowhere else, and the seats' own copy of claude (made by
 `up`, never the shared file; still intact after the shared file is replaced; `REPLACED` when its own
 file is swapped; a copy that cannot be made, or a shared install caught mid-reinstall, stops the
-start).
+start). It also covers `up` refusing a throwaway team on the default tmux server (TMUX and TMUX_TMPDIR
+unset, `/tmp` by two spellings, an empty or missing TMUX_TMPDIR, a relative one under CDPATH, TMUX naming
+the default socket) before any tmux call, going ahead on a private server, for a team file in `teams/` and
+with `--default-socket`, and `test/live-env.sh` (its environment, with a seat's TEAM_CONFIG, TEAM_ROLE and
+TEAM_SCRIPT unset and the folders resolved, its private socket, and refusing a missing folder, one `new`
+did not make, one whose tmux folder resolves to `/tmp`, and one whose socket folder or socket is a link).
 
 The exit code is authoritative: `test/e2e.sh` exits 0 only when it reaches the end with every
 assertion passed (`RESULT pass=<n> fail=0`), and non-zero when any assertion fails or the run stops
