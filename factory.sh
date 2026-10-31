@@ -142,7 +142,7 @@ ensure_worktree() {
 }
 
 cmd_check() {
-  local r on="not mounted"
+  local r on="not mounted" d real users
   mount | grep -qF " on $VOLUME (" && on="mounted"
   echo "team file : $CONFIG"
   echo "team      : $TEAM (tmux prefix '$PREFIX')"
@@ -151,6 +151,22 @@ cmd_check() {
   echo "worktrees : $WT_ROOT   [volume $VOLUME: $on]"
   echo "wrapper   : ${WRAPPER:-none (claude runs directly)}"
   echo "gate      : $(cfg get repo.gate_summary)"
+  echo "updates   : Claude Code's auto-updater is off in every seat (DISABLE_AUTOUPDATER=1); update by hand, then down and up"
+  if resolve_claude; then
+    echo "claude    : $CLAUDE_SRC, version $CLAUDE_VERSION; seats run the team's copy $CLAUDE_COPY$([ -x "$CLAUDE_COPY" ] || echo ' (made at the next up)')"
+  else
+    echo "claude    : $CLAUDE_ERR"
+  fi
+  # Each copy up has made, with the running seats that use it. Nothing removes them by itself.
+  for d in "$STATE"/bin/claude-*; do
+    [ -d "$d" ] || continue
+    real=$(ruby -e 'print File.realpath(ARGV[0])' "$d/claude" 2>/dev/null)
+    users=""
+    for r in $ROLES; do
+      if alive "$r" && [ "$(seat_exe "$r")" = "$real" ]; then users="$users $r"; fi
+    done
+    echo "            $d ($(cat "$d/.how" 2>/dev/null || echo '?')):${users:- no running seat}"
+  done
   echo "state     : $STATE"
   printf '%-5s %-36s %-18s %-12s %-9s %-24s %-7s %s\n' ROLE SEAT SESSION MODEL EFFORT MODE GATE WORKDIR
   for r in $ROLES; do
@@ -170,14 +186,18 @@ cmd_up() {
   done
   roles=${args:-$ROLES}
   command -v tmux >/dev/null || die "tmux not found"
-  command -v claude >/dev/null || die "claude not found"
+  resolve_claude || die "$CLAUDE_ERR"
   for r in $roles; do check_role "$r"; done
   for a in $(cfg get state.generated_dirs); do mkdir -p "$STATE/$a"; done
+  ensure_claude_copy
   # Roles start in the order given (file order by default).
   for r in $roles; do
     sess=$(session "$r")
     if alive "$r"; then
       echo "skip   $r: session $sess already exists (left alone)"
+      if [ "$(seat_exe "$r")" = REPLACED ]; then
+        echo "ATTENTION $r runs a claude executable that has been replaced under it; restart it: $SELF down --yes $r, then $SELF up $r"
+      fi
       continue
     fi
     dir=$(workdir "$r")
@@ -202,7 +222,10 @@ cmd_up() {
       echo '# started from tmux has no responsible app for; it passes them to its child. If it is'
       echo '# configured but missing, claude runs directly.'
       printf 'wrapper=%q\n' "$WRAPPER"
-      echo 'claude_bin="$(command -v claude)"'
+      echo '# The auto-updater would reinstall claude under this running seat, after which macOS can no'
+      echo '# longer tell which process it is and its privacy grants stop working (#50). Update by hand.'
+      echo 'export DISABLE_AUTOUPDATER=1'
+      printf 'claude_bin=%q\n' "$CLAUDE_COPY"
       echo 'if [ -n "$wrapper" ] && [ -x "$wrapper" ]; then run=("$wrapper" "$claude_bin"); else run=("$claude_bin"); fi'
       printf '"${run[@]}"%s --settings %q -n %q \\\n' "$args_q" "$settings" "$sess"
       printf '  --append-system-prompt "$(cat %q)" \\\n' "$STATE/prompts/$r.md"
@@ -381,7 +404,8 @@ cmd_view() {
 
 cmd_status() {
   local r sess where d
-  printf '%-5s %-36s %-18s %-6s %s\n' ROLE SEAT SESSION STATE WORKDIR
+  # EXE: the claude executable a running seat runs, or REPLACED (restart it: see seat_exe).
+  printf '%-5s %-36s %-18s %-6s %s  %s\n' ROLE SEAT SESSION STATE WORKDIR EXE
   for r in $ROLES; do
     sess=$(session "$r")
     d=$(workdir "$r")
@@ -394,8 +418,85 @@ cmd_status() {
     else
       where=$d
     fi
-    printf '%-5s %-36s %-18s %-6s %s\n' "$r" "$(title "$r")" "$sess" "$(alive "$r" && echo up || echo down)" "$where"
+    printf '%-5s %-36s %-18s %-6s %s  %s\n' "$r" "$(title "$r")" "$sess" "$(alive "$r" && echo up || echo down)" "$where" \
+      "$(if alive "$r"; then seat_exe "$r"; else echo -; fi)"
   done
+}
+
+# The claude executable seats run: the team's own copy of the shared install, made by up (#50).
+# Claude Code's updater, in any session on the machine, replaces the shared file (even with the same
+# version), and macOS then cannot identify a seat still running the old file, so the privacy grants
+# it runs under (the worktree volume) stop working. A copy that only up writes is never replaced
+# under a running seat. Sets CLAUDE_SRC (the shared file), CLAUDE_VERSION and CLAUDE_COPY, or
+# CLAUDE_ERR and returns 1.
+resolve_claude() {
+  local c
+  CLAUDE_ERR=""
+  if ! c=$(command -v claude); then
+    CLAUDE_ERR="claude not found on PATH (or caught in the middle of a reinstall); retry up"
+    return 1
+  fi
+  if ! CLAUDE_SRC=$(ruby -e 'print File.realpath(ARGV[0])' "$c" 2>/dev/null) || [ ! -x "$CLAUDE_SRC" ]; then
+    CLAUDE_ERR="$c does not lead to an executable (Claude Code may be in the middle of a reinstall); retry up"
+    return 1
+  fi
+  CLAUDE_VERSION=$("$CLAUDE_SRC" --version 2>/dev/null | awk 'NR == 1 { print $1 }')
+  if ! [[ $CLAUDE_VERSION =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+    CLAUDE_ERR="could not read the version of $CLAUDE_SRC; retry up"
+    return 1
+  fi
+  CLAUDE_COPY="$STATE/bin/claude-$CLAUDE_VERSION/claude"
+}
+
+# Make the copy if it is not there yet: an APFS clone (cp -c: a file of its own that shares the
+# original's blocks) where the state folder is on the same file system, else a plain copy. It is
+# checked before it is moved into place, so a seat never runs a partial copy. Any failure stops up:
+# falling back to the shared file would bring the problem back without a sign.
+ensure_claude_copy() {
+  local dir tmp how
+  [ -x "$CLAUDE_COPY" ] && return 0
+  dir=$(dirname "$CLAUDE_COPY")
+  tmp="$dir/.claude.partial.$$"
+  mkdir -p "$dir" 2>/dev/null || die "could not copy claude to $dir (cannot create the folder)"
+  how=clone
+  if ! cp -c "$CLAUDE_SRC" "$tmp" 2>/dev/null; then
+    rm -f "$tmp"
+    how=copy
+    cp "$CLAUDE_SRC" "$tmp" 2>/dev/null || { rm -f "$tmp"; die "could not copy $CLAUDE_SRC to $dir (no space, or no permission?)"; }
+  fi
+  if [ "$(stat -f %z "$tmp")" != "$(stat -f %z "$CLAUDE_SRC")" ] ||
+    [ "$("$tmp" --version 2>/dev/null | awk 'NR == 1 { print $1 }')" != "$CLAUDE_VERSION" ]; then
+    rm -f "$tmp"
+    die "the copy of claude in $dir does not match $CLAUDE_SRC; retry up"
+  fi
+  chmod 0555 "$tmp"
+  # Another up may have made the copy meanwhile, and its seat may already run it: never replace it.
+  # macOS mv -n exits 0 even when it does not move, so the temp file still being there is the sign.
+  mv -n "$tmp" "$CLAUDE_COPY" || { rm -f "$tmp"; die "could not copy claude to $CLAUDE_COPY"; }
+  if [ -e "$tmp" ]; then
+    rm -f "$tmp"
+    [ -x "$CLAUDE_COPY" ] || die "$CLAUDE_COPY exists but is not a runnable copy of claude; remove that exact file, then retry up"
+    return 0
+  fi
+  echo "$how" >"$dir/.how"
+  echo "  copied claude $CLAUDE_VERSION to $CLAUDE_COPY ($how)"
+}
+
+# The executable a running seat's claude process runs (its real path), REPLACED when the file at
+# that path is no longer the one it runs (another file put in its place, or its folder gone), "-"
+# when no claude runs in the pane, "?" when it cannot be told. lsof keeps printing the old path
+# after a replacement, so the device and inode are what is compared.
+seat_exe() {
+  local tty pid line
+  tty=$(tmux display-message -p -t "=$(session "$1"):" '#{pane_tty}' 2>/dev/null) || { echo "?"; return; }
+  pid=$(ps -t "${tty#/dev/}" -o pid=,comm= | awk '$2 ~ /(^|\/)claude(\.exe)?$/ { print $1; exit }')
+  [ -n "$pid" ] || { echo "-"; return; }
+  # "<device, hex> <inode> <path>" of the claude executable it runs; stat gives the device in decimal.
+  line=$(lsof -a -p "$pid" -d txt -FDin 2>/dev/null |
+    awk '/^D/ { d = substr($0, 2) } /^i/ { i = substr($0, 2) } /^n/ { n = substr($0, 2); if (n ~ /(^|\/)claude(\.exe)?$/) { print d " " i " " n; exit } }')
+  [ -n "$line" ] || { echo "?"; return; }
+  set -- $line
+  if [ "$(stat -f '%d %i' "${line#* * }" 2>/dev/null)" = "$(printf '%d' "$1" 2>/dev/null) $2" ]; then echo "${line#* * }"; else echo REPLACED; fi
 }
 
 # True when a claude process is attached to the seat's terminal. The pane's own command name is
@@ -538,6 +639,24 @@ send_one() {
   tmux send-keys -t "=$sess:" Enter
 }
 
+# One messages.log field, escaped so a record stays on one line and the terminal reading the log
+# with tail cannot be driven by the message (an ESC or CSI sequence could retitle it or hide lines;
+# a bidi override could reorder how the line shows): backslash becomes \\, newline \n, CR \r, tab
+# \t, and every other C0 control, DEL, C1 control (U+0080-U+009F) and bidi embedding, override or
+# isolate (U+202A-U+202E, U+2066-U+2069) is written as its UTF-8 bytes in \xHH form. This goes by
+# code point, not by byte: the check mark is E2 9C 93, and 0x9C alone is a C1 control. Text that is
+# not valid UTF-8 has every byte from 0x80 up escaped instead, so a stray 0x9B cannot act as CSI.
+# Reversible: printf '%b' gives back the original. --disable-gems: RubyGems is not needed, and its
+# loading has failed in an unreadable working directory. If ruby fails, a fixed marker is logged
+# rather than an empty field.
+log_field() {
+  ruby --disable-gems -e '
+    s = ARGV[0].dup.force_encoding("UTF-8")
+    re = s.valid_encoding? ? /[\\\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/ : (s = s.b; /[\\\x00-\x1f\x7f-\xff]/n)
+    esc = { "\\" => "\\\\", "\n" => "\\n", "\r" => "\\r", "\t" => "\\t" }
+    print s.gsub(re) { |c| esc[c] || c.bytes.map { |b| format("\\x%02X", b) }.join }' -- "$1" || printf '%s' '<log_field failed>'
+}
+
 cmd_say() {
   local to=${1:-} from=${TEAM_ROLE:-owner} text r rc=0
   [ -n "$to" ] && [ $# -ge 2 ] || die "usage: say <role|all> <message...>"
@@ -555,9 +674,11 @@ cmd_say() {
     [ "$to" = "$from" ] && die "a seat cannot message itself"
     send_one "$to" "$text" || rc=1
   fi
-  # The log records what happened, not what was attempted: a refused delivery says so.
-  printf '%s\t%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%dT%H:%M:%S')" "$from" "$to" \
-    "$([ "$rc" -eq 0 ] && echo delivered || echo NOT-DELIVERED)" "$*" >>"$LOG"
+  # The log records what happened, not what was attempted: a refused delivery says so. One line
+  # per say (all included), in the format the README documents under "The message log". $to is a
+  # role id or all; $from comes from TEAM_ROLE, which nothing validates, so it is escaped too.
+  printf '%s\t%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%dT%H:%M:%S')" "$(log_field "$from")" "$to" \
+    "$([ "$rc" -eq 0 ] && echo delivered || echo NOT-DELIVERED)" "$(log_field "$*")" >>"$LOG"
   return "$rc"
 }
 
