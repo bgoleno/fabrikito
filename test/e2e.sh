@@ -10,7 +10,14 @@ SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 S=$SRC/factory.sh
 T=$(mktemp -d "${TMPDIR:-/tmp}/team-e2e.XXXX"); T=$(cd "$T" && pwd); mkdir -p $T/bin $T/tmux $T/local
 ROOT="Projects/_teamtest-$$"; VOL=${TEST_VOLUME:-}
-unset TMUX CLAUDE_CONFIG_DIR; export TMUX_TMPDIR=$T/tmux TEAM_STATE_DIR=$T/state
+# Start from a clean environment. Run from a seat, this shell inherits what the seat's launcher
+# and claude set there (DISABLE_AUTOUPDATER, TEAM_*, CLAUDE* including CLAUDE_CONFIG_DIR, TMUX*), and the test's tmux server
+# and everything it starts would inherit it in turn: the leak check on DISABLE_AUTOUPDATER below
+# would fail only when run from a seat, and a stand-in seat could reach the real seat's tmux or
+# messaging socket (#75). This is the one list of what is cleared; add any new launcher variable here.
+# It runs before anything below exports a TEAM_* variable (TEAM_VIEW=0), or it would clear it.
+for v in $(compgen -e); do case $v in DISABLE_AUTOUPDATER|TEAM_*|CLAUDE*|TMUX*) unset "$v" ;; esac; done
+export TMUX_TMPDIR=$T/tmux TEAM_STATE_DIR=$T/state
 # No run may drive iTerm (#93). A stand-in osascript first on PATH records every call and does
 # nothing, and the run fails at the end if it was called: `up` opens a real iTerm window unless told
 # not to, every run left its windows on the user's screen, and enough of them used up every pty on
@@ -18,14 +25,22 @@ unset TMUX CLAUDE_CONFIG_DIR; export TMUX_TMPDIR=$T/tmux TEAM_STATE_DIR=$T/state
 # (TEAM_VIEW=0), and every up says --no-view too, so dropping either one still opens no window.
 printf '#!/bin/sh\necho "osascript $*" >> %s/osascript.log\nexit 1\n' "$T" > $T/bin/osascript; chmod +x $T/bin/osascript
 export PATH=$T/bin:$PATH TEAM_VIEW=0
-# Stopped early (a gate timeout kills this test's process group): stop the private tmux server,
-# which has left that group, and remove what the test made, as the cleanup at the end does.
-on_signal() {
+# Stopped early (a gate timeout kills this test's process group, a setup step exits, set -u trips):
+# stop the private tmux server, which has left that group, and remove what the test made, as the
+# cleanup at the end does. Not every assertion ran, so the exit status is never 0. The exit code is
+# what a gate reads (repo.gate, lib/stop_gate.sh): only a run that reaches the end with fail=0 is 0.
+finished=
+on_exit() {
+  local rc=$?
+  [ -n "$finished" ] && return
   tmux kill-server 2>/dev/null
   for w in "$VOL/$ROOT"/*; do [ -d "$w" ] && git -C $T/repo worktree remove --force "$w" 2>/dev/null; done
-  rmdir "$VOL/$ROOT" 2>/dev/null; rm -rf "$T"; exit 143
+  rmdir "$VOL/$ROOT" 2>/dev/null; rm -rf "$T"
+  echo "ABORTED before the end (exit $rc): pass=${pass:-0} fail=${fail:-0}" >&2
+  [ "$rc" -eq 0 ] && rc=1; exit "$rc"
 }
-trap on_signal TERM INT
+trap on_exit EXIT
+trap 'exit 143' TERM INT
 pass=0; fail=0; ok(){ echo "PASS $1"; pass=$((pass+1)); }; bad(){ echo "FAIL $1"; fail=$((fail+1)); }
 # throwaway repo with a "github" slug the origin URL contains
 git init -q --bare $T/local/origin.git; git clone -q $T/local/origin.git $T/repo 2>/dev/null
@@ -278,7 +293,7 @@ for p in "$RT/state/settings/**" "$RT/state/launch/**" "$RT/state/prompts/**" "$
   rules $T/state/settings/w1.json deny | grep -qxF "Edit(/$p)" || missing="$missing $p"
 done
 [ -z "$missing" ] && ok "w1.json: Edit deny on every protected path" || { bad "protected paths missing:$missing"; rules $T/state/settings/w1.json deny; }
-rules $T/state/settings/w1.json deny | grep -qE "state/notes|Edit\(//$RT/state/\*\*\)|Edit\(//$RHC/\*\*\)" && bad "protected paths are too wide (state notes, whole state dir or whole ~/.claude)" || ok "protected paths leave state/notes and the rest of ~/.claude writable"
+rules $T/state/settings/w1.json deny | grep -qE "state/notes/\*\*|state/notes/w1\.md|Edit\(//$RT/state/\*\*\)|Edit\(//$RHC/\*\*\)" && bad "protected paths are too wide (all notes or the seat's own, whole state dir or whole ~/.claude)" || ok "protected paths leave the seat's own note and the rest of ~/.claude writable"
 # Claude Code puts the worktrees it makes (--worktree, subagents with isolation: worktree) under
 # <repo>/.claude/worktrees/, so no deny may cover that folder.
 # $T is the path as configured; on macOS it runs through the /var symlink, so its real path ($RT)
@@ -303,6 +318,8 @@ Bash(git push */main *)'
 [ "$(rules $T/state/settings/em.json ask | grep '^Bash(git push ')" = "$base_rules" ] && ok "ask on any push to the base branch (main, from origin/main): the 8 patterns" || { bad "base-branch ask"; rules $T/state/settings/em.json ask; }
 chk=$($S -c $T/team.yaml check 2>&1)
 echo "$chk" | grep -qE "^em +Manager .* bypassPermissions " && echo "$chk" | grep -qE "^w1 +Worker One .* default " && ok "check: MODE column per role" || { bad "check MODE column"; echo "$chk"; }
+echo "$chk" | grep -qE "^w1 +Worker One +tt-w1 +sonnet +low " && echo "$chk" | grep -qE "^em +Manager +tt-em +\(inherit\) +\(inherit\) " \
+  && ok "check: MODEL and EFFORT columns per role (a role's own, or inherit)" || { bad "check MODEL/EFFORT columns"; echo "$chk"; }
 echo "$chk" | grep -qF "warning: seat-to-seat messages will be held. Prompting for permissions: w1 (default). Bypassing them: em (bypassPermissions), w2 (bypassPermissions)." && ok "check: a team whose seats fall into both message classes is warned, naming each" || { bad "check: held-message warning on the mixed test team"; echo "$chk" | grep -A2 "^warning"; }
 sect() { echo "$chk" | sed -n "/^\[$1\]/,/^\[/p"; }
 sect w1 | grep -qF "deny : Read(//**/.env), Bash(touch tt-deny*), Bash(gh pr merge *)" && ok "check: w1's merged deny list" || { bad "check w1 deny"; sect w1; }
@@ -328,8 +345,45 @@ echo "$chk" | grep -qF "add to" && ok "check: says the rules add to the user's a
 hook=$(ruby -rjson -e 'j = JSON.parse(File.read(ARGV[0])); h = j.dig("hooks", "Stop", 0, "hooks", 0) || {}; puts [j["hooks"]["Stop"].size, h["type"], h["command"], *h["args"], h["timeout"], j["disableAllHooks"].inspect].join(" | ")' $T/state/settings/w1.json 2>&1)
 [ "$hook" = "1 | command | $SRC/lib/stop_gate.sh | $T/state | w1 | $VOL/$ROOT/team-w1 | make check | 120 | 2 | 150 | false" ] && ok "w1.json: one Stop hook running stop_gate.sh with state, role, workdir, gate, timeout, max blocks; disableAllHooks false" || { bad "w1 Stop hook"; echo "$hook"; }
 # w2 has not started yet at this point (its legacy worktree is refused above): ask the builder.
-nohooks() { ruby -rjson -e 'j = JSON.parse(STDIN.read); exit(j.key?("hooks") || j.key?("disableAllHooks") ? 1 : 0)'; }
-nohooks < $T/state/settings/em.json && TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml settings w2 | nohooks && ok "roles without gate_on_stop (em, w2) get no hooks and no disableAllHooks" || bad "a role without gate_on_stop got hooks"
+nostop() { ruby -rjson -e 'j = JSON.parse(STDIN.read); exit((j["hooks"] || {}).key?("Stop") ? 1 : 0)'; }
+nostop < $T/state/settings/em.json && TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml settings w2 | nostop && ok "roles without gate_on_stop (em, w2) get no Stop hook" || bad "a role without gate_on_stop got a Stop hook"
+# Every seat gets one SessionStart hook (#5), for every start source (no matcher: startup, resume,
+# clear and compact), that shows it its progress note, branch and recent commits.
+sshook() { ruby -rjson -e 'j = JSON.parse(STDIN.read); a = (j["hooks"] || {})["SessionStart"] || []; h = (a[0] || {}).fetch("hooks", [])[0] || {}
+  puts [a.size, (a[0] || {}).key?("matcher"), h["type"], h["command"], *h["args"], h["timeout"], j["disableAllHooks"].inspect].join(" | ")' 2>&1; }
+ss_em=$(sshook < $T/state/settings/em.json); ss_w1=$(sshook < $T/state/settings/w1.json); ss_w2=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml settings w2 | sshook)
+# disableAllHooks: false only for the gated seat (w1): the note is a convenience and does not
+# override a user who switched every hook off; the gate is a control and does.
+[ "$ss_em" = "1 | false | command | $SRC/lib/session_start.sh | $T/state | em | $T/proj | 10 | nil" ] \
+  && [ "$ss_w1" = "1 | false | command | $SRC/lib/session_start.sh | $T/state | w1 | $VOL/$ROOT/team-w1 | 10 | false" ] \
+  && [ "$ss_w2" = "1 | false | command | $SRC/lib/session_start.sh | $T/state | w2 | $VOL/$ROOT/team-w2 | 10 | nil" ] \
+  && ok "every seat (em, w1, w2): one SessionStart hook running session_start.sh with state, role, workdir; disableAllHooks false only for gated w1" || { bad "SessionStart hook"; echo "$ss_em"; echo "$ss_w1"; echo "$ss_w2"; }
+# A seat may write its own note without a prompt (it is outside its working directory), and only its
+# own: every other seat's note is denied, as exact paths in both spellings, since a note is put into
+# its seat's context at each start.
+na=""; for f in em w1; do for o in em w1 w2; do for sp in "$RT" "$T"; do
+  if [ $f = $o ]; then rules $T/state/settings/$f.json allow | grep -qxF "Edit(/$sp/state/notes/$o.md)" || na="$na $f-allows-$o($sp)"
+    rules $T/state/settings/$f.json deny | grep -qxF "Edit(/$sp/state/notes/$o.md)" && na="$na $f-denies-own($sp)"
+  else rules $T/state/settings/$f.json deny | grep -qxF "Edit(/$sp/state/notes/$o.md)" || na="$na $f-denies-$o($sp)"
+    rules $T/state/settings/$f.json allow | grep -qF "notes/$o.md" && na="$na $f-allows-other-$o"; fi
+done; done; done
+rules $T/state/settings/w1.json deny | grep -qF "state/notes/**" && na="$na notes/**-denied"
+[ -z "$na" ] && ok "em.json, w1.json: Edit allowed on the seat's own note, denied on every other seat's (both spellings, exact paths)" || { bad "note rules:$na"; rules $T/state/settings/w1.json deny | grep notes; rules $T/state/settings/w1.json allow; }
+sect em | grep -qF "added: Edit deny on" && sect em | grep -qF ", Edit allow on its own progress note and deny on the other seats'" && ! sect em | grep -E "^ +(allow|deny) *:" | grep -qF notes \
+  && ok "check: the note allow is listed as added by the launcher, not among the team's allow rules" || { bad "check: note allow line"; sect em; }
+# A user who switched every hook off keeps that choice in seats without a gate, which then get no
+# note: check says which. Throwaway config folders, so the owner's own settings play no part.
+mkdir -p $T/cfgoff $T/cfgon && echo '{"disableAllHooks": true}' > $T/cfgoff/settings.json && echo '{}' > $T/cfgon/settings.json
+hk=$(CLAUDE_CONFIG_DIR=$T/cfgoff $S -c $T/team.yaml check 2>&1 | grep "^hooks ")
+[ "$hk" = "hooks     : disableAllHooks is true in $T/cfgoff/settings.json, so em, w2 get no session-start note (a gated seat turns hooks back on for its gate)" ] \
+  && ! CLAUDE_CONFIG_DIR=$T/cfgon $S -c $T/team.yaml check 2>&1 | grep -q "^hooks " && ! CLAUDE_CONFIG_DIR=$T/no-such-cfg $S -c $T/team.yaml check 2>&1 | grep -q "^hooks " \
+  && ok "check: a hooks line naming the ungated seats when the user's settings disable all hooks, none otherwise" || { bad "check: hooks line"; echo "$hk"; }
+[ -d $T/state/notes ] && ok "up makes the notes folder under the state folder" || bad "no $T/state/notes after up"
+grep -qF "$T/state/notes/em.md" $T/state/prompts/em.md && ok "the rendered prompt names the seat's own note" || bad "the prompt does not name $T/state/notes/em.md"
+# The allow covers Edit (and Write), not a Bash redirect, which prompts outside bypass (qa, live on #90).
+grep -qF "Write it with the Write or Edit tool, not Bash" $T/state/prompts/em.md && ok "the prompt says to write the note with Write or Edit, not Bash" || bad "the prompt does not say how to write the note"
+grep -qF "progress note" $T/state/prompts/em.kickoff && ok "the default kickoff asks for the note's task and next step" || { bad "kickoff and the note"; cat $T/state/prompts/em.kickoff; }
+echo "Task: survive a restart" > $T/state/notes/em.md
 rules $T/state/settings/w1.json deny | grep -qxF "Edit(/$RT/state/gate/**)" && ok "the gate's own state (its failure counter) is Edit-protected" || bad "gate state not protected"
 echo "$chk" | grep -qE "^w1 .* on-stop " && echo "$chk" | grep -qE "^em .* - +[^ ]" && ok "check: GATE column (on-stop for w1 only)" || { bad "check GATE column"; echo "$chk" | head -14; }
 echo "$chk" | grep -qF "make check (timeout 120s; a seat may stop after 2 failed gates in a row)" && ok "check: gate command, timeout and limit in the header" || bad "check: gate header"
@@ -337,6 +391,7 @@ echo "$chk" | grep -qF "make check (timeout 120s; a seat may stop after 2 failed
 chmod u+w $T/state/settings/em.json && echo '{"permissions":{}}' > $T/state/settings/em.json && chmod 444 $T/state/settings/em.json
 $S -c $T/team.yaml down --yes em >/dev/null; TEAM_VIEW=0 $S -c $T/team.yaml up --no-view em >/dev/null 2>&1
 [ "$(perms $T/state/settings/em.json)" = "$want_em" ] && [ "$(stat -f %Lp $T/state/settings/em.json)" = 444 ] && ok "up rewrites a stale settings file" || { bad "up rewrites settings"; perms $T/state/settings/em.json; }
+[ "$(cat $T/state/notes/em.md 2>&1)" = "Task: survive a restart" ] && ok "a seat's progress note survives down and up" || { bad "progress note after down/up"; ls -la $T/state/notes 2>&1; }
 echo "--- say"
 TEAM_ROLE=em $S -c $T/team.yaml say w1 "hello w1 from em" && sleep 1
 echo "--- kickoff label"
@@ -853,6 +908,38 @@ $SRC/lib/stop_gate.sh $T/gstate w9 $T/g $T/gate.sh 30 2 </dev/null >/dev/null 2>
 printf '#!/bin/sh\nsleep 60 &\necho $! > %s/bgpid\nsleep 60\n' $T > $T/slow.sh; chmod +x $T/slow.sh
 t0=$(date +%s); gate s3 $T/g $T/slow.sh 2; t1=$(date +%s); sleep 1
 [ $rc = 2 ] && echo "$err" | grep -q "timed out after 2s" && ! echo "$err" | grep -q "Terminated" && [ $((t1 - t0)) -lt 15 ] && ! kill -0 "$(cat $T/bgpid)" 2>/dev/null && ok "a gate past its timeout is killed with its children, and the stop is sent back" || { bad "gate timeout (rc=$rc, $((t1 - t0))s)"; echo "$err"; }
+echo "--- session start hook (lib/session_start.sh, run directly with hook input on stdin)"
+# sst <workdir>: runs the hook for role w9 with state $T/sstate; sets rc, out, err.
+sst() { printf '{"session_id":"s1","source":"%s"}' "${SRC_KIND:-startup}" | $SRC/lib/session_start.sh $T/sstate w9 "$1" >$T/sout 2>$T/serr; rc=$?; out=$(cat $T/sout); err=$(cat $T/serr); }
+mkdir -p $T/s && git -C $T/s init -q && git -C $T/s switch -q -c work && git -C $T/s commit -q --allow-empty -m "first commit" && git -C $T/s commit -q --allow-empty -m "second: the latest"
+sst $T/s; [ $rc = 0 ] && [ -z "$err" ] && echo "$out" | grep -qF "no progress note yet" && echo "$out" | grep -qF "$T/sstate/notes/w9.md" \
+  && ok "no note yet: exit 0, says so and names the file to write" || { bad "no note (rc=$rc)"; echo "$out$err"; }
+mkdir -p $T/sstate/notes && printf 'Task: #5 progress notes\nNext: open the PR\n' > $T/sstate/notes/w9.md && touch $T/s/dirty.txt
+sst $T/s; [ $rc = 0 ] && [ -z "$err" ] && echo "$out" | grep -qxF "Task: #5 progress notes" && echo "$out" | grep -qxF "Next: open the PR" && echo "$out" | grep -qF "Branch: work" \
+  && echo "$out" | grep -qF "second: the latest" && echo "$out" | grep -qF "first commit" && echo "$out" | grep -qF "?? dirty.txt" \
+  && ok "with a note: the note, the branch, recent commits and uncommitted files" || { bad "session start output (rc=$rc)"; echo "$out$err"; }
+SRC_KIND=compact sst $T/s; [ $rc = 0 ] && echo "$out" | grep -qxF "Task: #5 progress notes" && ok "the output does not depend on the start source (compact, as after a compaction)" || { bad "compact (rc=$rc)"; echo "$out"; }
+git -C $T/s switch -q --detach; sst $T/s; [ $rc = 0 ] && echo "$out" | grep -qE "Branch: \(detached at [0-9a-f]+\)" && ok "a detached HEAD is named as such" || { bad "detached (rc=$rc)"; echo "$out"; }
+sst $T/proj; [ $rc = 0 ] && echo "$out" | grep -qxF "Task: #5 progress notes" && echo "$out" | grep -qF "not a git work tree" && ok "a workdir that is not a git work tree: the note, and no git lines" || { bad "non-repo workdir (rc=$rc)"; echo "$out$err"; }
+sst $T/no-such-dir; [ $rc = 0 ] && echo "$out" | grep -qxF "Task: #5 progress notes" && ok "a missing workdir: the note still, exit 0" || { bad "missing workdir (rc=$rc)"; echo "$out$err"; }
+# A note that grew past its purpose is cut, so it cannot flood the seat's context.
+ruby -e '300.times { |i| puts "line #{i} " + "x" * 400 }' > $T/sstate/notes/w9.md
+sst $T/s; [ $rc = 0 ] && [ "$(printf %s "$out" | wc -c | tr -d ' ')" -lt 9000 ] && echo "$out" | grep -qF "note truncated" && echo "$out" | grep -qF "second: the latest" \
+  && ok "a long note is truncated (output under 9000 bytes), and the git lines still follow" || { bad "long note ($(printf %s "$out" | wc -c) bytes)"; echo "$out" | tail -5; }
+printf 'caf\xc3\xa9 ok\nbad \xff byte\n' > $T/sstate/notes/w9.md
+LC_ALL=C sst $T/s; [ $rc = 0 ] && echo "$out" | grep -qF "café ok" && ok "a note with UTF-8 and an invalid byte is shown under LC_ALL=C, exit 0" || { bad "non-ASCII note (rc=$rc)"; echo "$out$err"; }
+# Terminal escapes in a note or a commit subject come out as plain text: C0 controls other than tab
+# and newline, and DEL, are dropped from everything the hook prints.
+printf 'clip \033]52;c;ZXZpbA==\007 title \033]0;x\007 del \177 tab\tkept\n' > $T/sstate/notes/w9.md
+git -C $T/s commit -q --allow-empty -m "$(printf 'subject \033[31mred\033[0m end')"
+sst $T/s; [ $rc = 0 ] && ! LC_ALL=C grep -q "$(printf '[\001-\010\013-\037\177]')" $T/sout && grep -qF "$(printf 'clip ]52;c;ZXZpbA== title ]0;x del  tab\tkept')" $T/sout \
+  && grep -qF "subject [31mred[0m end" $T/sout && ok "control characters are stripped from the note and the git output; a tab is kept" || { bad "control characters in hook output (rc=$rc)"; od -c $T/sout | grep -E '033|007|177' | head -3; }
+# A git status past its own limit (4s) is cut, and the note still arrives: Claude Code drops all of a
+# hook's output when the hook itself runs past its timeout (10s).
+mkdir -p $T/slowgit && printf '#!/bin/sh\ncase " $* " in *" status "*) exec sleep 30;; esac\nexec %s "$@"\n' "$(command -v git)" > $T/slowgit/git && chmod +x $T/slowgit/git
+t0=$(date +%s); PATH=$T/slowgit:$PATH sst $T/s; t1=$(date +%s)
+[ $rc = 0 ] && [ $((t1 - t0)) -lt 9 ] && echo "$out" | grep -qF "clip" && echo "$out" | grep -qF "git status did not finish within 4s" && echo "$out" | grep -qF "subject" \
+  && ok "a git status that hangs is cut at 4s (the hook took $((t1 - t0))s): the note and recent commits still print" || { bad "slow git status (rc=$rc, $((t1 - t0))s)"; echo "$out"; }
 echo "--- the seats' claude copy: replaced, failed, mid-reinstall"
 cc -o $CP.new $T/c.c && mv $CP.new $CP
 $S -c $T/team.yaml status | grep -E "^em " | grep -q REPLACED && ok "status: a seat whose claude file was replaced under it shows REPLACED" || { bad "status REPLACED"; $S -c $T/team.yaml status; }
@@ -877,11 +964,20 @@ for r in $(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml ids); do
   n=$(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render "$r" 2>/dev/null | wc -l | tr -d ' ')
   [ "${n:-0}" -gt 0 ] && [ "$n" -lt 200 ] && ok "example seat $r renders a prompt under 200 lines ($n)" || bad "example seat $r renders a prompt of ${n:-?} lines (limit 199)"
 done
+echo "--- the example team sets effort per role"
+# Effort is the main cost and depth control: the manager coordinates at medium, the seats that
+# write, test and review code run at high. Read from the flags each seat would be launched with.
+for pair in em:medium tl:high fs1:high fs2:high qa:high sec:high; do
+  r=${pair%%:*}; want=${pair#*:}
+  got=$(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml claude_args "$r" 2>&1 | grep -A1 -x -- --effort | tail -1)
+  [ "$got" = "$want" ] && ok "example seat $r launches with --effort $want" || bad "example seat $r launches with --effort '${got}' (want $want)"
+done
 echo "--- prompts render the same whatever the locale"
 # Under LC_ALL=C, or with no locale at all (cron, env -i), ruby would read files as US-ASCII and the
 # first non-ASCII byte in a prompt would stop the render (#72). The output must not depend on it.
-# env -i drops TEAM_SCRIPT and TEAM_LOG, which the prompts name, so every run gets the same values.
-pin="TEAM_SCRIPT=factory.sh TEAM_LOG=messages.log"
+# env -i drops TEAM_SCRIPT, TEAM_LOG and TEAM_STATE_DIR, which the prompts name (the state folder
+# through @@NOTE@@), so every run gets the same values.
+pin="TEAM_SCRIPT=factory.sh TEAM_LOG=messages.log TEAM_STATE_DIR=$T/state"
 for r in $(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml ids); do
   want=$(env $pin LC_ALL=en_US.UTF-8 ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render "$r" 2>&1)
   c=$(env $pin LC_ALL=C ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render "$r" 2>&1); rc=$?
@@ -897,3 +993,4 @@ for w in team-w1 team-w2; do git -C $T/repo worktree remove --force $VOL/$ROOT/$
 rmdir $VOL/$ROOT 2>/dev/null; [ ! -e $VOL/$ROOT ] && ok "test folder removed from the volume" || bad "test folder removed from the volume ($(ls -A $VOL/$ROOT 2>&1 | head -3))"
 rm -rf "$T"
 echo "RESULT pass=$pass fail=$fail"
+finished=1; [ "$fail" -eq 0 ] && [ "$pass" -gt 0 ]
