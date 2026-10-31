@@ -248,6 +248,11 @@ message. Anything else fails closed, with a reason:
   recognised as ready"), where the Enter would pick an answer;
 - an input box that already holds text (someone typing, or an earlier message that was not sent);
 - a pane in copy mode (someone scrolling);
+- Claude Code's diff panel notice ("Resize your terminal to at least 110 columns to show the diff
+  panel") in a pane of 13 rows or fewer, where it pushes the end of the input box off the screen.
+  With 16 rows or more the notice is harmless and `say` delivers (at 14 or 15 only a one-line
+  message fits). Widen the pane to 110 columns, give it 16 rows or more, or close the diff panel in
+  the seat;
 - a screen tmux cannot read.
 
 Attach to the seat, deal with it, and send again. If the box does not show the message after the paste,
@@ -398,6 +403,14 @@ What the rules cannot do:
 - Paths in Read and Edit rules: `//path` is absolute, `~/path` is under the home folder, `./path` or a
   bare name is relative to the seat's folder. A single leading `/` anchors at the folder that holds the
   generated file, so it is refused.
+- Claude Code matches permission rules against each part of a compound command (`;`, `&&`, `|`), but
+  against the whole command text when it can't parse the command (for example `"$(...)"` in an
+  argument, or `${...}` next to quotes). In default mode, a subshell `( ... )` or a command it can't
+  parse prompts even when no rule matches (the reason varies: "can't be checked before it runs",
+  "shell operators that require approval"); in bypass mode it prompts only when a rule matches
+  (measured on 2.1.316, [#103](../../issues/103); other modes not measured). So seats run `git push`
+  as its own simple command: chained with an unparseable part, a `main` elsewhere in the command makes
+  it match the base-branch ask.
 
 The [sandbox](https://code.claude.com/docs/en/sandboxing) is the OS-level control that would hold
 whatever the command text, but the launcher does not turn it on: seats run without one unless settings

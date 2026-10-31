@@ -61,6 +61,8 @@ printf '#!/bin/sh\necho "$TEAM_ROLE $(pwd -P) env=$(test -f .env.local && echo y
 #           any text), mixed (typed text and the dim suggestion), mention (the @-mention list drawn
 #           above the box while its last word starts with @, no row highlighted, as after a paste),
 #           mentionsel (text "sel @sr" with the list's first row highlighted: Enter completes it)
+#           cut (the screen ends at the input row: no bottom rule and no footer, as a pane too
+#           short for what is drawn above the box)
 # A submitted line that starts with ! is run by /bin/sh the way Claude Code's Bash tool runs a
 # command: in a child that leaves the pane's terminal (setsid), so the child has no tty of its own
 # and only the stand-in, its parent, holds the pane's tty.
@@ -148,6 +150,7 @@ static void draw(void) {
   if (blen == 0) printf(sticky || !strcmp(mode, "suggest") ? "\033[2mrun the tests\033[0m" : "\033[2mTry \"something\"\033[0m");
   for (size_t i = 0; i < blen; i++) { if (buf[i] == '\n') printf("\r\n  "); else putchar(buf[i]); }
   if (blen && sticky) printf(" \033[2mrun the tests\033[0m");
+  if (!strcmp(mode, "cut")) { fflush(stdout); return; }
   printf("\r\n%s\r\n", RULE);
   if (!strcmp(mode, "below")) printf("  \xe2\x9d\xaf suggestion one\r\n    suggestion two\r\n");
   printf("  SL line one\r\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle)\r\n");
@@ -631,7 +634,7 @@ echo "--- say delivers only to a seat showing its input box"
 # with no numbers and no key hint: any dialog say does not know must fail closed too.
 roles=""
 # em is a seat here too: say takes its sender from TEAM_ROLE=em, which must be a role of the team (#89).
-for r in em pp pm pd ph pu pb pf ps pg px pk pq po pn pz ta tb tc td te; do roles="$roles  $r: { title: Seat $r, workdir: { type: project, path: $T/proj }, prompt_text: \"$r\" }
+for r in em pp pm pd ph pu pb pf ps pg px pk pq po pn pz ta tb tc td te pv pw py; do roles="$roles  $r: { title: Seat $r, workdir: { type: project, path: $T/proj }, prompt_text: \"$r\" }
 "; done
 cat > $T/tp.yaml <<Y
 team: tp
@@ -702,6 +705,13 @@ echo tall > $T/fake-ta-mode.txt; echo tall > $T/fake-te-mode.txt; echo tall-dim 
 echo below > $T/fake-pb-mode.txt; echo prefill > $T/fake-pf-mode.txt; echo swallow > $T/fake-ps-mode.txt
 echo suggest > $T/fake-pg-mode.txt; echo mixed > $T/fake-px-mode.txt; echo sticky > $T/fake-pk-mode.txt
 echo mention > $T/fake-pn-mode.txt; echo mentionsel > $T/fake-pz-mode.txt
+# The diff panel notice (#95), byte for byte as Claude Code 2.1.316 drew it in an 89-column pane on
+# 2026-10-31, then the reset its next row starts with. pv: above a whole input box. pw: the same,
+# in a pane too short for the box under it (the screen ends at the input row). py: above a dialog.
+notice=$(printf '\033[2m\342\225\255%s\033[0m\033[38;5;246m\342\234\225\033[2m\033[39m\342\224\200\342\225\256\n\342\224\202\033[0m \033[38;5;246mResize your terminal to at least 110 columns to show the diff panel\033[39m%19s\033[2m\342\224\202\n\342\225\260%s\342\225\257\n\033[0m' \
+  "$(printf '\342\224\200%.0s' $(seq 85))" "" "$(printf '\342\224\200%.0s' $(seq 87))")
+printf '%s\n' "$notice" > $T/fake-pv-output.txt; cp $T/fake-pv-output.txt $T/fake-pw-output.txt; echo cut > $T/fake-pw-mode.txt
+printf '%s\n%s\n' "$notice" "$fake_prompt" > $T/fake-py-prompt.txt
 { printf '%s\n' "$fake_prompt"; for i in $(seq 1 5); do echo "later output line $i"; done; } > $T/fake-pq-output.txt
 cat > $T/fake-po-output.txt <<'M'
 ⏺ The permission prompt asked "Do you want to proceed?" and the cursor sat on "❯ 1. Yes".
@@ -754,6 +764,15 @@ mn=$(tmux capture-pane -p -t '=tp-pn:')
 echo "$mn" | grep -qF "❯ [from em] see @src" && ! echo "$mn" | grep -qF "see @src/" && tail -1 $T/state/messages.log | grep -q "	pn	delivered	see @src$" &&
   ok "say delivers a message ending in an @ word whole (the mention list above the box is not read as footer)" || { bad "say to a seat with the mention list"; echo "$mn" | tail -8; tail -1 $T/state/messages.log; }
 refused pz "input box" "a seat whose box holds text with a highlighted @-mention row (Enter would complete it)"
+# The notice alone is no reason to refuse: with the whole box under it, say delivers. Only when it
+# pushes the end of the box off the pane does say refuse, and then it says why and what clears it.
+tmux capture-pane -p -t '=tp-pv:' | grep -qF "Resize your terminal to at least 110 columns to show the diff panel" && ok "stand-in: pv draws the diff panel notice above its box" || bad "stand-in: no notice on pv"
+delivered pv "a seat with the diff panel notice above its whole input box"
+refused pw "diff panel notice" "a seat whose diff panel notice pushed the end of its input box off a short pane, naming the notice"
+nout=$(TEAM_ROLE=em $S -c $T/tp.yaml say pw "notice wording check" 2>&1)
+echo "$nout" | grep -qF "110 columns wide or more" && echo "$nout" | grep -qF "16 rows or more" && echo "$nout" | grep -qF "close the diff panel" &&
+  ok "the refusal says how to clear the notice (110 columns, 16 rows, or close the panel)" || { bad "notice refusal wording"; echo "$nout"; }
+refused py "screen not recognised as ready" "a seat at a permission prompt under the diff panel notice"
 tmux copy-mode -t '=tp-pq:'; refused pq "copy mode" "a seat whose pane is in copy mode"; tmux send-keys -t '=tp-pq:' -X cancel
 # When tmux cannot read the seat's screen, say cannot tell what is up: it refuses.
 mkdir -p $T/shim && printf '#!/bin/sh\n[ "$1" = capture-pane ] && exit 1\nexec %s "$@"\n' "$(command -v tmux)" > $T/shim/tmux && chmod +x $T/shim/tmux
@@ -1178,6 +1197,12 @@ for r in $(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml ids); do
   n=$(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render "$r" 2>/dev/null | wc -l | tr -d ' ')
   [ "${n:-0}" -gt 0 ] && [ "$n" -lt 200 ] && ok "example seat $r renders a prompt under 200 lines ($n)" || bad "example seat $r renders a prompt of ${n:-?} lines (limit 199)"
 done
+# A push chained with other commands can be matched as one text, when Claude Code cannot split it
+# (an expansion or heredoc in a later part): `git push origin <feature>; gh pr create --base main
+# --body "$(cat <<EOF ...)"` then hits the base-branch ask through the later `main` (#91, #103).
+flat=$(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render fs1 2>&1 | tr '\n' ' ' | tr -s ' ')
+echo "$flat" | grep -qF 'run `git push` as a command of its own, never chained' && echo "$flat" | grep -qF '`gh pr create --base <base>`' \
+  && ok "the shared prompt says to run git push alone, never chained (gh pr create named)" || bad "the shared prompt does not say to run git push alone"
 echo "--- the example team sets effort per role"
 # Effort is the main cost and depth control: the manager coordinates at medium, the seats that
 # write, test and review code run at high. Read from the flags each seat would be launched with.
