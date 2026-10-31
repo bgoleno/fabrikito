@@ -1,6 +1,6 @@
 ---
 name: review-pr
-description: "For a reviewer (a tech lead, or a security engineer asked for a security review): review one PR at its exact head against its issue, run the whole gate there, and post one verdict that names the head: READY or CHANGES NEEDED, blocking and optional points, what was and was not verified. Argument: <PR>."
+description: "For a reviewer (a tech lead, or a security engineer asked for a security review): review one PR at its exact head against its issue, run the whole gate there, and post one verdict naming the head: READY or CHANGES NEEDED, blocking and optional points, what was not verified. Argument: <PR>."
 argument-hint: <PR number or URL>
 ---
 
