@@ -11,6 +11,13 @@ S=$SRC/factory.sh
 T=$(mktemp -d "${TMPDIR:-/tmp}/team-e2e.XXXX"); T=$(cd "$T" && pwd); mkdir -p $T/bin $T/tmux $T/local
 ROOT="Projects/_teamtest-$$"; VOL=${TEST_VOLUME:-}
 unset TMUX CLAUDE_CONFIG_DIR; export TMUX_TMPDIR=$T/tmux TEAM_STATE_DIR=$T/state
+# No run may drive iTerm (#93). A stand-in osascript first on PATH records every call and does
+# nothing, and the run fails at the end if it was called: `up` opens a real iTerm window unless told
+# not to, every run left its windows on the user's screen, and enough of them used up every pty on
+# the machine, so tmux could no longer start the test's own seats. The view is off for the whole run
+# (TEAM_VIEW=0), and every up says --no-view too, so dropping either one still opens no window.
+printf '#!/bin/sh\necho "osascript $*" >> %s/osascript.log\nexit 1\n' "$T" > $T/bin/osascript; chmod +x $T/bin/osascript
+export PATH=$T/bin:$PATH TEAM_VIEW=0
 # Stopped early (a gate timeout kills this test's process group): stop the private tmux server,
 # which has left that group, and remove what the test made, as the cleanup at the end does.
 on_signal() {
@@ -144,7 +151,7 @@ export PATH=$T/bin:$PATH
 # legacy worktree for w2, internal disk
 git -C $T/repo worktree add -q --detach $T/repo/.claude/worktrees/team-w2 origin/main
 echo "--- up (w2 has a legacy worktree, expect it to be refused)"
-out=$($S -c $T/team.yaml up 2>&1); echo "$out" | grep -E "start|error|ATTENTION" | cut -c1-170
+out=$($S -c $T/team.yaml up --no-view 2>&1); echo "$out" | grep -E "start|error|ATTENTION" | cut -c1-170
 echo "$out" | grep -q "start  w1" && ok "w1 started" || bad "w1 started"
 echo "$out" | grep -q "migrate w2" && ok "w2 refused with migrate hint" || bad "w2 refused with migrate hint"
 case "$(git -C $T/repo worktree list)" in *"$VOL/$ROOT/team-w1"*) ok "w1 worktree is on the volume";; *) bad "w1 worktree is on the volume";; esac
@@ -297,6 +304,18 @@ n=$(wc -l < $T/state/messages.log)
 LC_ALL=C TEAM_ROLE=em $S -c $T/team.yaml say w2 $'c locale: csi \xc2\x9b, e-acute \xc3\xa9' >/dev/null 2>&1
 [ "$(wc -l < $T/state/messages.log)" -eq $((n + 1)) ] && [ "$(tail -1 $T/state/messages.log | cut -f5-)" = $'c locale: csi \\xC2\\x9B, e-acute \xc3\xa9' ] &&
   ok "log: under LC_ALL=C the message is escaped, not logged as a failure" || { bad "log: LC_ALL=C"; tail -1 $T/state/messages.log; }
+# Prompt and team files are read as UTF-8 whatever the locale (#72). say validates the team file,
+# which renders every prompt, so a non-ASCII prompt or kickoff must not stop it under LC_ALL=C.
+# A prompt file, not prompt_text: YAML hands back UTF-8 strings in any locale, a plain read does not.
+printf 'em prompt, caf\xc3\xa9 \xe2\x80\xa6\n' > $T/em-u.md
+EMU=$T/em-u.md ruby -pe 'sub(/prompt_text: "em prompt"/) { "prompt: #{ENV["EMU"]}, kickoff: \"start, caf\u00e9 \u2026\"" }' $T/team.yaml > $T/team-u.yaml
+n=$(wc -l < $T/state/messages.log)
+LC_ALL=C TEAM_ROLE=em $S -c $T/team-u.yaml say w2 'from a team with a non-ASCII prompt' >/dev/null 2>&1
+[ "$(wc -l < $T/state/messages.log)" -eq $((n + 1)) ] && tail -1 $T/state/messages.log | grep -qF "from a team with a non-ASCII prompt" \
+  && ok "say under LC_ALL=C with a non-ASCII prompt in the team" || { bad "say under LC_ALL=C with a non-ASCII prompt"; tail -1 $T/state/messages.log; }
+LC_ALL=C ruby $SRC/lib/team_config.rb $T/team-u.yaml render em 2>&1 | grep -qF $'em prompt, caf\xc3\xa9 \xe2\x80\xa6' \
+  && LC_ALL=C ruby $SRC/lib/team_config.rb $T/team-u.yaml kickoff em 2>&1 | grep -qxF $'[from launcher] start, caf\xc3\xa9 \xe2\x80\xa6' \
+  && ok "a non-ASCII prompt and kickoff come out byte for byte under LC_ALL=C" || bad "non-ASCII prompt or kickoff under LC_ALL=C"
 # The sender comes from TEAM_ROLE, which nothing validates: it is escaped like the message.
 n=$(wc -l < $T/state/messages.log)
 TEAM_ROLE=$'e\tm\nx' $S -c $T/team.yaml say w2 "from an odd sender" >/dev/null 2>&1
@@ -328,7 +347,7 @@ tmux capture-pane -p -t '=tt-w1:' | grep -qF "[from owner] unset role from a pan
   ok "say from a tmux pane that is not a seat with TEAM_ROLE unset is still [from owner]" || { bad "say from a non-seat pane: owner label"; tail -1 $T/state/messages.log; }
 echo "--- migrate then up w2"
 $S -c $T/team.yaml migrate w2 2>&1 | grep -E "moved|REFUSE|skip" | cut -c1-150
-$S -c $T/team.yaml up w2 2>&1 | grep -E "start|error" | cut -c1-150
+$S -c $T/team.yaml up --no-view w2 2>&1 | grep -E "start|error" | cut -c1-150
 case "$(git -C $T/repo worktree list)" in *"$VOL/$ROOT/team-w2"*) ok "w2 recreated on the volume";; *) bad "w2 recreated on the volume";; esac
 [ ! -d $T/repo/.claude/worktrees/team-w2 ] && ok "legacy w2 folder gone" || bad "legacy w2 folder gone"
 echo "--- status"; $S -c $T/team.yaml status | cut -c1-150
@@ -342,7 +361,7 @@ echo "--- unmounted volume"
 sed "s#volume: $VOL#volume: /Volumes/NotMounted#" $T/team.yaml > $T/team2.yaml
 $S -c $T/team.yaml down --yes w2 >/dev/null
 echo '  w3: { title: Worker Three, workdir: { type: worktree }, prompt_text: "w3 prompt" }' >> $T/team2.yaml
-rm_out=$($S -c $T/team2.yaml up w3 2>&1); echo "$rm_out" | grep -E "error|skip" | cut -c1-150 | head -2
+rm_out=$($S -c $T/team2.yaml up --no-view w3 2>&1); echo "$rm_out" | grep -E "error|skip" | cut -c1-150 | head -2
 echo "$rm_out" | grep -q "is not mounted; refusing" && ok "unmounted volume refused with a clear error" || { bad "unmounted volume refused"; echo "<<<$rm_out>>>"; }
 [ ! -e /Volumes/NotMounted ] && ok "nothing created at the missing volume" || bad "nothing created at the missing volume"
 echo "--- iTerm view layout (generated script only; iTerm itself is not driven)"
@@ -571,6 +590,11 @@ out=$($S -c $T/v.yaml check 2>&1); rc=$?
 mk; sed -i '' 's/^  em: /  owner: /' $T/v.yaml
 out=$($S -c $T/v.yaml check 2>&1); rc=$?
 [ $rc != 0 ] && echo "$out" | grep -qF "role id 'owner' is reserved" && ok "rejects a role named owner" || { bad "role named owner (rc=$rc)"; echo "$out" | tail -2; }
+printf 'ok\nnot utf-8: \xff\n' > $T/bad-utf8.md
+reject "a prompt file that is not UTF-8" "$T/bad-utf8.md is not valid UTF-8 (line 2)" "" "prompts: { common: $T/bad-utf8.md }"
+mk ""; printf '# \xff\n' >> $T/v.yaml
+out=$($S -c $T/v.yaml check 2>&1); rc=$?
+[ $rc -ne 0 ] && echo "$out" | grep -qF "$T/v.yaml is not valid UTF-8 (line 9)" && ok "rejects a team file that is not UTF-8, naming the line" || { bad "rejects a team file that is not UTF-8 (rc=$rc)"; echo "$out" | tail -2; }
 reject "a non-boolean sessions.claude.plugin" "sessions.claude.plugin must be true or false" "plugin: yes please"
 mk "plugin: false"; pa=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml claude_args em)
 [ $? = 0 ] && ! echo "$pa" | grep -q -- "--plugin-dir" && $S -c $T/v.yaml check 2>&1 | grep -qxF "plugin    : off (sessions.claude.plugin: false)" && ok "plugin: false omits --plugin-dir, and check says off" || { bad "plugin: false"; echo "$pa"; }
@@ -694,6 +718,20 @@ for r in $(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml ids); do
   n=$(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render "$r" 2>/dev/null | wc -l | tr -d ' ')
   [ "${n:-0}" -gt 0 ] && [ "$n" -lt 200 ] && ok "example seat $r renders a prompt under 200 lines ($n)" || bad "example seat $r renders a prompt of ${n:-?} lines (limit 199)"
 done
+echo "--- prompts render the same whatever the locale"
+# Under LC_ALL=C, or with no locale at all (cron, env -i), ruby would read files as US-ASCII and the
+# first non-ASCII byte in a prompt would stop the render (#72). The output must not depend on it.
+# env -i drops TEAM_SCRIPT and TEAM_LOG, which the prompts name, so every run gets the same values.
+pin="TEAM_SCRIPT=factory.sh TEAM_LOG=messages.log"
+for r in $(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml ids); do
+  want=$(env $pin LC_ALL=en_US.UTF-8 ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render "$r" 2>&1)
+  c=$(env $pin LC_ALL=C ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render "$r" 2>&1); rc=$?
+  none=$(env -i PATH="$PATH" HOME="$HOME" $pin ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render "$r" 2>&1); rn=$?
+  [ $rc = 0 ] && [ $rn = 0 ] && [ -n "$want" ] && [ "$c" = "$want" ] && [ "$none" = "$want" ] \
+    && ok "example seat $r renders the same under LC_ALL=C and with no locale" || { bad "example seat $r under LC_ALL=C (rc=$rc) or no locale (rc=$rn)"; echo "$c" | tail -2; }
+done
+echo "--- iTerm"
+[ ! -e $T/osascript.log ] && ok "nothing in this run called osascript, so no iTerm window was opened" || { bad "osascript was called $(wc -l < $T/osascript.log | tr -d ' ') time(s)"; cut -c1-120 $T/osascript.log | head -5; }
 echo "--- cleanup"
 $S -c $T/team.yaml down --yes >/dev/null 2>&1; tmux kill-server 2>/dev/null
 for w in team-w1 team-w2; do git -C $T/repo worktree remove --force $VOL/$ROOT/$w 2>/dev/null; git -C $T/repo worktree remove --force $T/repo/.claude/worktrees/$w 2>/dev/null; done
