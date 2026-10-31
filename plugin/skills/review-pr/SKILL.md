@@ -68,7 +68,8 @@ differ, the role prompt wins.
    - Then correctness. Would the tests fail without the change? When that is cheap, check it by
      hand: undo the fix in your detached worktree and run the test, then put each file you changed
      back with `git restore <path>` and check that `git status --porcelain` is empty.
-   - A security engineer reviews per their role prompt instead: reachability first, then severity.
+   - A security engineer reviews per their role prompt instead: reachability first, then severity,
+     and each finding goes through `factory:security-triage` (step 7).
    - For a change your role prompt calls risky, get the second opinion it describes. Give the
      reviewer the diff and the issue, not your conclusions, and check each of its findings yourself
      before you post it.
@@ -86,14 +87,21 @@ differ, the role prompt wins.
    - last line: `READY at <short sha>` or `CHANGES NEEDED at <short sha>`, and what else the PR
      waits for (another reviewer, qa, a merge with its base, the owner).
 
-   A security finding that your role prompt keeps out of public trackers goes in neither the file
-   nor the PR: send it to the EM and the owner as your role prompt says, and post nothing that
-   describes it.
+   A security finding that your role prompt keeps out of public trackers (its rule 5) goes in
+   neither the file nor the PR, and nothing you post describes it. Who tells whom:
+   - **Not the security engineer** (for example a tech lead): send it to `sec` and the EM only,
+     with `SendMessage`. Tell the author nothing about it: sec's triage decides who is told. Do not
+     post READY while it is open; a blocking point says only that one point went to `sec` and the
+     EM.
+   - **The security engineer:** triage it with `factory:security-triage`, which decides who is told
+     and when: the author privately when the fix belongs on their PR, and anyone else only once the
+     owner allows disclosure (rule 8).
 8. **Post it** as a command of its own: `gh pr comment <n> -R <repo> --body-file <file>`. Never
    approve or merge for the owner, and never put the body in the command itself
    (`--body "$(...)"`): that makes the command unparseable for the permission rules.
 9. **Tell the author and the EM,** one message each: the PR URL, the head, the verdict, and the
-   comment's URL. The comment is the record; the message only points to it. Send each with
+   comment's URL. The comment is the record; the message only points to it, and neither message
+   describes a finding held back in step 7. Send each with
    `SendMessage`, `to` set to the seat's session name. Use the role prompt's `say` fallback only
    where it says to.
 10. **Leave your worktree clean:** nothing staged, and back where it was before the review
