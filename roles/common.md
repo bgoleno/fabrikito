@@ -63,7 +63,7 @@ Some of these rules are also enforced as permission rules, where the team file c
 (`@@SCRIPT@@ check` lists yours), and those hold in every permission mode. For everything else, this
 text is the only guardrail. Neither is a security boundary: both guard against accidents, and a
 command written another way gets past a permission rule. A permission prompt that names a rule
-(`Permission rule … requires confirmation`), and any prompt in bypass mode, means your command's
+(`Permission rule ... requires confirmation`), and any prompt in bypass mode, means your command's
 text matched an ask rule, even when the reason shown is about parsing ("expansion obfuscation",
 "shell operators that require approval"): that line only says why Claude Code could not narrow the
 prompt to the matching part. A seat at a prompt waits for a human, and nobody may be watching, so do
