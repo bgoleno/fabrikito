@@ -261,7 +261,8 @@ message. Anything else fails closed, with a reason:
 - a screen tmux cannot read;
 - another `say` typing into the same seat that has not finished within 8 seconds. One `say` at a time
   types into a seat (an `flock` on `.state/<team>/say/<role>.lock`, released when that `say` exits,
-  however it ends), so two messages never mix in one box.
+  however it ends), so two messages never mix in one box. Anything other than a plain file at that
+  path (a FIFO, a symlink) is refused at once: remove it.
 
 Attach to the seat, deal with it, and send again. If the box does not show the message after the paste,
 no Enter is sent and the text stays in the box, where it goes out with the next Enter; `say` says so,

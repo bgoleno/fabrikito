@@ -868,7 +868,7 @@ EOF
 # puts back exactly the size and window-size option it found. A window at 110x12 or more is never
 # touched. Meanwhile the owner's view of that seat shows a clipped part of the bigger window.
 SAY_MIN_COLS=110 SAY_MIN_ROWS=12 SAY_COLS=220 SAY_ROWS=50
-GROWN_SESS="" GROWN_W="" GROWN_H="" GROWN_OPT=""
+GROWN_SESS="" GROWN_W="" GROWN_H="" GROWN_OPT="" LOCK_WHY=""
 
 # Grows seat $1's window if it is under SAY_MIN_COLS x SAY_MIN_ROWS, recording what to put back,
 # and waits for Claude Code to redraw at the new size. The traps put it back on every exit but
@@ -921,11 +921,21 @@ shrink_window() {
 # <state>/say/<role>.lock, held through file descriptor 9 of this shell (macOS has no flock(1), so
 # perl takes it on the inherited descriptor). The kernel releases it when this shell exits, however
 # it ends, SIGKILL included, so a dead holder leaves no lock behind; the children here close 9 or
-# end at once. Waits up to 8 seconds, then refuses.
+# end at once. Waits up to 8 seconds, then refuses: sets LOCK_WHY and returns 1. It must run in
+# the calling shell, never in $(...), or the descriptor and the lock would go with the subshell.
+# The path must be a plain file or not there yet (sec on #132): something else could be put there,
+# and opening a FIFO to append blocks with no limit. It is opened read-write, which does not block
+# even on a FIFO swapped in after the check; flock then fails there, and the wait runs out.
 seat_lock() {
-  mkdir -p "$STATE/say" 2>/dev/null && exec 9>>"$STATE/say/$1.lock" || return 1
-  perl -MFcntl=:flock -e 'open(my $f, ">&=", 9) or exit 70; for (1 .. 80) { exit 0 if flock($f, LOCK_EX | LOCK_NB); select(undef, undef, undef, 0.1) } exit 75' && return 0
+  local f="$STATE/say/$1.lock"
+  if [ -L "$f" ] || { [ -e "$f" ] && [ ! -f "$f" ]; }; then
+    LOCK_WHY="$f is not a regular file: remove it"
+    return 1
+  fi
+  mkdir -p "$STATE/say" 2>/dev/null && exec 9<>"$f" || { LOCK_WHY="could not open $f"; return 1; }
+  perl -MFcntl=:flock -e 'open(my $f, "+<&=", 9) or exit 70; for (1 .. 80) { exit 0 if flock($f, LOCK_EX | LOCK_NB); select(undef, undef, undef, 0.1) } exit 75' && return 0
   exec 9>&-
+  LOCK_WHY="another say is typing into $1 and did not finish within 8 seconds; try again"
   return 1
 }
 seat_unlock() { exec 9>&-; }
@@ -946,7 +956,7 @@ send_one() {
     return 1
   fi
   if ! seat_lock "$to"; then
-    echo "not delivered: another say is typing into $to and did not finish within 8 seconds; try again" >&2
+    echo "not delivered: $LOCK_WHY" >&2
     return 1
   fi
   grow_window "$to"
