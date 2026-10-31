@@ -197,6 +197,7 @@ Bash(git push */main *)'
 [ "$(rules $T/state/settings/em.json ask | grep '^Bash(git push ')" = "$base_rules" ] && ok "ask on any push to the base branch (main, from origin/main): the 8 patterns" || { bad "base-branch ask"; rules $T/state/settings/em.json ask; }
 chk=$($S -c $T/team.yaml check 2>&1)
 echo "$chk" | grep -qE "^em +Manager .* bypassPermissions " && echo "$chk" | grep -qE "^w1 +Worker One .* default " && ok "check: MODE column per role" || { bad "check MODE column"; echo "$chk"; }
+echo "$chk" | grep -qF "warning: seat-to-seat messages will be held. Prompting for permissions: w1 (default). Bypassing them: em (bypassPermissions), w2 (bypassPermissions)." && ok "check: a team whose seats fall into both message classes is warned, naming each" || { bad "check: held-message warning on the mixed test team"; echo "$chk" | grep -A2 "^warning"; }
 sect() { echo "$chk" | sed -n "/^\[$1\]/,/^\[/p"; }
 sect w1 | grep -qF "deny : Read(//**/.env), Bash(touch tt-deny*), Bash(gh pr merge *)" && ok "check: w1's merged deny list" || { bad "check w1 deny"; sect w1; }
 sect em | grep -qF "allow rules have no effect in bypassPermissions" && ! sect w1 | grep -qF "no effect in bypassPermissions" && ok "check: bypass note on em only" || { bad "check bypass note"; sect em; }
@@ -532,6 +533,50 @@ mk; sed -i '' 's#github: local/origin.git }#github: local/origin.git, base: main
 nb=$($S -c $T/v.yaml check 2>&1); TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml settings em | grep -q "git push" && bad "base without a remote still produced push rules" || { echo "$nb" | grep -qF "no base-branch push rules" && ok "repo.base without a remote: no push rules, and check says so" || { bad "check: no base-branch note"; echo "$nb" | tail -3; }; }
 mk "args: [--dangerously-skip-permissions]"
 lg=$($S -c $T/v.yaml check 2>&1) && echo "$lg" | grep -qE "^em .* bypassPermissions \(args\)" && ok "legacy: --dangerously-skip-permissions in args with no mode still loads; check shows bypassPermissions (args)" || { bad "legacy args file"; echo "$lg" | tail -4; }
+echo "--- check warnings: held seat-to-seat messages (#36) and merging (#58)"
+# held <what> <expect: yes|no|note> : runs check on v.yaml and looks for the held-message lines.
+held() {
+  local out; out=$($S -c $T/v.yaml check 2>&1) || { bad "$1: check failed"; echo "$out" | tail -2; return; }
+  case $2 in
+    yes) echo "$out" | grep -qF "warning: seat-to-seat messages will be held. Prompting for permissions: $3. Bypassing them: $4." && echo "$out" | grep -qF "from a bypass seat to a prompting seat, and from a prompting seat to a bypass seat" && ok "$1: warns, naming each class and both directions" || { bad "$1: held warning"; echo "$out" | grep -A2 -E "^(warning|note)"; } ;;
+    no) echo "$out" | grep -qE "^(warning: seat-to-seat|note: check cannot see)" && { bad "$1: unexpected held warning"; echo "$out" | grep -A2 -E "^(warning|note)"; } || ok "$1: no held-message warning" ;;
+    note) echo "$out" | grep -qF "note: check cannot see the permission mode of $3 (inherited from settings)" && ! echo "$out" | grep -qF "warning: seat-to-seat" && ok "$1: notes the seats whose mode check cannot see, without a warning" || { bad "$1: inherit note"; echo "$out" | grep -A2 -E "^(warning|note)"; } ;;
+  esac
+}
+w9() { echo "  w9: { title: N, workdir: { type: project, path: $T/proj }, prompt_text: \"p\"${1:+, $1} }" >> $T/v.yaml; }
+guard='"Bash(gh pr merge *)", "Bash(gh api *pulls/*/merge*)", "Bash(gh api graphql*mergePullRequest*)"'
+mk "permission_mode: bypassPermissions" "$(rule ask "$guard")"; w9 "permission_mode: auto"
+held "a bypass team with one auto seat" yes "w9 (auto)" "em (bypassPermissions)"
+mk "permission_mode: bypassPermissions" "$(rule ask "$guard")"; w9 "permission_mode: plan"
+held "plan mode in a role (bypass switched off by its settings)" yes "w9 (plan)" "em (bypassPermissions)"
+mk "permission_mode: auto" "$(rule ask "$guard")" ", permission_mode: bypassPermissions"; w9 "permission_mode: dontAsk"
+held "a role in bypass on an auto team" yes "w9 (dontAsk)" "em (bypassPermissions)"
+mk "permission_mode: auto" "$(rule ask "$guard")"; w9 "permission_mode: acceptEdits"
+held "auto and acceptEdits (one class)" no
+mk "permission_mode: bypassPermissions" "$(rule ask "$guard")"; w9
+held "every seat in bypass" no
+mk "" "$(rule ask "$guard")"; w9
+held "every seat inheriting its mode" no
+mk "" "$(rule ask "$guard")"; w9 "permission_mode: auto"
+held "one seat inheriting beside one with a mode" note "em"
+# Merging: every role needs a deny or an ask on each merge pattern, unless it may merge.
+mo=$(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml warnings 2>&1)
+[ -z "$mo" ] && ok "the example team as shipped has no warnings" || { bad "example team warnings"; echo "$mo"; }
+mk "permission_mode: auto" "$(rule deny "$guard")"; w9
+$S -c $T/v.yaml check 2>&1 | grep -qF "warning: " && bad "team-wide merge deny: unexpected warning" || ok "a team-wide deny on the merge patterns: no merge warning"
+mk "permission_mode: auto" "" ", permissions: { ask: [$guard] }"; w9
+mw=$($S -c $T/v.yaml check 2>&1)
+echo "$mw" | grep -qF "warning: w9 could merge a PR without being asked: no deny or ask rule matches Bash(gh pr merge *), Bash(gh api *pulls/*/merge*), Bash(gh api graphql*mergePullRequest*)." && ! echo "$mw" | grep -q "warning: em could merge" && ok "a role added without a merge deny or ask is named, with every missing pattern" || { bad "merge warning for w9"; echo "$mw" | grep warning; }
+mk "permission_mode: auto" "" ", permissions: { ask: [$guard] }"; w9 "may_merge: true"
+$S -c $T/v.yaml check 2>&1 | grep -qF "could merge" && bad "may_merge: true still warned" || ok "a role marked may_merge: true is not warned about"
+mk "permission_mode: auto" "" ', permissions: { deny: ["Bash(gh pr merge *)"] }'
+mw=$($S -c $T/v.yaml check 2>&1)
+echo "$mw" | grep -qF "no deny or ask rule matches Bash(gh api *pulls/*/merge*), Bash(gh api graphql*mergePullRequest*). " && ok "a partial merge deny: only the patterns still open are named" || { bad "partial merge deny"; echo "$mw" | grep warning; }
+mk "permission_mode: auto" "" ', permissions: { deny: ["Bash(gh *)"] }'
+$S -c $T/v.yaml check 2>&1 | grep -qF "could merge" && bad "a broader deny (Bash(gh *)) still warned" || ok "a broader rule that covers the patterns (Bash(gh *)) counts"
+mk "permission_mode: auto" "" ', permissions: { deny: ["Bash(gh pr merge 12*)", "Bash(gh api repos/x/y/pulls/1/merge*)", "Bash(gh api graphql -f q=mergePullRequest*)"] }'
+$S -c $T/v.yaml check 2>&1 | grep -qF "warning: em could merge a PR without being asked: no deny or ask rule matches Bash(gh pr merge *), Bash(gh api *pulls/*/merge*), Bash(gh api graphql*mergePullRequest*)." && ok "narrower rules that leave other merges open do not count" || bad "narrower merge rules counted as covering"
+reject "a non-boolean may_merge" "roles.em.may_merge must be true or false" "" "" ", may_merge: yes please"
 echo "--- stop gate hook (lib/stop_gate.sh, run directly with hook input on stdin)"
 # A throwaway repo and a stand-in gate that records each run and passes only once g-pass exists.
 mkdir -p $T/g && git -C $T/g init -q && git -C $T/g commit -q --allow-empty -m init
