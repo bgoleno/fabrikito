@@ -300,7 +300,7 @@ $S -c $T/team.yaml check 2>&1 | grep -qxF "plugin    : $PLUG (skills as /factory
 echo "--- generated settings"
 # The user's rules, in team-then-role order, without duplicates. Rules the launcher adds itself
 # (Edit denies on its own files) are checked separately, so they are left out of these lists.
-perms() { ruby -rjson -e 'p = JSON.parse(File.read(ARGV[0]))["permissions"] || {}; %w[deny ask allow].each { |k| l = (p[k] || []).reject { |r| r.start_with?("Edit(//", "Bash(git push ") }; puts "#{k}=#{l.join(" | ")}" }; puts "disable=#{p["disableBypassPermissionsMode"]}"' "$1" 2>&1; }
+perms() { ruby -rjson -e 'p = JSON.parse(File.read(ARGV[0]))["permissions"] || {}; %w[deny ask allow].each { |k| l = (p[k] || []).reject { |r| r.start_with?("Edit(//", "Bash(git push ") || r =~ %r{\ARead\(//.*/state/messages\.log\)\z} }; puts "#{k}=#{l.join(" | ")}" }; puts "disable=#{p["disableBypassPermissionsMode"]}"' "$1" 2>&1; }
 # rules <file> <deny|ask|allow>: one rule per line
 rules() { ruby -rjson -e 'puts((JSON.parse(File.read(ARGV[0]))["permissions"] || {})[ARGV[1]] || [])' "$1" "$2"; }
 want_em='deny=Read(//**/.env) | Bash(touch tt-deny*)
@@ -421,9 +421,11 @@ for sp in "$RT" "$T"; do
 done
 [ -z "$lr" ] && ok "messages.log: Read denied to w1 and w2 (both spellings), readable by em" || { bad "messages.log read rules:$lr"; rules $T/state/settings/w1.json deny | grep messages; }
 # check names the Read deny for the seats that have it, and keeps it out of the protected-path count.
-nw1=$(sect w1 | sed -n 's/.*added: Edit deny on \([0-9]*\) protected paths.*/\1/p'); nem=$(sect em | sed -n 's/.*added: Edit deny on \([0-9]*\) protected paths.*/\1/p')
-sect w1 | grep -F "added: " | grep -qF ", Read deny on the message log" && ! sect em | grep -qF "Read deny on the message log" && [ -n "$nw1" ] && [ "$nw1" = "$nem" ] \
-  && ok "check: w1's added line names the message log Read deny, em's does not, and both count the same $nw1 protected paths" || { bad "check: message log Read deny line (w1 $nw1, em $nem)"; sect w1; sect em; }
+# w1's team and role denies hold no Edit rule, so its protected paths are its Edit denies but the notes.
+nw1=$(sect w1 | sed -n 's/.*added: Edit deny on \([0-9]*\) protected paths.*/\1/p')
+ew1=$(rules $T/state/settings/w1.json deny | grep '^Edit(' | grep -vc '/state/notes/')
+sect w1 | grep -F "added: " | grep -qF ", Read deny on the message log" && ! sect em | grep -qF "Read deny on the message log" && [ -n "$nw1" ] && [ "$nw1" = "$ew1" ] \
+  && ok "check: w1's added line names the message log Read deny (not counted among its $nw1 protected paths), em's does not" || { bad "check: message log Read deny line (counted $nw1, Edit denies $ew1)"; sect w1; sect em; }
 # A seat may write its own note without a prompt (it is outside its working directory), and only its
 # own: every other seat's note is denied, as exact paths in both spellings, since a note is put into
 # its seat's context at each start.
