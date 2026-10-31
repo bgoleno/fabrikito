@@ -173,7 +173,8 @@ static void draw(void) {
   fflush(stdout);
 }
 /* At the end of a paste, Claude Code 2.1.316 shows a paste of more than 800 characters, or of 4 or
-   more lines, as a placeholder (measured 2026-10-30). tall-typed: text typed right after the paste. */
+   more lines, as a placeholder (measured 2026-10-30). tall-typed and small-typed: text typed right
+   after the paste. */
 static void endpaste(void) {
   if (strncmp(mode, "tall", 4) && strncmp(mode, "small", 5)) return;
   size_t len = blen - pstart; int nl = 0;
@@ -183,7 +184,7 @@ static void endpaste(void) {
     blen = pstart + (size_t)(nl ? snprintf(buf + pstart, sizeof buf - pstart, "[Pasted text #%d +%d lines]", npaste, nl)
                                 : snprintf(buf + pstart, sizeof buf - pstart, "[Pasted text #%d]", npaste));
   }
-  if (!strcmp(mode, "tall-typed")) blen += (size_t)snprintf(buf + blen, sizeof buf - blen, " typed after");
+  if (!strcmp(mode, "tall-typed") || !strcmp(mode, "small-typed")) blen += (size_t)snprintf(buf + blen, sizeof buf - blen, " typed after");
 }
 int main(int n, char **v) {
   if (n == 2 && !strcmp(v[1], "--version")) { char *fv = getenv("FAKE_VERSION"); printf("%s (Claude Code)\n", fv ? fv : "9.9.9"); return 0; }
@@ -860,7 +861,7 @@ echo "--- say delivers only to a seat showing its input box"
 # with no numbers and no key hint: any dialog say does not know must fail closed too.
 roles=""
 # em is a seat here too: say takes its sender from TEAM_ROLE=em, which must be a role of the team (#89).
-for r in em pp pm pd ph pu pb pf ps pg px pk pq po pn pz ta tb tc td te pv pw py sa sb sc sd se; do roles="$roles  $r: { title: Seat $r, workdir: { type: project, path: $T/proj }, prompt_text: \"$r\" }
+for r in em pp pm pd ph pu pb pf ps pg px pk pq po pn pz ta tb tc td te pv pw py sa sb sc sd se sf; do roles="$roles  $r: { title: Seat $r, workdir: { type: project, path: $T/proj }, prompt_text: \"$r\" }
 "; done
 cat > $T/tp.yaml <<Y
 team: tp
@@ -938,7 +939,7 @@ notice=$(printf '\033[2m\342\225\255%s\033[0m\033[38;5;246m\342\234\225\033[2m\0
   "$(printf '\342\224\200%.0s' $(seq 85))" "" "$(printf '\342\224\200%.0s' $(seq 87))")
 printf '%s\n' "$notice" > $T/fake-pv-output.txt; cp $T/fake-pv-output.txt $T/fake-pw-output.txt; echo cut > $T/fake-pw-mode.txt
 # sa, sb, sc (#84): see "Short panes" below. sa draws the notice only while it is under 110 columns.
-cp $T/fake-pv-output.txt $T/fake-sa-output.txt; echo small > $T/fake-sa-mode.txt; echo small-clean > $T/fake-sb-mode.txt; echo tall > $T/fake-sc-mode.txt; echo small-slow > $T/fake-sd-mode.txt; echo small-clean > $T/fake-se-mode.txt
+cp $T/fake-pv-output.txt $T/fake-sa-output.txt; echo small > $T/fake-sa-mode.txt; echo small-clean > $T/fake-sb-mode.txt; echo tall > $T/fake-sc-mode.txt; echo small-slow > $T/fake-sd-mode.txt; echo small-clean > $T/fake-se-mode.txt; echo small-typed > $T/fake-sf-mode.txt
 printf '%s\n%s\n' "$notice" "$fake_prompt" > $T/fake-py-prompt.txt
 { printf '%s\n' "$fake_prompt"; for i in $(seq 1 5); do echo "later output line $i"; done; } > $T/fake-pq-output.txt
 cat > $T/fake-po-output.txt <<'M'
@@ -1081,6 +1082,17 @@ tmux resize-window -t '=tp-sd:' -x 80 -y 10; for i in $(seq 1 50); do [ "$(lastr
 [ "$(lastrule sd)" = 80 ] || bad "test setup: sd did not redraw at 80 columns"
 : > $T/resize.log; PATH=$T/rshim:$PATH tall sd ok "slow seat, one line" "a message to a seat slow to redraw after the resize (say waits for the redrawn box)"
 [ "$(steps sd)" = "paste grow shrink " ] || { bad "steps for the slow seat ($(steps sd))"; cat $T/resize.log; }
+# Text typed after the message (sf, tl on #132). In a big pane the box is whole and starts with the
+# label, so only the whole visible text can tell the typed text is there: refused, no resize. In an
+# 80x10 pane the paste grows the box past the bottom, so the check after the paste refuses and say
+# grows the window. There the box is whole again and starts with the label: it must still refuse,
+# or the Enter would submit the typed text with the message.
+: > $T/resize.log; PATH=$T/rshim:$PATH tall sf refused "big pane, typed after" "a message with text typed after it, in a 220x50 pane"; why "not just the message" "the box holds more than the message"
+! grep -q '^resize-window' $T/resize.log || { bad "the big seat with typed text was resized"; cat $T/resize.log; }
+tmux send-keys -t '=tp-sf:' C-u; tmux resize-window -t '=tp-sf:' -x 80 -y 10; sleep 1; gf=$(geo sf); : > $T/resize.log
+PATH=$T/rshim:$PATH tall sf refused "$(msg 400)" "a 400-character line with text typed after it, in an 80x10 pane (grown, then checked again)"; why "not just the message" "the box holds more than the message"
+[ "$(steps sf)" = "paste grow shrink " ] && [ "$(geo sf)" = "$gf" ] && ok "the 80x10 seat with typed text was grown after the paste, refused there, and put back ($gf)" || { bad "steps for the seat with typed text ($(steps sf); $(geo sf), was $gf)"; cat $T/resize.log; }
+tmux send-keys -t '=tp-sf:' C-u; sleep 0.5
 [ "$(geo sa)" = "$ga" ] && [ "$(geo sb)" = "$gb" ] && ok "after each, the small seats' size and window-size are as before ($ga; $gb)" || bad "small seat geometry after say (sa $(geo sa), was $ga; sb $(geo sb), was $gb)"
 : > $T/resize.log; PATH=$T/rshim:$PATH tall sc ok "big pane" "a message to a seat in a 220x50 pane"
 ! grep -q '^resize-window' $T/resize.log && [ "$(geo sc)" = "$gc" ] && ok "a seat in a big pane is not resized (no resize-window, same size and window-size)" || { bad "the big seat was touched ($(geo sc), was $gc)"; cat $T/resize.log; }
