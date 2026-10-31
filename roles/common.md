@@ -79,7 +79,8 @@ rules are not preferences.
    `@@GITHUB_REPO@@`. Never force-push a branch you did not create. Respect branch protection.
 3. **Never touch the owner's running or production instances or live data.** Test only against a
    throwaway instance you start yourself on another port with a fresh temporary data directory (see
-   the repository's docs), or against the test harness.
+   the repository's docs), or against the test harness. A throwaway copy of a team file goes outside
+   any `teams/` folder and runs on a private tmux server, never on the one your seat runs on.
 4. **Secrets:** never put a credential in a message, file, commit, PR or issue. Activating a live
    or billable credential in a running application is the owner's step; ask them to run it.
 5. **Visibility:** assume anything you write in an issue, PR or commit can be read by others, and by
