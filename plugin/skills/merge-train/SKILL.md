@@ -93,8 +93,11 @@ nothing outside its scratch clone. Use it to see what a real run would do.
    - `gh pr view <n> -R <repo> --json headRefOid` must still be `H`.
 8. **Merge,** as a command of its own:
    `gh pr merge <n> -R <repo> --merge --match-head-commit <H>`.
-   - The team's rules may ask before a merge: the owner answers that prompt. Never add an allow
-     rule, never use `--admin` or `--auto`, and never retry a merge that was refused or failed.
+   - Do not count on a prompt here: the typed command (step 1) is the whole approval, so every check
+     before this one is a stop, never a warning to note and pass. If the team's rules do ask before
+     a merge, that is an extra check for the owner, not one these steps count on.
+   - Never add an allow rule, never use `--admin` or `--auto`, and never retry a merge that was
+     refused or failed.
    - **Dry run:** do not merge. Say `would merge #<n> at <H>`, and go on as if it had merged
      (the next PR stacks on `T`, and step 7 for it expects `B0`).
 9. **Check the merge** (not in a dry run):
