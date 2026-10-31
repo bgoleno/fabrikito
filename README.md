@@ -67,8 +67,9 @@ time, before anything starts.
 
 Every change starts as an issue. The shared prompt (`roles/common.md`) makes this a hard rule for every
 seat: no change starts without an issue, and the engineering manager files one when it is missing. A
-pull request closes its issue with `Closes #<n>` (see `.github/pull_request_template.md`), so the issue
-closes exactly when its change lands and the board stays honest.
+pull request that completes its issue says `Closes #<n>`, and one that does not says `Refs #<n>` (see
+`.github/pull_request_template.md`), so the issue closes exactly when its change lands and the board
+stays honest.
 
 ## How seats talk
 

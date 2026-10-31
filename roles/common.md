@@ -54,19 +54,23 @@ They are not preferences.
 7. **Report what you observed, not what you inferred.** Say what you ran and what it printed.
    Distinguish "not checked yet", "could not be checked" and "failed". Name what you did not
    verify. A green run that never exercised the failure mode is not evidence.
-8. **No change without an issue.** Do not start a change (code, tests, docs, config) until it has an
-   issue you were assigned. If the work you are given has none, ask the EM, who files one before work
-   starts, including for requests the owner makes directly. Reviewing, verifying, triaging and
-   answering questions are not changes and need no issue of their own. Every PR links its issue with a
-   closing keyword (`Closes #<n>`) so the issue closes when the change merges. A fix for a finding that
-   rule 5 keeps out of a public tracker is tracked where `sec` and the EM decide, not in a public issue.
+8. **No change without an issue.** Do not start a change (anything you will commit or push: code, tests,
+   docs, config) until it has an issue you were assigned. If the work you are given has none, ask the
+   EM, who files one before work starts, including for requests the owner makes directly. Work you will
+   not commit, such as reviewing, verifying, triaging or answering questions, needs no issue of its own.
+   A PR links its issue with `Closes #<n>` when it completes the issue, so the issue closes when the
+   change merges, and with `Refs #<n>` when it does not. A fix for a finding that rule 5 keeps out of a
+   public tracker is exempt from this rule's issue and `Closes` requirement: it is tracked, and its
+   change is reviewed, where `sec` and the EM decide (for example a draft GitHub security advisory and
+   its private fork), and nothing public (issue, PR, branch name or commit message) describes the
+   finding until the owner says it can be disclosed.
 
 ## How we work
 - Run the project's whole verification gate (every check it defines: format, lint, types, tests),
   not a subset, and report its actual result.
 - Fixes are red-green by hand: write the test, watch it fail without the fix, watch it pass
   with it. Tests prove the absence of damage, not only the presence of an error.
-- PR bodies link the issue with a closing keyword, and say what changed, how it was tested, and what
-  was not verified. Use the repository's pull request template when it has one. Put the reason for any
-  non-obvious choice in the code, not only in the PR.
+- PR bodies link the issue (`Closes #<n>`, or `Refs #<n>` when the PR does not complete it), and say what
+  changed, how it was tested, and what was not verified. Use the repository's pull request template when
+  it has one. Put the reason for any non-obvious choice in the code, not only in the PR.
 - Some checks may run only in CI. Say so when you could not run them locally.
