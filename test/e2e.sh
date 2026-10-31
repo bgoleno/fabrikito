@@ -39,8 +39,10 @@ cat > $T/c.c <<'C'
 #include <string.h>
 #include <termios.h>
 #include <unistd.h>
+#include <sys/ioctl.h>
 static char buf[65536], hist[65536], head[4096], mode[64], name[256];
-static size_t blen, hlen;
+static size_t blen, hlen, pstart;
+static int npaste;
 static const char *base;
 static void cat(const char *what) {
   char path[4096]; snprintf(path, sizeof path, "%s-%s.txt", base, what);
@@ -53,6 +55,34 @@ static int has(const char *what) {
   return access(path, R_OK) == 0;
 }
 static const char *RULE = "────────────────────────────────────────────────────────────";
+/* mode tall*: the input box as Claude Code 2.1.316 draws long text. Rows wrap at word boundaries
+   with a 2-space indent; the box shows at most max(3, (terminal rows - 10) / 2) rows and scrolls to
+   keep the end in view, with the prompt on the first VISIBLE row and no scroll marker. tall-dim
+   adds a dim suggestion after the text, tall-short shows one row fewer than a full box. */
+static void tall(void) {
+  struct winsize ws; int cols = 220, rows = 50, w, v, nr = 0; static size_t rs[8192], rl[8192];
+  if (ioctl(1, TIOCGWINSZ, &ws) == 0 && ws.ws_col && ws.ws_row) { cols = ws.ws_col; rows = ws.ws_row; }
+  w = cols - 4 < 20 ? 20 : cols - 4; v = (rows - 10) / 2; if (v < 3) v = 3;
+  if (!strcmp(mode, "tall-short")) v--;
+  for (size_t i = 0; i <= blen && nr < 8192;) {          /* split into logical lines, then wrap each */
+    size_t e = i; while (e < blen && buf[e] != '\n') e++;
+    size_t a = i;
+    do {
+      size_t len = e - a, cut = len;
+      if (len > (size_t)w) { cut = (size_t)w; while (cut > 0 && buf[a + cut] != ' ') cut--; if (cut == 0) cut = (size_t)w; }
+      rs[nr] = a; rl[nr] = cut; nr++;
+      a += cut; if (a < e && buf[a] == ' ') a++;
+    } while (a < e && nr < 8192);
+    i = e + 1;
+  }
+  int first = nr > v ? nr - v : 0;
+  for (int r = first; r < nr; r++) {
+    if (r > first) printf("\r\n  ");                     /* draw() has printed the prompt */
+    fwrite(buf + rs[r], 1, rl[r], stdout);
+  }
+  if (blen == 0) printf("\033[2mTry \"something\"\033[0m");
+  else if (!strcmp(mode, "tall-dim")) printf(" \033[2mrun the tests\033[0m");
+}
 static void draw(void) {
   printf("\033[H\033[2J%s\r\n", head);
   fwrite(hist, 1, hlen, stdout);
@@ -60,6 +90,11 @@ static void draw(void) {
   cat("output");
   if (name[0]) printf("────────────────────────────────────────── %s ──\r\n\xe2\x9d\xaf\xc2\xa0", name);
   else printf("%s\r\n\xe2\x9d\xaf\xc2\xa0", RULE);
+  if (!strncmp(mode, "tall", 4)) {
+    tall();
+    printf("\r\n%s\r\n  SL line one\r\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle)\r\n", RULE);
+    fflush(stdout); return;
+  }
   int sticky = !strcmp(mode, "sticky") || !strcmp(mode, "mixed");
   if (blen == 0) printf(sticky || !strcmp(mode, "suggest") ? "\033[2mrun the tests\033[0m" : "\033[2mTry \"something\"\033[0m");
   for (size_t i = 0; i < blen; i++) { if (buf[i] == '\n') printf("\r\n  "); else putchar(buf[i]); }
@@ -68,6 +103,19 @@ static void draw(void) {
   if (!strcmp(mode, "below")) printf("  \xe2\x9d\xaf suggestion one\r\n    suggestion two\r\n");
   printf("  SL line one\r\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle)\r\n");
   fflush(stdout);
+}
+/* At the end of a paste, Claude Code 2.1.316 shows a paste of more than 800 characters, or of 4 or
+   more lines, as a placeholder (measured 2026-10-30). tall-typed: text typed right after the paste. */
+static void endpaste(void) {
+  if (strncmp(mode, "tall", 4)) return;
+  size_t len = blen - pstart; int nl = 0;
+  for (size_t i = pstart; i < blen; i++) if (buf[i] == '\n') nl++;
+  if (len > 800 || nl >= 3) {
+    npaste++;
+    blen = pstart + (size_t)(nl ? snprintf(buf + pstart, sizeof buf - pstart, "[Pasted text #%d +%d lines]", npaste, nl)
+                                : snprintf(buf + pstart, sizeof buf - pstart, "[Pasted text #%d]", npaste));
+  }
+  if (!strcmp(mode, "tall-typed")) blen += (size_t)snprintf(buf + blen, sizeof buf - blen, " typed after");
 }
 int main(int n, char **v) {
   if (n == 2 && !strcmp(v[1], "--version")) { char *fv = getenv("FAKE_VERSION"); printf("%s (Claude Code)\n", fv ? fv : "9.9.9"); return 0; }
@@ -88,7 +136,7 @@ int main(int n, char **v) {
     if (kl) { fputc(b, kl); fflush(kl); }
     if (esc) {                                   /* ESC [ 2 0 0 ~ and ESC [ 2 0 1 ~ mark a paste */
       seq[sl++] = (char)b;
-      if (b == '~' || sl >= 7) { seq[sl] = 0; if (!strcmp(seq, "[200~")) paste = 1; if (!strcmp(seq, "[201~")) paste = 0; esc = 0; }
+      if (b == '~' || sl >= 7) { seq[sl] = 0; if (!strcmp(seq, "[200~")) { paste = 1; pstart = blen; } if (!strcmp(seq, "[201~")) { paste = 0; endpaste(); } esc = 0; draw(); }
       continue;
     }
     if (b == 27) { esc = 1; sl = 0; continue; }
@@ -101,6 +149,7 @@ int main(int n, char **v) {
         blen = 0;
       }
     } else if (b == 21) blen = 0;                 /* ctrl-u clears the box */
+    else if (b == 12) ;                           /* ctrl-l redraws (after a resize) */
     else if (blen < sizeof buf - 1) buf[blen++] = (char)b;
     draw();
   }
@@ -314,7 +363,7 @@ echo "--- say delivers only to a seat showing its input box"
 # CLI that draws them differently shows up as a mismatch here. pu shows an invented select list
 # with no numbers and no key hint: any dialog say does not know must fail closed too.
 roles=""
-for r in pp pm pd ph pu pb pf ps pg px pk pq po; do roles="$roles  $r: { title: Seat $r, workdir: { type: project, path: $T/proj }, prompt_text: \"$r\" }
+for r in pp pm pd ph pu pb pf ps pg px pk pq po ta tb tc td; do roles="$roles  $r: { title: Seat $r, workdir: { type: project, path: $T/proj }, prompt_text: \"$r\" }
 "; done
 cat > $T/tp.yaml <<Y
 team: tp
@@ -381,6 +430,7 @@ cat > $T/fake-pu-prompt.txt <<'M'
  ❯ Leave it as it is
    Change it
 M
+echo tall > $T/fake-ta-mode.txt; echo tall-dim > $T/fake-tb-mode.txt; echo tall-typed > $T/fake-tc-mode.txt; echo tall-short > $T/fake-td-mode.txt
 echo below > $T/fake-pb-mode.txt; echo prefill > $T/fake-pf-mode.txt; echo swallow > $T/fake-ps-mode.txt
 echo suggest > $T/fake-pg-mode.txt; echo mixed > $T/fake-px-mode.txt; echo sticky > $T/fake-pk-mode.txt
 { printf '%s\n' "$fake_prompt"; for i in $(seq 1 5); do echo "later output line $i"; done; } > $T/fake-pq-output.txt
@@ -430,6 +480,30 @@ mkdir -p $T/shim && printf '#!/bin/sh\n[ "$1" = capture-pane ] && exit 1\nexec %
 before=$(wc -c < $T/keys-pq.log)
 cf=$(PATH=$T/shim:$PATH TEAM_ROLE=em $S -c $T/tp.yaml say pq "capture fails" 2>&1); rc=$?; sleep 1
 [ $rc -ne 0 ] && echo "$cf" | grep -q "could not read" && [ "$(wc -c < $T/keys-pq.log)" = "$before" ] && tail -1 $T/state/messages.log | grep -q "	pq	NOT-DELIVERED	capture fails" && ok "a failed screen capture refuses delivery, logs NOT-DELIVERED, sends no keys" || { bad "failed capture (rc=$rc)"; echo "$cf"; tail -1 $T/state/messages.log; }
+# A message taller than the input box (#47). Claude Code 2.1.316 scrolls a full box and shows only
+# the end of the text; below 801 characters and 4 lines it is not collapsed to a placeholder. ta..td
+# model that box in a 60x16 pane, which shows 3 rows.
+for r in ta tb tc td; do tmux resize-window -t "=tp-$r:" -x 60 -y 16; tmux send-keys -t "=tp-$r:" C-l; done; sleep 1
+msg() { local m="" i=0; while [ ${#m} -lt $1 ]; do i=$((i+1)); m="$m w$(printf %03d $i)"; done; m=${m# }; printf '%s' "${m:0:$1}"; }
+# tall <role> <ok|refused> <message> <what>: say's exit status, and whether an Enter followed the paste.
+tall() {
+  local rc
+  touch $T/keys-$1.log
+  TEAM_ROLE=em $S -c $T/tp.yaml say "$1" "$3" >$T/tall.out 2>&1; rc=$?; sleep 1
+  if [ "$2" = ok ]; then
+    [ $rc -eq 0 ] && [ "$(tail -c 7 $T/keys-$1.log | od -An -c | tr -d ' \n')" = '033[201~\r' ] && ok "say delivers $4" || { bad "say delivers $4 (rc=$rc)"; cat $T/tall.out; tmux send-keys -t "=tp-$1:" C-u; sleep 0.5; }
+  else
+    [ $rc -ne 0 ] && [ "$(tail -c 6 $T/keys-$1.log | od -An -c | tr -d ' \n')" = '033[201~' ] && ok "say refuses $4" || { bad "say refuses $4 (rc=$rc)"; cat $T/tall.out; }
+  fi
+}
+tall ta ok "$(msg 290)" "a message taller than the box (300 characters, 6 rows in a 3-row box)"
+tall ta ok "$(msg 790)" "a tall message at the 800-character edge (shown as text)"
+tall ta ok "$(msg 791)" "a message one past the edge (801 characters, a placeholder)"
+tall ta ok "$(msg 140)"$'\n'"$(msg 140)"$'\n'"$(msg 140)" "a tall message of 3 lines (shown as text)"
+tall ta ok "$(msg 60)"$'\n'"$(msg 60)"$'\n'"$(msg 60)"$'\n'"$(msg 60)" "a message of 4 lines (a placeholder)"
+tall tb refused "$(msg 290)" "a tall message with dim text after it"
+tall tc refused "$(msg 290)" "a tall message with text typed after it"
+tall td refused "$(msg 290)" "the end of a tall message in a box that is not full"
 $S -c $T/tp.yaml down --yes >/dev/null 2>&1
 echo "--- permission validation (check must refuse each file)"
 # A minimal valid team file; $1 is the sessions.claude body, $2 extra top-level lines, $3 extra keys for role em.
