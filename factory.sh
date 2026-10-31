@@ -903,11 +903,14 @@ log_field() {
 # no role in this team to be labelled with.
 #
 # This catches mislabelling by accident only, and labels are not authenticated (#29). A process
-# escapes the check whenever none of its ancestors holds a seat pane's tty when it runs: one that
+# escapes the check whenever none of its ancestors holds the tty of a seat's pane on the tmux server
+# say addresses (the one its tmux commands reach) when it runs: one that
 # leaves the session (setsid) and outlives its parent; any background job (`&`, nohup, disown) that
 # outlives the tool call that started it, since its parent exits and it is re-parented to launchd;
-# anything started by launchd, cron or `tmux run-shell`; and a command in a new tmux session or
-# window a seat opens, whose ancestor is the tmux server and whose session does not set TEAM_ROLE.
+# anything started by launchd, cron or `tmux run-shell`; a command in a new tmux session or
+# window a seat opens, whose ancestor is the tmux server and whose session does not set TEAM_ROLE;
+# and a seat of any team on another tmux server, such as a seat that runs test/live-env.sh run
+# (TMUX unset, TMUX_TMPDIR at a private server), since only the addressed server's panes are listed.
 # All of these are labelled [from owner].
 #
 # A pane belongs to a seat when its session has the seat's session name; nothing checks that up

@@ -271,9 +271,11 @@ run from inside a seat (found from the terminals of the processes that started i
 that seat's role, never `[from owner]`; this stops a mislabel by accident, and the labels are still
 not authenticated ([#29](../../issues/29)). When it cannot tell, `say` refuses rather than guess: when
 `ps` cannot read its process, when tmux cannot list its panes, or when it runs inside a seat of another
-team on the same tmux server (any session `up` started, which sets `TEAM_ROLE`). Only a process with no
-terminal at all, or whose terminal is a tmux pane that is no team's seat, is labelled `[from owner]`. A
-background job that outlives the command that started it, or a command a seat runs in a new tmux
+team on the same tmux server (any session `up` started, which sets `TEAM_ROLE`). The check looks only at
+the tmux server `say` addresses: a process is labelled `[from owner]` when it has no terminal at all, or
+when its terminal is not a seat's pane on that server. So a seat on another tmux server is labelled
+`[from owner]`, for example a seat that runs `test/live-env.sh run` to drive a throwaway team on a
+private server. A background job that outlives the command that started it, or a command a seat runs in a new tmux
 session, is not caught and is labelled `[from owner]` (the comment above `caller_seat` in `factory.sh` lists every
 such way). A seat cannot `say` to itself. A `TEAM_ROLE` that is set must be one of the team's role
 ids: `say` refuses any other value, and the reserved `owner` and `launcher`, sending no keys and
