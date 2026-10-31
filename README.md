@@ -214,9 +214,9 @@ What the rules cannot do:
 
 The [sandbox](https://code.claude.com/docs/en/sandboxing) is the OS-level control that would hold
 whatever the command text, but the launcher does not turn it on: seats run without one unless settings
-that apply to them enable it. The hard rules in the shared prompt (`roles/common.md`) still apply; read them before
-changing them. A seat started in a folder Claude Code has not seen stops at a trust dialog until a
-human answers it once; `up` reports which seats those are.
+that apply to them enable it. The hard rules in the shared prompt (`roles/common.md`) still apply;
+read them before changing them. A seat started in a folder Claude Code has not seen stops at a trust
+dialog until a human answers it once; `up` reports which seats those are.
 
 ## The gate
 
