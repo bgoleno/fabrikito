@@ -11,6 +11,13 @@ S=$SRC/factory.sh
 T=$(mktemp -d "${TMPDIR:-/tmp}/team-e2e.XXXX"); T=$(cd "$T" && pwd); mkdir -p $T/bin $T/tmux $T/local
 ROOT="Projects/_teamtest-$$"; VOL=${TEST_VOLUME:-}
 unset TMUX CLAUDE_CONFIG_DIR; export TMUX_TMPDIR=$T/tmux TEAM_STATE_DIR=$T/state
+# No run may drive iTerm (#93). A stand-in osascript first on PATH records every call and does
+# nothing, and the run fails at the end if it was called: `up` opens a real iTerm window unless told
+# not to, every run left its windows on the user's screen, and enough of them used up every pty on
+# the machine, so tmux could no longer start the test's own seats. The view is off for the whole run
+# (TEAM_VIEW=0), and every up says --no-view too, so dropping either one still opens no window.
+printf '#!/bin/sh\necho "osascript $*" >> %s/osascript.log\nexit 1\n' "$T" > $T/bin/osascript; chmod +x $T/bin/osascript
+export PATH=$T/bin:$PATH TEAM_VIEW=0
 # Stopped early (a gate timeout kills this test's process group): stop the private tmux server,
 # which has left that group, and remove what the test made, as the cleanup at the end does.
 on_signal() {
@@ -144,7 +151,7 @@ export PATH=$T/bin:$PATH
 # legacy worktree for w2, internal disk
 git -C $T/repo worktree add -q --detach $T/repo/.claude/worktrees/team-w2 origin/main
 echo "--- up (w2 has a legacy worktree, expect it to be refused)"
-out=$($S -c $T/team.yaml up 2>&1); echo "$out" | grep -E "start|error|ATTENTION" | cut -c1-170
+out=$($S -c $T/team.yaml up --no-view 2>&1); echo "$out" | grep -E "start|error|ATTENTION" | cut -c1-170
 echo "$out" | grep -q "start  w1" && ok "w1 started" || bad "w1 started"
 echo "$out" | grep -q "migrate w2" && ok "w2 refused with migrate hint" || bad "w2 refused with migrate hint"
 case "$(git -C $T/repo worktree list)" in *"$VOL/$ROOT/team-w1"*) ok "w1 worktree is on the volume";; *) bad "w1 worktree is on the volume";; esac
@@ -331,7 +338,7 @@ tmux capture-pane -p -t '=tt-w1:' | grep -qF "[from owner] unset role from a pan
   ok "say from a tmux pane that is not a seat with TEAM_ROLE unset is still [from owner]" || { bad "say from a non-seat pane: owner label"; tail -1 $T/state/messages.log; }
 echo "--- migrate then up w2"
 $S -c $T/team.yaml migrate w2 2>&1 | grep -E "moved|REFUSE|skip" | cut -c1-150
-$S -c $T/team.yaml up w2 2>&1 | grep -E "start|error" | cut -c1-150
+$S -c $T/team.yaml up --no-view w2 2>&1 | grep -E "start|error" | cut -c1-150
 case "$(git -C $T/repo worktree list)" in *"$VOL/$ROOT/team-w2"*) ok "w2 recreated on the volume";; *) bad "w2 recreated on the volume";; esac
 [ ! -d $T/repo/.claude/worktrees/team-w2 ] && ok "legacy w2 folder gone" || bad "legacy w2 folder gone"
 echo "--- status"; $S -c $T/team.yaml status | cut -c1-150
@@ -345,7 +352,7 @@ echo "--- unmounted volume"
 sed "s#volume: $VOL#volume: /Volumes/NotMounted#" $T/team.yaml > $T/team2.yaml
 $S -c $T/team.yaml down --yes w2 >/dev/null
 echo '  w3: { title: Worker Three, workdir: { type: worktree }, prompt_text: "w3 prompt" }' >> $T/team2.yaml
-rm_out=$($S -c $T/team2.yaml up w3 2>&1); echo "$rm_out" | grep -E "error|skip" | cut -c1-150 | head -2
+rm_out=$($S -c $T/team2.yaml up --no-view w3 2>&1); echo "$rm_out" | grep -E "error|skip" | cut -c1-150 | head -2
 echo "$rm_out" | grep -q "is not mounted; refusing" && ok "unmounted volume refused with a clear error" || { bad "unmounted volume refused"; echo "<<<$rm_out>>>"; }
 [ ! -e /Volumes/NotMounted ] && ok "nothing created at the missing volume" || bad "nothing created at the missing volume"
 echo "--- iTerm view layout (generated script only; iTerm itself is not driven)"
@@ -696,6 +703,8 @@ for r in $(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml ids); do
   [ $rc = 0 ] && [ $rn = 0 ] && [ -n "$want" ] && [ "$c" = "$want" ] && [ "$none" = "$want" ] \
     && ok "example seat $r renders the same under LC_ALL=C and with no locale" || { bad "example seat $r under LC_ALL=C (rc=$rc) or no locale (rc=$rn)"; echo "$c" | tail -2; }
 done
+echo "--- iTerm"
+[ ! -e $T/osascript.log ] && ok "nothing in this run called osascript, so no iTerm window was opened" || { bad "osascript was called $(wc -l < $T/osascript.log | tr -d ' ') time(s)"; cut -c1-120 $T/osascript.log | head -5; }
 echo "--- cleanup"
 $S -c $T/team.yaml down --yes >/dev/null 2>&1; tmux kill-server 2>/dev/null
 for w in team-w1 team-w2; do git -C $T/repo worktree remove --force $VOL/$ROOT/$w 2>/dev/null; git -C $T/repo worktree remove --force $T/repo/.claude/worktrees/$w 2>/dev/null; done
