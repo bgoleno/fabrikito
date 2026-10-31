@@ -363,7 +363,7 @@ echo "--- say delivers only to a seat showing its input box"
 # CLI that draws them differently shows up as a mismatch here. pu shows an invented select list
 # with no numbers and no key hint: any dialog say does not know must fail closed too.
 roles=""
-for r in pp pm pd ph pu pb pf ps pg px pk pq po ta tb tc td; do roles="$roles  $r: { title: Seat $r, workdir: { type: project, path: $T/proj }, prompt_text: \"$r\" }
+for r in pp pm pd ph pu pb pf ps pg px pk pq po ta tb tc td te; do roles="$roles  $r: { title: Seat $r, workdir: { type: project, path: $T/proj }, prompt_text: \"$r\" }
 "; done
 cat > $T/tp.yaml <<Y
 team: tp
@@ -430,7 +430,7 @@ cat > $T/fake-pu-prompt.txt <<'M'
  ❯ Leave it as it is
    Change it
 M
-echo tall > $T/fake-ta-mode.txt; echo tall-dim > $T/fake-tb-mode.txt; echo tall-typed > $T/fake-tc-mode.txt; echo tall-short > $T/fake-td-mode.txt
+echo tall > $T/fake-ta-mode.txt; echo tall > $T/fake-te-mode.txt; echo tall-dim > $T/fake-tb-mode.txt; echo tall-typed > $T/fake-tc-mode.txt; echo tall-short > $T/fake-td-mode.txt
 echo below > $T/fake-pb-mode.txt; echo prefill > $T/fake-pf-mode.txt; echo swallow > $T/fake-ps-mode.txt
 echo suggest > $T/fake-pg-mode.txt; echo mixed > $T/fake-px-mode.txt; echo sticky > $T/fake-pk-mode.txt
 { printf '%s\n' "$fake_prompt"; for i in $(seq 1 5); do echo "later output line $i"; done; } > $T/fake-pq-output.txt
@@ -483,7 +483,7 @@ cf=$(PATH=$T/shim:$PATH TEAM_ROLE=em $S -c $T/tp.yaml say pq "capture fails" 2>&
 # A message taller than the input box (#47). Claude Code 2.1.316 scrolls a full box and shows only
 # the end of the text; below 801 characters and 4 lines it is not collapsed to a placeholder. ta..td
 # model that box in a 60x16 pane, which shows 3 rows.
-for r in ta tb tc td; do tmux resize-window -t "=tp-$r:" -x 60 -y 16; tmux send-keys -t "=tp-$r:" C-l; done; sleep 1
+for r in ta tb tc td te; do tmux resize-window -t "=tp-$r:" -x 60 -y 16; tmux send-keys -t "=tp-$r:" C-l; done; sleep 1
 msg() { local m="" i=0; while [ ${#m} -lt $1 ]; do i=$((i+1)); m="$m w$(printf %03d $i)"; done; m=${m# }; printf '%s' "${m:0:$1}"; }
 # tall <role> <ok|refused> <message> <what>: say's exit status, and whether an Enter followed the paste.
 tall() {
@@ -504,6 +504,8 @@ tall ta ok "$(msg 60)"$'\n'"$(msg 60)"$'\n'"$(msg 60)"$'\n'"$(msg 60)" "a messag
 tall tb refused "$(msg 290)" "a tall message with dim text after it"
 tall tc refused "$(msg 290)" "a tall message with text typed after it"
 tall td refused "$(msg 290)" "the end of a tall message in a box that is not full"
+# A full box whose visible end matches but is under 40 characters is too little to go on: refused.
+tall te refused "$(msg 50)"$'\n'"ok"$'\n'"go" "a tall message whose visible end is under 40 characters"
 $S -c $T/tp.yaml down --yes >/dev/null 2>&1
 echo "--- permission validation (check must refuse each file)"
 # A minimal valid team file; $1 is the sessions.claude body, $2 extra top-level lines, $3 extra keys for role em.

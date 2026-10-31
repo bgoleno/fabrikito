@@ -138,6 +138,12 @@ message. Anything else fails closed, with a reason:
 
 Attach to the seat, deal with it, and send again. If the box does not show the message after the paste,
 no Enter is sent and the text stays in the box, where it goes out with the next Enter; `say` says so.
+A message taller than the box (up to 800 characters and 3 lines; a longer paste shows as a `[Pasted
+text #N]` placeholder) scrolls it, so only the message's end is visible. `say` then sends it only when
+the box is full (floor((pane rows - 10) / 2) rows, at least 3) and its visible text is the message's
+last 40 or more characters. One gap remains: if someone starts typing in the moment between `say`'s
+empty-box check and the paste, and the message scrolls that text out of view, it goes out with the
+message.
 The input box is recognised as Claude Code 2.1.316 draws it, so a CLI update that changes it makes `say`
 refuse every seat until `factory.sh` is updated. A refused message is logged as NOT-DELIVERED. Messages
 are labelled `[from <role>]`, and the owner's are `[from owner]`. The label is set by the sender (from
