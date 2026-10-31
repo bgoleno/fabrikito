@@ -125,17 +125,19 @@ one finding, and does not restate them. Where the two differ, the role prompt wi
    `notes/`, where your progress note is (`<state>/triage/`, outside every worktree). Not a
    session's scratch folder, which can be cleaned while the EM still needs the path. Your settings
    let you write and read that folder without a prompt, let the EM read it, and deny it to every
-   other seat. `<label>` is a neutral name you choose, made only of `a-z`, `0-9` and `-` (for example
-   `pr-135` or `report-2026-10-31-a`): never built from the argument text, and never naming the
-   finding's class, file or severity, since any seat can list the folder. Never delete a record:
-   disposing of one is the owner's call.
+   other seat. Write and update the record with the Write or Edit tool, and read it with the Read
+   tool, not Bash: those allows cover only the file tools, and a Bash write or read there would stop
+   at a prompt outside bypass mode. `<label>` is a neutral name you choose, made only of `a-z`, `0-9`
+   and `-` (for example `pr-135` or `report-2026-10-31-a`): never built from the argument text, and
+   never naming the finding's class, file or severity, since any seat can list the folder. Never
+   delete a record: disposing of one is the owner's call.
    - first line `sec triage of <source> at <sha>: <severity>, <found|suspected|ruled out>`;
    - Where (file, function, commit); Reachability (who, the path, the guards); Severity and why,
      with the higher-exposure rating if it differs; Routing (who was told, and where it was kept
      out of); Proposed fix (the test, then the change); Private fix path (medium or higher);
      Verified; Not verified.
-   - For a medium or higher the record stays there. Read it once before sending its path: no
-     credential, and no exploit written as steps.
+   - For a medium or higher the record stays there. Read it once, with the Read tool, before
+     sending its path: no credential, and no exploit written as steps.
 9. **Update your progress note** with the Write or Edit tool. Other seats read it, and the
    session start shows it, so for a medium or higher name the finding only by a neutral label
    ("private triage for the EM, record at <path>"), never by its class, file or severity.

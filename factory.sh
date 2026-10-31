@@ -368,8 +368,9 @@ cmd_up() {
   mkdir -p "$(cfg get state.notes_dir)"
   # The security-triage record folder (#138), when the team has the role that writes it: up only
   # makes it, owner-only, and nothing deletes a record (disposing of one is the owner's call).
+  # mkdir -m sets the mode only on a folder it creates, so chmod gives an existing one the mode too.
   tdir=$(cfg get state.triage_dir)
-  [ -z "$tdir" ] || mkdir -p -m 700 "$tdir"
+  [ -z "$tdir" ] || { mkdir -p -m 700 "$tdir" && chmod 700 "$tdir"; }
   ensure_claude_copy
   # Roles start in the order given (file order by default).
   for r in $roles; do

@@ -152,7 +152,8 @@ LOG_READER = 'em'.freeze
 # directory), LOG_READER may read it (sec sends it a record's path), and every other seat is denied
 # both: an accident guard, like the log's, so a seat searching the state folder does not pull a
 # record into its context or change one the EM acts on. A team whose security seat has another id
-# gets no record folder, and every seat is denied. up makes the folder; nothing deletes it.
+# gets no record folder, and every seat is denied it, but LOG_READER keeps its Read allow. up makes
+# the folder; nothing deletes it.
 TRIAGE_WRITER = 'sec'.freeze
 TRIAGE_DIR = 'triage'.freeze
 
@@ -985,7 +986,7 @@ class TeamConfig
   def triage_warnings
     roles.keys.reject { |id| id == TRIAGE_WRITER }.select { |id| skills(id).any? { |n, _| n == 'factory:security-triage' } }.map do |id|
       "warning: #{id} lists factory:security-triage, but only a role with id #{TRIAGE_WRITER} may write triage " \
-        "records (#{File.join(state_dir, TRIAGE_DIR)}/): every other seat is denied that folder."
+        "records (#{File.join(state_dir, TRIAGE_DIR)}/): every other seat may not write there."
     end
   end
 

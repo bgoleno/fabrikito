@@ -504,11 +504,15 @@ done
 tesc=$(TEAM_STATE_DIR='/tmp/sf-e2e-no[such]*dir' ruby $SRC/lib/team_config.rb $T/sec.yaml settings sec | ruby -rjson -e 'puts JSON.parse(STDIN.read)["permissions"]["allow"]' | grep triage)
 printf '%s\n' "$tesc" | grep -qxF 'Edit(//tmp/sf-e2e-no\[such\]\*dir/triage/**)' && printf '%s\n' "$tesc" | grep -qxF 'Read(//private/tmp/sf-e2e-no\[such\]\*dir/triage/**)' \
   && ok "triage folder: glob characters in the state path are escaped, the trailing ** is not" || { bad "triage folder glob escaping"; echo "$tesc"; }
+# The skill keeps sec on the tools its allows cover: a Bash write or read of a record would prompt
+# outside bypass, which is what the folder's rules exist to prevent (#138, as #90 for the notes).
+tr '\n' ' ' < $SRC/plugin/skills/security-triage/SKILL.md | tr -s ' ' | grep -qF "Write and update the record with the Write or Edit tool, and read it with the Read tool, not Bash" \
+  && ok "the security-triage skill says to write and read the record with the file tools, not Bash" || bad "the security-triage skill does not say which tools write and read the record"
 # check names the rules on each seat's added line, and warns about a role other than sec that lists the skill.
 schk=$($S -c $T/sec.yaml check 2>&1); ssect() { echo "$schk" | sed -n "/^\[$1\]/,/^\[/p"; }
 ssect sec | grep -F "added: " | grep -qF ", Edit and Read allow on the triage record folder" && ssect em | grep -F "added: " | grep -qF ", Read allow and Edit deny on the triage record folder" \
   && ssect w1 | grep -F "added: " | grep -qF ", Edit and Read deny on the triage record folder" \
-  && echo "$schk" | grep -qxF "warning: w2 lists factory:security-triage, but only a role with id sec may write triage records ($T/state/triage/): every other seat is denied that folder." \
+  && echo "$schk" | grep -qxF "warning: w2 lists factory:security-triage, but only a role with id sec may write triage records ($T/state/triage/): every other seat may not write there." \
   && ! echo "$schk" | grep -q "warning: sec lists factory:security-triage" \
   && ok "check: the triage folder rules on each seat's added line, and a warning for w2, which lists the skill and is not sec" || { bad "check: triage folder"; ssect sec; ssect em; echo "$schk" | grep warning; }
 # up makes the folder, owner-only, for a team with a sec role. up writes every seat's settings, so
@@ -517,6 +521,12 @@ ssect sec | grep -F "added: " | grep -qF ", Edit and Read allow on the triage re
 sed 's/^  prefix: tt$/  prefix: ts/' $T/sec.yaml > $T/sec2.yaml
 TEAM_STATE_DIR=$T/secstate $S -c $T/sec2.yaml up --no-view sec >/dev/null 2>&1
 [ -d $T/secstate/triage ] && [ "$(stat -f %Lp $T/secstate/triage)" = 700 ] && ok "up makes the triage folder (mode 700) for a team with a sec role" || { bad "up: triage folder"; ls -la $T/secstate; }
+# An existing folder with a looser mode gets 700 too, and its records are left alone. sec is still
+# running, so this up only writes settings and folders and skips the seat.
+chmod 755 $T/secstate/triage; echo record > $T/secstate/triage/pr-1.md
+TEAM_STATE_DIR=$T/secstate $S -c $T/sec2.yaml up --no-view sec >/dev/null 2>&1
+[ "$(stat -f %Lp $T/secstate/triage)" = 700 ] && [ "$(cat $T/secstate/triage/pr-1.md 2>/dev/null)" = record ] \
+  && ok "up gives an existing triage folder mode 700 and leaves its records" || { bad "up: existing triage folder"; ls -la $T/secstate/triage; }
 tmux kill-session -t '=ts-sec' 2>/dev/null; git -C $T/repo worktree remove --force $VOL/$ROOT/team-sec 2>/dev/null
 # A user who switched every hook off keeps that choice in seats without a gate, which then get no
 # note: check says which. Throwaway config folders, so the owner's own settings play no part.
