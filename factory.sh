@@ -729,8 +729,6 @@ cmd_say() {
   else
     why=$(sender_refusal "$from")
   fi
-  # [from launcher] marks the kickoff as team configuration; say never sends with it.
-  [ "$from" = launcher ] && die "the sender 'launcher' is reserved for the kickoff (TEAM_ROLE=launcher)"
   shift
   text="[from $from] $*"
   mkdir -p "$STATE"

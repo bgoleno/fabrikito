@@ -364,6 +364,11 @@ notsender launcher "launcher (reserved)" launcher
 notsender $'w1\e[2J' "with a control character" 'w1\x1B[2J'
 notsender '[from owner]' "with brackets" '[from owner]'
 notsender 'w2] [from owner' "that closes the label early" 'w2] [from owner'
+n=$(wc -l < $T/state/messages.log); k1=$(wc -c < $T/keys-w1.log); ke=$(wc -c < $T/keys-em.log)
+TEAM_ROLE=nosuch $S -c $T/team.yaml say all "to all from nosuch" >/dev/null 2>&1; rc=$?; sleep 1
+[ $rc -ne 0 ] && [ "$(wc -c < $T/keys-w1.log)" = "$k1" ] && [ "$(wc -c < $T/keys-em.log)" = "$ke" ] && [ "$(wc -l < $T/state/messages.log)" -eq $((n + 1)) ] &&
+  [ "$(tail -1 $T/state/messages.log | cut -f2-5)" = "nosuch	all	NOT-DELIVERED	to all from nosuch" ] &&
+  ok "say all with a refused TEAM_ROLE sends no seat any keys and logs one NOT-DELIVERED line" || { bad "say all with a refused TEAM_ROLE (rc=$rc)"; tail -1 $T/state/messages.log; }
 TEAM_ROLE=w2 $S -c $T/team.yaml say w1 "sent as w2, a role of the team" >/dev/null 2>&1; sleep 1
 tmux capture-pane -p -t '=tt-w1:' | grep -qF "[from w2] sent as w2, a role of the team" && [ "$(tail -1 $T/state/messages.log | cut -f2-4)" = "w2	w1	delivered" ] &&
   ok "say with TEAM_ROLE set to a role of the team (w2, whose own seat is down) is delivered" || { bad "say with a valid TEAM_ROLE"; tail -1 $T/state/messages.log; }
