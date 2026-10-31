@@ -1004,6 +1004,16 @@ for i in $(seq 1 100); do case "$(geo sa)" in 220x50*) break ;; esac; sleep 0.1;
 kill -TERM $tp; wait $tp; trc=$?; sleep 1
 [ $trc -ne 0 ] && grep -qF "stopped midway" $T/keys-sa.log && [ "$(geo sa)" = "$ga" ] && [ "$(tail -c 1 $T/keys-sa.log | od -An -c | tr -d ' \n')" != '\r' ] && ok "a say stopped with TERM mid-delivery puts sa's size and window-size back, and sends no Enter" || { bad "say stopped mid-delivery (rc=$trc, $(geo sa), was $ga)"; cat $T/term.out; }
 tmux send-keys -t '=tp-sa:' C-u; sleep 0.5
+# The lock path must be a plain file (sec on #132): opening a FIFO there to append would block with
+# no limit, and a symlink could point anywhere. say refuses at once, naming the file; nothing is typed.
+for kind in fifo symlink; do
+  mkdir -p $T/state/say; rm -f $T/state/say/sc.lock; [ $kind = fifo ] && mkfifo $T/state/say/sc.lock || ln -s $T/elsewhere $T/state/say/sc.lock
+  : > $T/keys-sc.log; t0=$(date +%s)
+  lo=$(perl -e 'alarm 20; exec @ARGV' env TEAM_ROLE=em $S -c $T/tp.yaml say sc "lock is a $kind" 2>&1); lrc=$?; t1=$(date +%s)
+  [ $lrc = 1 ] && [ $((t1 - t0)) -lt 15 ] && echo "$lo" | grep -qF "is not a regular file" && [ ! -s $T/keys-sc.log ] \
+    && ok "a $kind at a seat's lock path: say refuses at once, naming it, and types nothing" || { bad "lock path is a $kind (rc=$lrc, $((t1 - t0))s)"; echo "$lo"; }
+done
+rm -f $T/state/say/sc.lock
 $S -c $T/tp.yaml down --yes >/dev/null 2>&1
 echo "--- permission validation (check must refuse each file)"
 # A minimal valid team file; $1 is the sessions.claude body, $2 extra top-level lines, $3 extra keys for role em.
