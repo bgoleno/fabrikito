@@ -437,6 +437,11 @@ class TeamConfig
     File.join(state_dir, NOTES_DIR, "#{id}.md")
   end
 
+  # Edit rules for a seat's note: as configured and as its real path, glob characters escaped.
+  def note_rules(id)
+    [File.expand_path(note_path(id)), real_path(note_path(id))].uniq.map { |p| "Edit(/#{glob_escape(p)})" }
+  end
+
   # A `permissions:` mapping (team level or a role's), checked. `where` names it in errors.
   def permission_section(h, where)
     return {} if h.nil?
@@ -587,9 +592,13 @@ class TeamConfig
     add.call(permission_section(@c['permissions'], 'permissions'), 'team')
     add.call(permission_section(role(id)['permissions'], "roles.#{id}.permissions"), "roles.#{id}")
     # The note is outside the seat's working directory, so writing it would prompt in a mode other
-    # than bypass: the seat may edit its own note (both spellings, as for protected paths), no other.
-    note = [File.expand_path(note_path(id)), real_path(note_path(id))].uniq.map { |p| "Edit(/#{glob_escape(p)})" }
-    add.call({ 'deny' => protected_paths(id).map { |p| "Edit(/#{p})" }, 'ask' => base_push_rules, 'allow' => note }, 'factory.sh')
+    # than bypass: the seat may edit its own note. Every other seat's note is denied, because the
+    # session-start hook puts a note into its seat's context: a seat that could write another's would
+    # have a lasting channel into it. Exact paths, both spellings, not notes/** (that would also
+    # deny the seat's own note, since deny wins over allow).
+    own = note_rules(id)
+    others = (roles.keys - [id]).flat_map { |r| note_rules(r) }
+    add.call({ 'deny' => protected_paths(id).map { |p| "Edit(/#{p})" } + others, 'ask' => base_push_rules, 'allow' => own }, 'factory.sh')
     out
   end
 
@@ -652,6 +661,19 @@ class TeamConfig
       'args' => [state_dir, id, workdir(id)], 'timeout' => 10 }
   end
 
+  # A line for check when the user's own settings switch every hook off: seats without a gate then
+  # get no session-start note. nil when hooks are on, or the file is missing or unreadable.
+  def hooks_note
+    path = File.join(claude_config_paths[0], 'settings.json')
+    j = JSON.parse(File.read(path)) rescue nil
+    return nil unless j.is_a?(Hash) && j['disableAllHooks'] == true
+
+    off = roles.keys.reject { |r| gate_on_stop?(r) }
+    who = off.empty? ? 'no seat gets' : "#{off.join(', ')} #{off.size == 1 ? 'gets' : 'get'}"
+    "disableAllHooks is true in #{path}, so #{who} no session-start note (a gated seat turns hooks " \
+      'back on for its gate)'
+  end
+
   # The seat's Claude Code settings, written to <state>/settings/<id>.json and passed with
   # --settings. Later features add their own top-level keys (hooks, for example) here.
   def settings(id)
@@ -666,12 +688,15 @@ class TeamConfig
     # one in a project's .claude/settings.json. Update deliberately instead (README).
     out['env'] = { 'DISABLE_AUTOUPDATER' => '1' }
     out['hooks'] = { 'SessionStart' => [{ 'hooks' => [session_start_hook(id)] }] }
-    out['hooks']['Stop'] = [{ 'hooks' => [stop_gate_hook(id)] }] if gate_on_stop?(id)
-    # --settings outranks project and local settings, so a disableAllHooks: true written in the
-    # seat's .claude/ cannot switch the factory's hooks (session start, the gate) off. It also turns
-    # on the user's own hooks for every seat if they had switched them all off in
-    # ~/.claude/settings.json.
-    out['disableAllHooks'] = false
+    if gate_on_stop?(id)
+      out['hooks']['Stop'] = [{ 'hooks' => [stop_gate_hook(id)] }]
+      # --settings outranks project and local settings, so a disableAllHooks: true written in the
+      # seat's .claude/ cannot switch the gate off. It also turns on the user's own hooks for this
+      # seat if they had switched them all off in ~/.claude/settings.json. Only the gate, a safety
+      # control, justifies that: the session-start note is a convenience, so a seat without a gate
+      # keeps the owner's choice and goes without the note (check says so, see hooks_note).
+      out['disableAllHooks'] = false
+    end
     out
   end
 
@@ -687,9 +712,10 @@ class TeamConfig
         own = merged[list] - factory
         out << format('    %-5s: %s', list, own.empty? ? '(none)' : own.join(', '))
       end
-      added = merged['deny'].count { |r| factory.include?(r) }
+      notes = (roles.keys - [id]).flat_map { |r| note_rules(r) }
+      added = merged['deny'].count { |r| factory.include?(r) && !notes.include?(r) }
       asks = merged['ask'].count { |r| factory.include?(r) }
-      note = merged['allow'].any? { |r| factory.include?(r) } ? ', Edit allow on its own progress note' : ''
+      note = merged['allow'].any? { |r| factory.include?(r) } ? ', Edit allow on its own progress note and deny on the other seats\'' : ''
       out << "    added: Edit deny on #{added} protected paths#{asks.positive? ? ", ask on #{asks} push-to-#{base_branch} patterns" : ''}#{note}"
       out << '    note : allow rules have no effect in bypassPermissions' if mode.start_with?('bypassPermissions') && !(merged['allow'] - factory).empty?
       out << '    note : ask rules are refused in dontAsk mode, not asked' if mode == 'dontAsk' && !merged['ask'].empty?
@@ -812,6 +838,7 @@ when 'get'
   when 'claude.config_dir' then puts cfg.claude_config_paths.first
   when 'state.generated_dirs' then puts GENERATED_DIRS
   when 'state.notes_dir' then puts File.join(cfg.state_dir, NOTES_DIR)
+  when 'hooks.note' then puts cfg.hooks_note.to_s
   when 'repo.gate_summary'
     puts(cfg.gate ? "#{cfg.gate} (timeout #{cfg.gate_timeout}s; a seat may stop after #{cfg.gate_max_blocks} failed gates in a row)" : 'none')
   else die "unknown key '#{key}'"

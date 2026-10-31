@@ -192,7 +192,7 @@ for p in "$RT/state/settings/**" "$RT/state/launch/**" "$RT/state/prompts/**" "$
   rules $T/state/settings/w1.json deny | grep -qxF "Edit(/$p)" || missing="$missing $p"
 done
 [ -z "$missing" ] && ok "w1.json: Edit deny on every protected path" || { bad "protected paths missing:$missing"; rules $T/state/settings/w1.json deny; }
-rules $T/state/settings/w1.json deny | grep -qE "state/notes|Edit\(//$RT/state/\*\*\)|Edit\(//$RHC/\*\*\)" && bad "protected paths are too wide (state notes, whole state dir or whole ~/.claude)" || ok "protected paths leave state/notes and the rest of ~/.claude writable"
+rules $T/state/settings/w1.json deny | grep -qE "state/notes/\*\*|state/notes/w1\.md|Edit\(//$RT/state/\*\*\)|Edit\(//$RHC/\*\*\)" && bad "protected paths are too wide (all notes or the seat's own, whole state dir or whole ~/.claude)" || ok "protected paths leave the seat's own note and the rest of ~/.claude writable"
 # Claude Code puts the worktrees it makes (--worktree, subagents with isolation: worktree) under
 # <repo>/.claude/worktrees/, so no deny may cover that folder.
 # $T is the path as configured; on macOS it runs through the /var symlink, so its real path ($RT)
@@ -248,16 +248,32 @@ nostop < $T/state/settings/em.json && TEAM_STATE_DIR=$T/state ruby $SRC/lib/team
 sshook() { ruby -rjson -e 'j = JSON.parse(STDIN.read); a = (j["hooks"] || {})["SessionStart"] || []; h = (a[0] || {}).fetch("hooks", [])[0] || {}
   puts [a.size, (a[0] || {}).key?("matcher"), h["type"], h["command"], *h["args"], h["timeout"], j["disableAllHooks"].inspect].join(" | ")' 2>&1; }
 ss_em=$(sshook < $T/state/settings/em.json); ss_w1=$(sshook < $T/state/settings/w1.json); ss_w2=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml settings w2 | sshook)
-[ "$ss_em" = "1 | false | command | $SRC/lib/session_start.sh | $T/state | em | $T/proj | 10 | false" ] \
+# disableAllHooks: false only for the gated seat (w1): the note is a convenience and does not
+# override a user who switched every hook off; the gate is a control and does.
+[ "$ss_em" = "1 | false | command | $SRC/lib/session_start.sh | $T/state | em | $T/proj | 10 | nil" ] \
   && [ "$ss_w1" = "1 | false | command | $SRC/lib/session_start.sh | $T/state | w1 | $VOL/$ROOT/team-w1 | 10 | false" ] \
-  && [ "$ss_w2" = "1 | false | command | $SRC/lib/session_start.sh | $T/state | w2 | $VOL/$ROOT/team-w2 | 10 | false" ] \
-  && ok "every seat (em, w1, w2): one SessionStart hook running session_start.sh with state, role, workdir; disableAllHooks false" || { bad "SessionStart hook"; echo "$ss_em"; echo "$ss_w1"; echo "$ss_w2"; }
-# A seat may write its own note without a prompt (it is outside its working directory), and only its own.
-rules $T/state/settings/em.json allow | grep -qxF "Edit(/$RT/state/notes/em.md)" && rules $T/state/settings/em.json allow | grep -qxF "Edit(/$T/state/notes/em.md)" \
-  && ! rules $T/state/settings/em.json allow | grep -qF "notes/w1" && ! rules $T/state/settings/em.json deny | grep -qF "state/notes" \
-  && ok "em.json: Edit allowed on em's own note (both spellings), not on another seat's, and no deny on notes" || { bad "note allow rules"; rules $T/state/settings/em.json allow; }
-sect em | grep -qF "added: Edit deny on" && sect em | grep -qF ", Edit allow on its own progress note" && ! sect em | grep -E "^ +allow:" | grep -qF notes \
+  && [ "$ss_w2" = "1 | false | command | $SRC/lib/session_start.sh | $T/state | w2 | $VOL/$ROOT/team-w2 | 10 | nil" ] \
+  && ok "every seat (em, w1, w2): one SessionStart hook running session_start.sh with state, role, workdir; disableAllHooks false only for gated w1" || { bad "SessionStart hook"; echo "$ss_em"; echo "$ss_w1"; echo "$ss_w2"; }
+# A seat may write its own note without a prompt (it is outside its working directory), and only its
+# own: every other seat's note is denied, as exact paths in both spellings, since a note is put into
+# its seat's context at each start.
+na=""; for f in em w1; do for o in em w1 w2; do for sp in "$RT" "$T"; do
+  if [ $f = $o ]; then rules $T/state/settings/$f.json allow | grep -qxF "Edit(/$sp/state/notes/$o.md)" || na="$na $f-allows-$o($sp)"
+    rules $T/state/settings/$f.json deny | grep -qxF "Edit(/$sp/state/notes/$o.md)" && na="$na $f-denies-own($sp)"
+  else rules $T/state/settings/$f.json deny | grep -qxF "Edit(/$sp/state/notes/$o.md)" || na="$na $f-denies-$o($sp)"
+    rules $T/state/settings/$f.json allow | grep -qF "notes/$o.md" && na="$na $f-allows-other-$o"; fi
+done; done; done
+rules $T/state/settings/w1.json deny | grep -qF "state/notes/**" && na="$na notes/**-denied"
+[ -z "$na" ] && ok "em.json, w1.json: Edit allowed on the seat's own note, denied on every other seat's (both spellings, exact paths)" || { bad "note rules:$na"; rules $T/state/settings/w1.json deny | grep notes; rules $T/state/settings/w1.json allow; }
+sect em | grep -qF "added: Edit deny on" && sect em | grep -qF ", Edit allow on its own progress note and deny on the other seats'" && ! sect em | grep -E "^ +(allow|deny) *:" | grep -qF notes \
   && ok "check: the note allow is listed as added by the launcher, not among the team's allow rules" || { bad "check: note allow line"; sect em; }
+# A user who switched every hook off keeps that choice in seats without a gate, which then get no
+# note: check says which. Throwaway config folders, so the owner's own settings play no part.
+mkdir -p $T/cfgoff $T/cfgon && echo '{"disableAllHooks": true}' > $T/cfgoff/settings.json && echo '{}' > $T/cfgon/settings.json
+hk=$(CLAUDE_CONFIG_DIR=$T/cfgoff $S -c $T/team.yaml check 2>&1 | grep "^hooks ")
+[ "$hk" = "hooks     : disableAllHooks is true in $T/cfgoff/settings.json, so em, w2 get no session-start note (a gated seat turns hooks back on for its gate)" ] \
+  && ! CLAUDE_CONFIG_DIR=$T/cfgon $S -c $T/team.yaml check 2>&1 | grep -q "^hooks " && ! CLAUDE_CONFIG_DIR=$T/no-such-cfg $S -c $T/team.yaml check 2>&1 | grep -q "^hooks " \
+  && ok "check: a hooks line naming the ungated seats when the user's settings disable all hooks, none otherwise" || { bad "check: hooks line"; echo "$hk"; }
 [ -d $T/state/notes ] && ok "up makes the notes folder under the state folder" || bad "no $T/state/notes after up"
 grep -qF "$T/state/notes/em.md" $T/state/prompts/em.md && ok "the rendered prompt names the seat's own note" || bad "the prompt does not name $T/state/notes/em.md"
 grep -qF "progress note" $T/state/prompts/em.kickoff && ok "the default kickoff asks for the note's task and next step" || { bad "kickoff and the note"; cat $T/state/prompts/em.kickoff; }
@@ -683,6 +699,18 @@ sst $T/s; [ $rc = 0 ] && [ "$(printf %s "$out" | wc -c | tr -d ' ')" -lt 9000 ] 
   && ok "a long note is truncated (output under 9000 bytes), and the git lines still follow" || { bad "long note ($(printf %s "$out" | wc -c) bytes)"; echo "$out" | tail -5; }
 printf 'caf\xc3\xa9 ok\nbad \xff byte\n' > $T/sstate/notes/w9.md
 LC_ALL=C sst $T/s; [ $rc = 0 ] && echo "$out" | grep -qF "café ok" && ok "a note with UTF-8 and an invalid byte is shown under LC_ALL=C, exit 0" || { bad "non-ASCII note (rc=$rc)"; echo "$out$err"; }
+# Terminal escapes in a note or a commit subject come out as plain text: C0 controls other than tab
+# and newline, and DEL, are dropped from everything the hook prints.
+printf 'clip \033]52;c;ZXZpbA==\007 title \033]0;x\007 del \177 tab\tkept\n' > $T/sstate/notes/w9.md
+git -C $T/s commit -q --allow-empty -m "$(printf 'subject \033[31mred\033[0m end')"
+sst $T/s; [ $rc = 0 ] && ! LC_ALL=C grep -q "$(printf '[\001-\010\013-\037\177]')" $T/sout && grep -qF "$(printf 'clip ]52;c;ZXZpbA== title ]0;x del  tab\tkept')" $T/sout \
+  && grep -qF "subject [31mred[0m end" $T/sout && ok "control characters are stripped from the note and the git output; a tab is kept" || { bad "control characters in hook output (rc=$rc)"; od -c $T/sout | grep -E '033|007|177' | head -3; }
+# A git status past its own limit (4s) is cut, and the note still arrives: Claude Code drops all of a
+# hook's output when the hook itself runs past its timeout (10s).
+mkdir -p $T/slowgit && printf '#!/bin/sh\ncase " $* " in *" status "*) exec sleep 30;; esac\nexec %s "$@"\n' "$(command -v git)" > $T/slowgit/git && chmod +x $T/slowgit/git
+t0=$(date +%s); PATH=$T/slowgit:$PATH sst $T/s; t1=$(date +%s)
+[ $rc = 0 ] && [ $((t1 - t0)) -lt 9 ] && echo "$out" | grep -qF "clip" && echo "$out" | grep -qF "git status did not finish within 4s" && echo "$out" | grep -qF "subject" \
+  && ok "a git status that hangs is cut at 4s (the hook took $((t1 - t0))s): the note and recent commits still print" || { bad "slow git status (rc=$rc, $((t1 - t0))s)"; echo "$out"; }
 echo "--- the seats' claude copy: replaced, failed, mid-reinstall"
 cc -o $CP.new $T/c.c && mv $CP.new $CP
 $S -c $T/team.yaml status | grep -E "^em " | grep -q REPLACED && ok "status: a seat whose claude file was replaced under it shows REPLACED" || { bad "status REPLACED"; $S -c $T/team.yaml status; }
