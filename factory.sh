@@ -838,13 +838,16 @@ box_full_rows() {
 }
 
 # Whether box state $2 of seat $1 shows just message $3, after its paste: text with nothing drawn
-# dim, such as a suggestion left next to it, that starts with the message's "[from <role>]" (or is
-# the placeholder Claude Code shows for a long paste), or else shows the message's end in a full,
-# scrolled box. For the end: the visible text, all whitespace removed, is a suffix of the message,
-# likewise, of at least 40 characters (whitespace is where they may differ: the box wraps at spaces
-# and box_state joins rows with one), and the box shows as many rows as it can. A box only scrolls
-# once full, so a shorter box that does not start with the label holds something else. Text before
-# the message would show at the top and text after it at the end, so neither passes, except one gap:
+# dim, such as a suggestion left next to it, that is the whole message (or the placeholder Claude
+# Code shows for a long paste), or else shows the message's end in a full, scrolled box. Whitespace
+# is where the box and the message may differ (the box wraps at spaces and box_state joins rows with
+# one), so both are compared with all of it removed. Whole: the visible text is the message. It is
+# not enough that it starts with the message's "[from <role>]": text typed after the message would
+# go out with it, and a box that scrolled in a small pane is whole again once grown (tl on #132).
+# End: the visible text is a suffix of the message of at least 40 characters, and the box shows as
+# many rows as it can. A box only scrolls once full, so a shorter box that is not the whole message
+# holds something else. Text before the message would show at the top and text after it at the end,
+# so neither passes, except one gap:
 # a draft typed in the moment between the empty-box check and the paste, scrolled out of view by a
 # tall message, would go out with it (the README says so). When the box does not show just the
 # message, it prints why, so the refusal names the real cause (#84).
@@ -860,10 +863,11 @@ EOF
     *) box_refusal "$1" "$2"; return 1 ;;
   esac
   [ "$dim" = 0 ] || { echo "dim text was drawn next to the message (a hint or suggestion from Claude Code)"; return 1; }
-  case $vis in "${3%%]*}]"* | "[Pasted text #"*) return 0 ;; esac
-  full=$(box_full_rows "$1") || { echo "could not read the height of $1's pane"; return 1; }
-  [ "$rows" = "$full" ] || { echo "the box shows $rows of its $full rows and does not start with the message, so it holds something else"; return 1; }
+  case $vis in "[Pasted text #"*) return 0 ;; esac
   m=$(printf '%s' "$3" | LC_ALL=C tr -d '[:space:]'); v=$(printf '%s' "$vis" | LC_ALL=C tr -d '[:space:]')
+  [ "$v" != "$m" ] || return 0
+  full=$(box_full_rows "$1") || { echo "could not read the height of $1's pane"; return 1; }
+  [ "$rows" = "$full" ] || { echo "the box shows $rows of its $full rows and not just the message, so it holds something else"; return 1; }
   [ "${#v}" -ge 40 ] || { echo "only ${#v} characters of the message's end are visible (short last lines in a narrow pane), under the 40 say needs to recognise it"; return 1; }
   [ "${m%"$v"}" != "$m" ] || { echo "the box does not end with the message: other text is in it"; return 1; }
 }

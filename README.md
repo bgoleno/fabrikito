@@ -266,12 +266,14 @@ message. Anything else fails closed, with a reason:
   however it ends), so two messages never mix in one box. Anything other than a plain file at that
   path (a FIFO, a symlink) is refused at once: remove it.
 
-Attach to the seat, deal with it, and send again. If the box does not show the message after the paste,
-no Enter is sent and the text stays in the box, where it goes out with the next Enter; `say` says so,
-and says why: the screen no longer ends with the box, dim text was drawn next to the message, the box
-shows fewer rows than it can and does not start with the message, too little of the message's end is
-visible (under 40 characters, as with short last lines in a narrow pane), or the box does not end with
-the message.
+Attach to the seat, deal with it, and send again. After the paste, `say` sends Enter only when the box
+holds the message and nothing else: the whole message (whitespace aside, since the box wraps it), its
+placeholder, or the end of a message taller than the box (below). If it does not, no Enter is sent and
+the text stays in the box, where it goes out with the next Enter; `say` says so, and says why: the
+screen no longer ends with the box, dim text was drawn next to the message, the box shows fewer rows
+than it can and not just the message (as when someone typed after it), too little of the message's
+end is visible (under 40 characters, as with short last lines in a narrow pane), or the box does not
+end with the message.
 
 **Short panes ([#84](../../issues/84)).** A seat's pane takes the size of the iTerm pane attached to
 it, and the team view makes them small: 89x13 with ten seats on a 77-row display, about 10 rows with
