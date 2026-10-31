@@ -1254,6 +1254,24 @@ before=$(runs); gate s5 $T/gb
   && ok "a git status that fails (garbage index): the gate runs and its failure sends the seat back, saying status failed" || { bad "failed git status (rc=$rc, gate runs $before -> $(runs))"; echo "$err"; }
 touch $T/g-pass; gate s5 $T/gb; rm $T/g-pass
 [ $rc = 0 ] && ok "a git status that fails, passing gate: the stop goes through" || { bad "failed git status, passing gate (rc=$rc)"; echo "$err"; }
+# A repository git cannot read is not taken for no repository (#118). With a corrupt HEAD, git says
+# "not a git repository", exactly as it does for a plain folder, but the .git is there: the gate
+# runs, and the send-back names the repository and git's error. The same for a worktree, whose .git
+# is a file pointing at a gitdir with a corrupt HEAD. A plain folder with files stays ungated.
+mkdir -p $T/gh && echo a > $T/gh/f && git -C $T/gh init -q && git -C $T/gh add f && git -C $T/gh commit -q -m init && echo b >> $T/gh/f && printf 'garbage\n' > $T/gh/.git/HEAD
+git -C $T/gh rev-parse --is-inside-work-tree >/dev/null 2>&1 && bad "test setup: a corrupt HEAD did not make git rev-parse fail"
+before=$(runs); gate s6 $T/gh
+[ $rc = 2 ] && [ "$(runs)" = $((before + 1)) ] && echo "$err" | grep -qF "git cannot read the repository at $T/gh/.git" && echo "$err" | grep -qF "not a git repository" && echo "$err" | grep -qF "FAKE FAILURE" \
+  && ok "a corrupt HEAD with a dirty tree: the gate runs, and the send-back names the repository and git's error" || { bad "corrupt HEAD (rc=$rc, gate runs $before -> $(runs))"; echo "$err"; }
+mkdir -p $T/gwm && git -C $T/gwm init -q && git -C $T/gwm commit -q --allow-empty -m init && git -C $T/gwm worktree add -q --detach $T/gwt 2>/dev/null
+touch $T/gwt/new.txt; printf 'garbage\n' > "$(git -C $T/gwt rev-parse --git-dir)/HEAD"
+[ -f $T/gwt/.git ] && ! git -C $T/gwt rev-parse --is-inside-work-tree >/dev/null 2>&1 || bad "test setup: the worktree has no .git file, or its corrupt HEAD did not make rev-parse fail"
+before=$(runs); gate s7 $T/gwt
+[ $rc = 2 ] && [ "$(runs)" = $((before + 1)) ] && echo "$err" | grep -qF "git cannot read the repository at $T/gwt/.git" \
+  && ok "a worktree (.git file) whose gitdir has a corrupt HEAD: the gate runs" || { bad "worktree with a corrupt HEAD (rc=$rc, gate runs $before -> $(runs))"; echo "$err"; }
+mkdir -p $T/plain/sub && echo x > $T/plain/sub/file.txt
+before=$(runs); gate s8 $T/plain/sub
+[ $rc = 0 ] && [ "$(runs)" = "$before" ] && [ -z "$err" ] && ok "a plain folder with files and no .git anywhere above it: still ungated" || { bad "plain folder (rc=$rc, gate runs $before -> $(runs))"; echo "$err"; }
 echo "--- session start hook (lib/session_start.sh, run directly with hook input on stdin)"
 # sst <workdir>: runs the hook for role w9 with state $T/sstate; sets rc, out, err.
 sst() { printf '{"session_id":"s1","source":"%s"}' "${SRC_KIND:-startup}" | $SRC/lib/session_start.sh $T/sstate w9 "$1" >$T/sout 2>$T/serr; rc=$?; out=$(cat $T/sout); err=$(cat $T/serr); }
