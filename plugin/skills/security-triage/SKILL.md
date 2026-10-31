@@ -44,8 +44,10 @@ one finding, and does not restate them. Where the two differ, the role prompt wi
      ask the EM. The owner decides whether outside code runs on their machine.
    - For a PR, get its head with `git fetch origin pull/<n>/head`; `git rev-parse FETCH_HEAD` must
      equal `headRefOid`, or the head moved: pin it again.
-   - Read the code at that commit (`git show <sha>:<path>`, or `git archive <sha> | tar -x -C <dir>`
-     into a throwaway folder outside your worktree), never by switching your worktree.
+   - Read the code at that commit with `git show <sha>:<path>`, never by switching your worktree.
+     If you need a whole tree, `git archive <sha> | tar -x -C <dir>` into a throwaway folder
+     outside your worktree, knowing that a `.gitattributes` with `export-ignore` or
+     `export-subst` changes what it writes; `git show` reads the commit as it is.
    - Note the repository's visibility (`gh repo view <repo> --json visibility`). It changes who can
      reach the code, not where the finding may be written: step 6 treats the project's tracker as
      public even for a private repository, because visibility can change and every seat and
@@ -68,12 +70,14 @@ one finding, and does not restate them. Where the two differ, the role prompt wi
    a seat already runs code and changes its own worktree, and permission rules guard against
    accidents, not attacks. Otherwise:
    - **high:** reachable from outside the trusted set (anyone, or an outside contributor), or any
-     exposed credential; leads to running code, or to reading or changing the owner's data,
-     credentials, server or repository.
+     exposed credential; leads to running code, or to reading or changing the data, credentials,
+     server or repository of the owner or of the project's users (for example one user reading or
+     changing another's records).
    - **medium:** reachable by a trusted party (a seat, a script, the shared account) with that
      impact beyond what that party can already do on purpose, through one crafted input or one
      plausible mistake (for example a copied team file, or a wrong working folder) that reaches the
-     live team, the owner's data or the repository; or reachable from outside with contained impact.
+     live team, the owner's or the users' data, or the repository; or reachable from outside with
+     contained impact.
    - **low:** needs several uncommon conditions at once, or an unlikely precondition; or its impact
      stays in a throwaway folder or the seat's own state; or hardening with no reachable path in
      any supported setup.
@@ -91,8 +95,10 @@ one finding, and does not restate them. Where the two differ, the role prompt wi
      fix, and the path of your triage record (step 8). Never in an issue, PR, review, commit
      message, branch name or public alert comment. A message with an exposed credential also says
      that rotating it is the owner's step.
-     - Found while reviewing a PR: give the author the details by `SendMessage`, and say no more on
-       the PR than that a change was sent to the author and the EM. Give no class, file or severity.
+     - Found while reviewing a PR: ask the EM in that message to hold the merge until the fix is
+       reviewed. Give the author the details by `SendMessage`, and say no more on the PR than that
+       a change was sent to the author and the EM, with no class, file or severity, posted with
+       `gh pr comment --body-file <file>` (never a body in the command itself).
      - Already written somewhere public: add nothing there, and tell the EM where it is. Editing or
        deleting it is the owner's decision.
    - "Unfixed" means not fixed on the base. A merged fix is still not disclosed until the owner says
@@ -115,7 +121,9 @@ one finding, and does not restate them. Where the two differ, the role prompt wi
      and the condition for disclosure (the owner's word). Create nothing there yourself unless the
      EM asks you to: the place is decided by `sec` and the EM, and the repository's settings are
      the owner's.
-8. **Write the triage record** to a file outside every worktree (your scratch or state folder):
+8. **Write the triage record** to a file outside every worktree, in your state folder (the one your
+   progress note is in), not a session's scratch folder, which can be cleaned while the EM still
+   needs the path:
    - first line `sec triage of <source> at <sha>: <severity>, <found|suspected|ruled out>`;
    - Where (file, function, commit); Reachability (who, the path, the guards); Severity and why,
      with the higher-exposure rating if it differs; Routing (who was told, and where it was kept
