@@ -118,9 +118,8 @@ nothing outside its scratch clone. Use it to see what a real run would do.
 In your session, and to the owner as your role prompt says (a dry run only in your session):
 - One line per PR: number, `H` (7 characters), the clearances counted at `H`, the gate's result
   line, `T`, and one of `merged <merge commit>`, `would merge` or `stopped: <reason>`.
-- If the train stopped, the PRs it did not reach: they need another typed command. Name them, but
-  do not write out a command line for the owner to copy: Claude Code can offer your text as its
-  suggested next prompt, which Tab and Enter would send as typed.
+- If the train stopped, the PRs it did not reach: they need another typed command. A suggested
+  prompt the owner accepts and sends counts as typed input.
 - After a real run: what merged, at which head, the gated tree, the issues it closed (or did not),
   and whether the owner's checkout was fast-forwarded.
 
