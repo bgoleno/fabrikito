@@ -51,6 +51,12 @@ sessions:
     # --setting-sources, --permission-prompt-tool) are refused here, and so are permission flags
     # when permission_mode is set.
     # args: []
+    # Load the factory's own plugin (plugin/ next to factory.sh) into every seat with --plugin-dir.
+    # Its skills show as /factory:<skill>, and only sessions factory.sh starts get them. Default true,
+    # so a team file without this key gets the plugin at its next `up`, and gets every skill (and,
+    # later, every hook) added to plugin/ after that. false: the flag is omitted. A --plugin-dir of
+    # your own in args still loads; the flag repeats.
+    # plugin: true
     # Permission mode for every seat (a role can override it): default (alias manual) |
     # acceptEdits | plan | auto | dontAsk | bypassPermissions. auto runs without routine prompts
     # and has a classifier check risky actions. bypassPermissions skips every prompt and is meant
@@ -118,7 +124,13 @@ permissions:
 # Seats start in this order. Each needs: title, workdir, and one of `prompt` (a file) or
 # `prompt_text` (inline). `summary` is the line shown in the roster every seat sees.
 # Optional per role: `gate_on_stop:` (see repo.gate), `model:`, `effort:` and `permission_mode:` (override sessions.claude),
-# `permissions:` (added to the team's), `session:` (tmux name), `kickoff:` (first message).
+# `permissions:` (added to the team's), `session:` (tmux name), `kickoff:` (first message),
+# `skills:` (skills to name in the seat's prompt, below).
+# skills: each item is a skill name as the Skill tool shows it (`name`, or `plugin:name` for a
+# plugin's skill), or a one-entry mapping of that name to when to use it. They are listed after the
+# role's prompt with a note that a skill may not be installed, so naming one installs nothing and
+# a seat without it works on. The ones below come from the superpowers plugin and Claude Code's own
+# bundled skills: keep the ones you have, add your own.
 #   workdir.type: project   an existing folder: path: ...
 #   workdir.type: worktree  a git worktree under storage (optional: name: folder-name)
 roles:
@@ -127,6 +139,8 @@ roles:
     summary: owns the board, assigns work, the owner's single contact
     workdir: { type: project, path: /path/to/your/checkout }
     prompt: ../roles/em.md
+    skills:
+      - "superpowers:brainstorming": to pin down a vague request from the owner before filing issues
     permissions:
       # Ask before a force-push. Engineers keep force-pushing their own branches unattended (they
       # rebase); "never force-push a branch you did not create" cannot be written as a pattern.
@@ -141,6 +155,9 @@ roles:
     summary: design direction, reviews every PR
     workdir: { type: worktree }
     prompt: ../roles/tl.md
+    skills:
+      - "code-review": to review a PR's diff for correctness bugs
+      - "superpowers:writing-plans": to turn an agreed design into steps an engineer can follow
     permissions: { deny: ["Bash(gh pr merge *)", "Bash(gh api *pulls/*/merge*)", "Bash(gh api graphql*mergePullRequest*)"] }
   fs1:
     title: Senior Full-Stack Software Engineer
@@ -148,6 +165,11 @@ roles:
     workdir: { type: worktree }
     prompt: ../roles/fs.md
     gate_on_stop: true
+    skills:
+      - "superpowers:test-driven-development": before writing implementation code
+      - "superpowers:systematic-debugging": on a bug or a failing test, before proposing a fix
+      - "superpowers:verification-before-completion": before saying work is done or opening a PR
+      - "superpowers:receiving-code-review": before acting on review comments
     permissions: { deny: ["Bash(gh pr merge *)", "Bash(gh api *pulls/*/merge*)", "Bash(gh api graphql*mergePullRequest*)"] }
   fs2:
     title: Senior Full-Stack Software Engineer
@@ -155,6 +177,11 @@ roles:
     workdir: { type: worktree }
     prompt: ../roles/fs.md
     gate_on_stop: true
+    skills:
+      - "superpowers:test-driven-development": before writing implementation code
+      - "superpowers:systematic-debugging": on a bug or a failing test, before proposing a fix
+      - "superpowers:verification-before-completion": before saying work is done or opening a PR
+      - "superpowers:receiving-code-review": before acting on review comments
     permissions: { deny: ["Bash(gh pr merge *)", "Bash(gh api *pulls/*/merge*)", "Bash(gh api graphql*mergePullRequest*)"] }
   qa:
     title: QA Engineer
@@ -162,10 +189,16 @@ roles:
     workdir: { type: worktree }
     prompt: ../roles/qa.md
     gate_on_stop: true
+    skills:
+      - "superpowers:verification-before-completion": before reporting a result
+      - "superpowers:systematic-debugging": when a behaviour is not what the issue says
+      - "run": to start the app and see a change working
     permissions: { deny: ["Bash(gh pr merge *)", "Bash(gh api *pulls/*/merge*)", "Bash(gh api graphql*mergePullRequest*)"] }
   sec:
     title: Security Engineer
     summary: security review and triage
     workdir: { type: worktree }
     prompt: ../roles/sec.md
+    skills:
+      - "security-review": to review a branch's pending changes for security issues
     permissions: { deny: ["Bash(gh pr merge *)", "Bash(gh api *pulls/*/merge*)", "Bash(gh api graphql*mergePullRequest*)"] }
