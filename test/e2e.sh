@@ -165,6 +165,7 @@ missing=""
 for p in "$RT/state/settings/**" "$RT/state/launch/**" "$RT/state/prompts/**" "$RT/state/messages.log" "$RT/team.yaml" \
   "$RSRC/roles/common.md" "$RSRC/factory.sh" "$RSRC/lib/**" "$RSRC/roles/**" "$RT/bin/wrap" \
   "$RT/repo/.claude/settings.json" "$RT/repo/.claude/settings.local.json" "$RT/repo/.claude/skills/**" "$RT/repo/.claude/agents/**" "$RT/repo/.claude/commands/**" \
+  "$RT/repo/.mcp.json" "$RT/repo/.claude/hooks/**" "$RT/repo/.claude/CLAUDE.md" "$RT/repo/.claude/rules/**" \
   "$RW1/.claude/settings.json" "$RW1/.claude/settings.local.json" "$RHC/settings.json" "$RH/.claude.json" "$RHC/CLAUDE.md" \
   "$RHC/plugins/**" "$RHC/skills/**" "$RHC/agents/**" "$RHC/commands/**" "$RHC/hooks/**"; do
   rules $T/state/settings/w1.json deny | grep -qxF "Edit(/$p)" || missing="$missing $p"
@@ -173,10 +174,17 @@ done
 rules $T/state/settings/w1.json deny | grep -qE "state/notes|Edit\(//$RT/state/\*\*\)|Edit\(//$RHC/\*\*\)" && bad "protected paths are too wide (state notes, whole state dir or whole ~/.claude)" || ok "protected paths leave state/notes and the rest of ~/.claude writable"
 # Claude Code puts the worktrees it makes (--worktree, subagents with isolation: worktree) under
 # <repo>/.claude/worktrees/, so no deny may cover that folder.
-rules $T/state/settings/w1.json deny | grep -E "^Edit\(/$RT/repo/\.claude/(\*\*|worktrees)" && bad "a deny covers <repo>/.claude/worktrees" || ok "no deny covers <repo>/.claude/worktrees (Claude Code's own worktrees stay editable)"
+# $T is the path as configured; on macOS it runs through the /var symlink, so its real path ($RT)
+# differs. Both spellings of a protected path are denied.
+missing=""
+for p in "$T/repo/.mcp.json" "$T/repo/.claude/settings.json" "$T/state/settings/**" "$T/team.yaml" "$T/bin/wrap"; do
+  rules $T/state/settings/w1.json deny | grep -qxF "Edit(/$p)" || missing="$missing $p"
+done
+[ "$T" != "$RT" ] && [ -z "$missing" ] && ok "a protected path reached through a symlink is denied by both spellings" || { bad "configured spellings missing:$missing"; }
+rules $T/state/settings/w1.json deny | grep -E "^Edit\(/($RT|$T)/repo/\.claude/(\*\*|worktrees)" && bad "a deny covers <repo>/.claude/worktrees" || ok "no deny covers <repo>/.claude/worktrees (Claude Code's own worktrees stay editable)"
 rules $T/state/settings/em.json deny | grep -qxF "Edit(/$RT/proj/.claude/settings.json)" && ok "em.json: protects em's own workdir settings" || bad "em.json: workdir settings deny"
 esc=$(TEAM_STATE_DIR='/tmp/sf-e2e-no[such]*dir' ruby $SRC/lib/team_config.rb $T/team.yaml settings em | ruby -rjson -e 'puts JSON.parse(STDIN.read)["permissions"]["deny"]' | grep "sf-e2e-no")
-echo "$esc" | grep -qxF 'Edit(//private/tmp/sf-e2e-no\[such\]\*dir/settings/**)' && ok "glob characters in a protected path are escaped" || { bad "glob escaping"; echo "$esc"; }
+echo "$esc" | grep -qxF 'Edit(//private/tmp/sf-e2e-no\[such\]\*dir/settings/**)' && echo "$esc" | grep -qxF 'Edit(//tmp/sf-e2e-no\[such\]\*dir/settings/**)' && ok "glob characters in a protected path are escaped" || { bad "glob escaping"; echo "$esc"; }
 base_rules='Bash(git push * main)
 Bash(git push * main *)
 Bash(git push *:main)
@@ -441,6 +449,8 @@ REPO_EXTRA='gate: "true"' accept "a gate that no role runs" ""
 # The wrapper claude runs through is protected like factory.sh: a file, or its whole .app bundle.
 mk; ws=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml settings em)
 echo "$ws" | grep -q "wrap\|\.app" && bad "no wrapper configured, but a wrapper deny was added" || ok "no wrapper configured: no wrapper deny"
+ln -s $T/bin $T/linkbin; mk "wrapper: $T/linkbin/wrap"; ws=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml settings em)
+echo "$ws" | grep -qF "\"Edit(/$T/linkbin/wrap)\"" && echo "$ws" | grep -qF "\"Edit(/$RT/bin/wrap)\"" && ok "a wrapper reached through a symlinked folder: the link path and the real path are both denied" || { bad "symlinked wrapper"; echo "$ws" | grep -i wrap; }
 mk "wrapper: $T/Wrap.app/Contents/MacOS/Wrap"; ws=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml settings em)
 echo "$ws" | grep -qF "\"Edit(/$RT/Wrap.app/**)\"" && ok "a wrapper inside an .app: Edit deny on the whole bundle" || { bad "wrapper .app deny"; echo "$ws" | grep -i wrap; }
 mk "permission_mode: dontAsk" "$(rule ask '"Bash(rm *)"')"
