@@ -118,6 +118,13 @@ GENERATED_DIRS = %w[settings launch prompts bin].freeze
 # GENERATED_DIRS, but not regenerated per start.
 HOOK_DIRS = %w[gate].freeze
 
+# The one role that may read messages.log. The log holds every native message in full, private
+# reports to the EM among them, so every other seat gets a Read deny on it (the owner's decision on
+# #110). An accident guard, not a boundary: every seat runs as the same OS user (#29), so a command
+# or script that reads the file another way is not stopped. A team with no role of this id has
+# every seat denied; the owner still reads the log directly.
+LOG_READER = 'em'.freeze
+
 # Where each seat keeps its progress note, <state>/notes/<role>.md (#5). Outside the worktree, so it
 # survives the worktree being recreated, and in neither list above, so a seat may write it.
 NOTES_DIR = 'notes'.freeze
@@ -497,6 +504,14 @@ class TeamConfig
     [File.expand_path(note_path(id)), real_path(note_path(id))].uniq.map { |p| "Edit(/#{glob_escape(p)})" }
   end
 
+  # The Read deny on messages.log for a seat other than LOG_READER, in both spellings.
+  def log_read_rules(id)
+    return [] if id == LOG_READER
+
+    log = File.join(state_dir, 'messages.log')
+    [File.expand_path(log), real_path(log)].uniq.map { |p| "Read(/#{glob_escape(p)})" }
+  end
+
   # A `permissions:` mapping (team level or a role's), checked. `where` names it in errors.
   def permission_section(h, where)
     return {} if h.nil?
@@ -653,7 +668,8 @@ class TeamConfig
     # deny the seat's own note, since deny wins over allow).
     own = note_rules(id)
     others = (roles.keys - [id]).flat_map { |r| note_rules(r) }
-    add.call({ 'deny' => protected_paths(id).map { |p| "Edit(/#{p})" } + others, 'ask' => base_push_rules, 'allow' => own }, 'factory.sh')
+    deny = protected_paths(id).map { |p| "Edit(/#{p})" } + others + log_read_rules(id)
+    add.call({ 'deny' => deny, 'ask' => base_push_rules, 'allow' => own }, 'factory.sh')
     out
   end
 
@@ -786,10 +802,12 @@ class TeamConfig
         out << format('    %-5s: %s', list, own.empty? ? '(none)' : own.join(', '))
       end
       notes = (roles.keys - [id]).flat_map { |r| note_rules(r) }
-      added = merged['deny'].count { |r| factory.include?(r) && !notes.include?(r) }
+      logs = log_read_rules(id)
+      added = merged['deny'].count { |r| factory.include?(r) && !notes.include?(r) && !logs.include?(r) }
       asks = merged['ask'].count { |r| factory.include?(r) }
       note = merged['allow'].any? { |r| factory.include?(r) } ? ', Edit allow on its own progress note and deny on the other seats\'' : ''
-      out << "    added: Edit deny on #{added} protected paths#{asks.positive? ? ", ask on #{asks} push-to-#{base_branch} patterns" : ''}#{note}"
+      log = (merged['deny'] & logs).empty? ? '' : ', Read deny on the message log'
+      out << "    added: Edit deny on #{added} protected paths#{asks.positive? ? ", ask on #{asks} push-to-#{base_branch} patterns" : ''}#{note}#{log}"
       out << '    note : allow rules have no effect in bypassPermissions' if mode.start_with?('bypassPermissions') && !(merged['allow'] - factory).empty?
       out << '    note : ask rules are refused in dontAsk mode, not asked' if mode == 'dontAsk' && !merged['ask'].empty?
     end

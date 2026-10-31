@@ -11,21 +11,25 @@
 # in the receiver's inbox, and NOT-SENT when it returned success false or failed. The recipient is
 # written as a role id when it names a roster seat's session (with or without a " [ref]"), or when
 # it is a uds: address whose process runs in a roster seat's pane; anything else is written as given.
+# A message or recipient that is not a string is written as its JSON text. Input that cannot be read
+# at all is still recorded, as a line with recipient "?", outcome UNREADABLE and a placeholder message:
+# the hook runs only on SendMessage, so a message was sent, and the log should say so.
 #
 # The message is the sender's to choose, so every field is escaped exactly as say's log_field does:
 # a message cannot split or forge a log line, or drive the terminal that reads the log. The message
 # goes into messages.log and nowhere else. The script never touches the message or the tool result:
 # it prints nothing and exits 0 whatever happens, so a log it cannot write costs a line, not the
-# message. The hook's own timeout (5s) is a backstop; the uds: lookup has its own limit.
+# message. The hook's own timeout (5s) is a backstop; the uds: lookup gives up after 2s by itself.
 set -u
 log=${1:-} from=${2:-}
 [ -n "$log" ] && [ -n "$from" ] || exit 0
 shift 2
 # The source is ASCII (escapes, not characters): outside a UTF-8 locale ruby reads -e as US-ASCII.
-ruby --disable-gems -rjson -rtimeout -e '
+ruby --disable-gems -rjson -e '
   log, from, *pairs = ARGV
   roles = {}
   pairs.each { |p| s, r = p.split("=", 2); roles[s] = r if s && r }
+  stamp = Time.now.strftime("%Y-%m-%dT%H:%M:%S")
 
   def field(s)
     s = s.to_s.dup.force_encoding("UTF-8")
@@ -34,27 +38,88 @@ ruby --disable-gems -rjson -rtimeout -e '
     s.gsub(re) { |c| esc[c] || c.bytes.map { |b| format("\\x%02X", b) }.join }
   end
 
-  # The pane tty of each roster session, then the tty of the process named by a uds: address.
+  def now
+    Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  end
+
+  # Runs argv with its output on a pipe, in a process group of its own, until the deadline. Returns
+  # its output, or nil if it has not finished by then: it is then killed, its whole group with it,
+  # and reaped. Not Timeout around a block-form IO.popen, which waits for the child with no limit
+  # when it closes the pipe (tl review of #110: a hung tmux held the hook for 20s).
+  def run_until(argv, deadline)
+    r, w = IO.pipe
+    pid = Process.spawn(*argv, in: File::NULL, out: w, err: File::NULL, pgroup: true)
+    w.close
+    out = String.new
+    loop do
+      left = deadline - now
+      return nil if left <= 0 || IO.select([r], nil, nil, left).nil?
+      c = r.read_nonblock(65_536, exception: false)
+      break if c.nil?
+      out << c if c.is_a?(String)
+    end
+    until Process.waitpid(pid, Process::WNOHANG)
+      return nil if now >= deadline
+      sleep 0.01
+    end
+    pid = nil
+    out.force_encoding("UTF-8")
+  ensure
+    [r, w].each { |io| io.close if io && !io.closed? }
+    if pid
+      (Process.kill("KILL", -pid) rescue nil)
+      (Process.waitpid(pid) rescue nil)
+    end
+  end
+
+  # The pane tty of each roster session, then the tty of the process named by a uds: address. Both
+  # commands share one 2s limit.
   def uds_role(to, roles)
     pid = to[%r{\Auds:.*/(\d+)\.sock\z}, 1] or return nil
-    Timeout.timeout(2) do
-      tty = IO.popen(["ps", "-o", "tty=", "-p", pid], err: File::NULL, &:read).to_s.strip
-      return nil if tty.empty? || tty.start_with?("?")
-      panes = IO.popen(["tmux", "list-panes", "-a", "-F", "\#{pane_tty} \#{session_name}"], err: File::NULL, &:read).to_s
-      panes.each_line do |l|
-        t, s = l.chomp.split(" ", 2)
-        return roles[s] if t && s && File.basename(t) == File.basename(tty) && roles.key?(s)
-      end
+    deadline = now + 2
+    tty = run_until(["ps", "-o", "tty=", "-p", pid], deadline).to_s.strip
+    return nil if tty.empty? || tty.start_with?("?")
+    panes = run_until(["tmux", "list-panes", "-a", "-F", "\#{pane_tty} \#{session_name}"], deadline).to_s
+    panes.each_line do |l|
+      t, s = l.chomp.split(" ", 2)
+      return roles[s] if t && s && File.basename(t) == File.basename(tty) && roles.key?(s)
     end
     nil
-  rescue StandardError, Timeout::Error
+  rescue StandardError
     nil
   end
 
-  j = (JSON.parse(STDIN.read) rescue nil)
-  exit 0 unless j.is_a?(Hash) && j["tool_name"] == "SendMessage"
+  # Ruby 2.6 json refuses a lone surrogate escape (a high half with no low half after it, or a low
+  # half alone), which JSON.stringify writes for a JS string that holds one, so the whole line would
+  # be lost (tl review of #110). Each lone one becomes \ufffd, U+FFFD. Escapes are matched left to
+  # right, so a valid pair stays, and so does an escaped backslash followed by the text "ud800". Done
+  # on the bytes, so input that is not valid UTF-8 still parses, and field escapes those bytes.
+  def lone_surrogates_replaced(raw)
+    raw.b.gsub(/\\u[dD][89abAB]\h\h\\u[dD][c-fC-F]\h\h|\\u[dD][89a-fA-F]\h\h|\\./mn) { |m| m.bytesize == 6 ? "\\ufffd" : m }.force_encoding("UTF-8")
+  end
+
+  # A field that is not a string is written as its JSON text; a missing one is empty.
+  def text(x)
+    return "" if x.nil?
+    return x if x.is_a?(String)
+    JSON.generate(x)
+  rescue StandardError
+    x.inspect
+  end
+
+  # One write in append mode, as say appends with >>: lines from both stay whole.
+  def append(log, fields)
+    File.open(log, "a") { |f| f.write(fields.join("\t") + "\n") } if File.directory?(File.dirname(log))
+  end
+
+  j = (JSON.parse(lone_surrogates_replaced(STDIN.read)) rescue nil)
+  unless j.is_a?(Hash)
+    append(log, [stamp, field(from), "?", "UNREADABLE", "<hook input could not be read>"])
+    exit 0
+  end
+  exit 0 unless j["tool_name"] == "SendMessage"
   inp = j["tool_input"].is_a?(Hash) ? j["tool_input"] : {}
-  to = inp["to"].to_s
+  to = text(inp["to"])
   outcome =
     if j["hook_event_name"] == "PostToolUseFailure" then "NOT-SENT"
     else
@@ -64,8 +129,6 @@ ruby --disable-gems -rjson -rtimeout -e '
     end
   name = to.sub(/ \[[^\]]*\]\z/, "")
   rcpt = roles[name] || uds_role(to, roles) || to
-  line = [Time.now.strftime("%Y-%m-%dT%H:%M:%S"), field(from), field(rcpt), outcome, field(inp["message"])].join("\t") + "\n"
-  # One write in append mode, as say appends with >>: lines from both stay whole.
-  File.open(log, "a") { |f| f.write(line) } if File.directory?(File.dirname(log))
+  append(log, [stamp, field(from), field(rcpt), outcome, field(text(inp["message"]))])
 ' -- "$log" "$from" "$@" </dev/stdin >/dev/null 2>&1
 exit 0

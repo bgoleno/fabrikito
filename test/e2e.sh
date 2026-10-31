@@ -408,6 +408,10 @@ for sp in "$RT" "$T"; do
   echo "$w2deny" | grep -qxF "Read(/$sp/state/messages.log)" || lr="$lr w2-not-denied($sp)"
 done
 [ -z "$lr" ] && ok "messages.log: Read denied to w1 and w2 (both spellings), readable by em" || { bad "messages.log read rules:$lr"; rules $T/state/settings/w1.json deny | grep messages; }
+# check names the Read deny for the seats that have it, and keeps it out of the protected-path count.
+nw1=$(sect w1 | sed -n 's/.*added: Edit deny on \([0-9]*\) protected paths.*/\1/p'); nem=$(sect em | sed -n 's/.*added: Edit deny on \([0-9]*\) protected paths.*/\1/p')
+sect w1 | grep -F "added: " | grep -qF ", Read deny on the message log" && ! sect em | grep -qF "Read deny on the message log" && [ -n "$nw1" ] && [ "$nw1" = "$nem" ] \
+  && ok "check: w1's added line names the message log Read deny, em's does not, and both count the same $nw1 protected paths" || { bad "check: message log Read deny line (w1 $nw1, em $nem)"; sect w1; sect em; }
 # A seat may write its own note without a prompt (it is outside its working directory), and only its
 # own: every other seat's note is denied, as exact paths in both spellings, since a note is put into
 # its seat's context at each start.
