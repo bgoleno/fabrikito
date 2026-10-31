@@ -1594,17 +1594,20 @@ PRIV=$T/tmux/tmux-$(id -u)/default
 printf 'team: fw\nrepo: { path: %s/repo, github: local/origin.git }\nproject: { name: B, url: "https://github.com/users/x/projects/9" }\nstorage: { volume: %s, root: %s }\nsessions: { prefix: fw, claude: { wrapper: %s/bin/wrap } }\nroles:\n  fa: { title: FA, workdir: { type: project, path: %s/proj }, prompt_text: "fa" }\n  fb: { title: FB, workdir: { type: project, path: %s/proj }, prompt_text: "fb" }\n' $T $VOL $ROOT $T $T $T > $T/fw.yaml
 TEAM_STATE_DIR=$T/fwstate TEAM_VIEW=0 $S -c $T/fw.yaml up --no-view >/dev/null 2>&1
 mkdir -p $T/fwdtmux; printf '#!/bin/sh\necho "$*" >> %s/fwd.log\nexec %s -S %s "$@"\n' $T "$(command -v tmux)" $PRIV > $T/fwdtmux/tmux; chmod +x $T/fwdtmux/tmux
-cp $T/fw.yaml $T/copy.yaml
+# The copy names its seats differently, so a titles call that is not refused would relabel them.
+cp $T/fw.yaml $T/copy.yaml && sed -i '' 's/title: FA,/title: COPY-A,/; s/title: FB,/title: COPY-B,/' $T/copy.yaml
 seats() { tmux -S $PRIV list-sessions -F '#{session_name} #{session_created} #{pane_pid}' 2>/dev/null | grep '^fw-' | sort; }
 keys() { cat $T/keys-fa.log $T/keys-fb.log 2>/dev/null | cksum; }
+ttl() { for s in fw-fa fw-fb; do tmux -S $PRIV show-options -v -t "=$s:" set-titles-string 2>/dev/null; done; }
 # fw <command...>: runs it on the stand-in default server; sets out, rc and calls (tmux calls made)
 fw() { : > $T/fwd.log; out=$(env -u TMUX -u TMUX_TMPDIR "PATH=$T/fwdtmux:$PATH" TEAM_STATE_DIR=$T/fwstate TEAM_ROLE=fa "$@" 2>&1 </dev/null); rc=$?; calls=$(wc -l < $T/fwd.log | tr -d ' '); }
-before=$(seats); kb=$(keys)
+before=$(seats); kb=$(keys); tb=$(ttl)
 echo "$before" | grep -q '^fw-fa ' && echo "$before" | grep -q '^fw-fb ' || bad "test setup: fw-fa and fw-fb did not start on the e2e's tmux server"
-for c in "down" "down fb" "say fb hello-from-a-copy" "say all hello-from-a-copy" "attach fa" "attach" "view" "view --print" "down --yes fb" "down --yes"; do
+echo "$tb" | grep -qxF "fa | FA | fw-fa" || bad "test setup: fw-fa's title is not set ($tb)"
+for c in "down" "down fb" "say fb hello-from-a-copy" "say all hello-from-a-copy" "attach fa" "attach" "view" "view --print" "titles" "down --yes fb" "down --yes"; do
   fw $S -c $T/copy.yaml $c
-  refused_default && echo "$out" | grep -qF "$T/copy.yaml" && [ "$(seats)" = "$before" ] && [ "$(keys)" = "$kb" ] \
-    && ok "$c, with a copy of the team file on the default server: refused before any tmux call, every seat as it was" || { bad "$c with a copy on the default server (rc=$rc, tmux calls=$calls)"; echo "$out" | head -3; }
+  refused_default && echo "$out" | grep -qF "$T/copy.yaml" && [ "$(seats)" = "$before" ] && [ "$(keys)" = "$kb" ] && [ "$(ttl)" = "$tb" ] \
+    && ok "$c, with a copy of the team file on the default server: refused before any tmux call, every seat as it was (titles too)" || { bad "$c with a copy on the default server (rc=$rc, tmux calls=$calls)"; echo "$out" | head -3; }
 done
 # The owner's real team file (in teams/) works on the default server as before, and --default-socket
 # lets a team that is meant to run there through. None of these kills a seat or opens iTerm.
@@ -1621,6 +1624,10 @@ fw $S -c $T/copy.yaml view --print --default-socket
 [ $rc = 0 ] && echo "$out" | grep -qF "fw-fa" && ok "view --print --default-socket goes ahead on the default server" || { bad "view --print --default-socket (rc=$rc)"; echo "$out" | head -3; }
 fw $S -c $T/copy.yaml say --default-socket fb hello-from-the-default-socket
 ! echo "$out" | grep -qF "default tmux server" && [ "$calls" -gt 0 ] && ok "say --default-socket goes ahead on the default server" || { bad "say --default-socket (rc=$rc, calls=$calls)"; echo "$out"; }
+fw $T/inst/factory.sh -c $T/inst/teams/fw.yaml titles
+[ $rc = 0 ] && echo "$out" | grep -qF "set the terminal title of 2 running seat(s)" && [ "$(ttl)" = "$tb" ] && ok "titles for a team file in teams/ goes ahead on the default server" || { bad "titles for a team file in teams/ (rc=$rc, calls=$calls)"; echo "$out"; }
+fw $S -c $T/copy.yaml titles --default-socket
+[ $rc = 0 ] && ttl | grep -qxF "fa | COPY-A | fw-fa" && ok "titles --default-socket goes ahead on the default server (the copy's titles are set)" || { bad "titles --default-socket (rc=$rc, calls=$calls)"; echo "$out"; ttl; }
 TEAM_STATE_DIR=$T/fwstate $S -c $T/fw.yaml down --yes >/dev/null 2>&1
 # test/live-env.sh: new makes a private environment, run runs a command in it, down removes it.
 LE=$SRC/test/live-env.sh

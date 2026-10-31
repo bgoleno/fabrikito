@@ -37,11 +37,12 @@ and point the team file at them.
 
 `up` takes a team file outside `teams/` for a throwaway one (a test) and will not start its seats on your
 default tmux server, where a real team runs: run it on a private server (see Tests), or pass
-`up --default-socket` if that team is meant to run there. `down` (with or without `--yes`), `say`, `attach`
-and `view` apply the same rule before any tmux call, because a copy of a real team file shares its session
-prefix and would reach the real seats: kill them, type into them, or show them
-([#105](../../issues/105)). Each takes `--default-socket` too (`say` and `attach`: as the first argument),
-and `up --default-socket` passes it on to the view it opens. So a throwaway team file never goes in `teams/`,
+`up --default-socket` if that team is meant to run there. `down` (with or without `--yes`), `say`, `attach`,
+`view` and `titles` apply the same rule before any tmux call, because a copy of a real team file shares its
+session prefix and would reach the real seats: kill them, type into them, show them or relabel them
+([#105](../../issues/105), [#124](../../issues/124)). `status` only reads, and `migrate` keeps any worktree a
+running process works in, on whatever server ([#121](../../issues/121)). Each takes `--default-socket` too
+(`say` and `attach`: as the first argument), and `up --default-socket` passes it on to the view it opens. So a throwaway team file never goes in `teams/`,
 neither this checkout's nor a worktree's copy of it: there every command takes it for a real one. Put it
 in a temporary folder and run it on a private server.
 
@@ -637,7 +638,7 @@ file is swapped; a copy that cannot be made, or a shared install caught mid-rein
 start). It also covers `up` refusing a throwaway team on the default tmux server (TMUX and TMUX_TMPDIR
 unset, `/tmp` by two spellings, an empty or missing TMUX_TMPDIR, a relative one under CDPATH, TMUX naming
 the default socket) before any tmux call, going ahead on a private server, for a team file in `teams/` and
-with `--default-socket`; `down`, `down --yes`, `say`, `attach` and `view` refusing a copy of a running
+with `--default-socket`; `down`, `down --yes`, `say`, `attach`, `view` and `titles` refusing a copy of a running
 team's file there before any tmux call, with the seats left as they were (a stand-in tmux passes every call
 to the test's private server), and going ahead for a file in `teams/` or with `--default-socket`; and
 `test/live-env.sh` (its environment, with a seat's TEAM_CONFIG and TEAM_SCRIPT unset, TEAM_ROLE
