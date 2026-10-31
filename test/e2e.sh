@@ -316,6 +316,15 @@ for p in "$RT/state/settings/**" "$RT/state/launch/**" "$RT/state/prompts/**" "$
   rules $T/state/settings/w1.json deny | grep -qxF "Edit(/$p)" || missing="$missing $p"
 done
 [ -z "$missing" ] && ok "w1.json: Edit deny on every protected path" || { bad "protected paths missing:$missing"; rules $T/state/settings/w1.json deny; }
+# The repository's auto-memory folder, which the owner's own sessions load (#108): denied for every
+# seat with auto memory off (em, w1), in both spellings of the repo path ($T is under a symlink, and
+# Claude Code names the folder after the path), and not for w2 (auto_memory: true).
+enc() { printf '%s' "$1" | sed 's/[^A-Za-z0-9]/-/g'; }
+MEMA="$RHC/projects/$(enc "$T/repo")/memory/**"; MEMB="$RHC/projects/$(enc "$RT/repo")/memory/**"
+missing=""; for r in em w1; do for p in "$MEMA" "$MEMB"; do rules $T/state/settings/$r.json deny | grep -qxF "Edit(/$p)" || missing="$missing $r:$p"; done; done
+[ -z "$missing" ] && [ "$MEMA" != "$MEMB" ] && ok "auto-memory folder: Edit deny for em and w1 (auto memory off), both spellings of the repo path" || { bad "auto-memory folder deny missing:$missing"; rules $T/state/settings/w1.json deny | grep memory; }
+w2mem=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml settings w2 | grep -c '/memory/\*\*')
+[ "$w2mem" = 0 ] && ok "auto-memory folder: no deny for w2 (auto_memory: true)" || bad "auto-memory folder denied for w2 ($w2mem rules)"
 rules $T/state/settings/w1.json deny | grep -qE "state/notes/\*\*|state/notes/w1\.md|Edit\(//$RT/state/\*\*\)|Edit\(//$RHC/\*\*\)" && bad "protected paths are too wide (all notes or the seat's own, whole state dir or whole ~/.claude)" || ok "protected paths leave the seat's own note and the rest of ~/.claude writable"
 # Claude Code puts the worktrees it makes (--worktree, subagents with isolation: worktree) under
 # <repo>/.claude/worktrees/, so no deny may cover that folder.
@@ -400,6 +409,7 @@ na=""; for f in em w1; do for o in em w1 w2; do for sp in "$RT" "$T"; do
 done; done; done
 rules $T/state/settings/w1.json deny | grep -qF "state/notes/**" && na="$na notes/**-denied"
 [ -z "$na" ] && ok "em.json, w1.json: Edit allowed on the seat's own note, denied on every other seat's (both spellings, exact paths)" || { bad "note rules:$na"; rules $T/state/settings/w1.json deny | grep notes; rules $T/state/settings/w1.json allow; }
+sect em | grep -qF "Edit deny on the repository's auto-memory folder" && sect w1 | grep -qF "Edit deny on the repository's auto-memory folder" && ! sect w2 | grep -qF "auto-memory folder" && ok "check: names the auto-memory folder deny for em and w1, not for w2" || { bad "check: auto-memory folder"; sect w2; }
 sect em | grep -qF "added: Edit deny on" && sect em | grep -qF ", Edit allow on its own progress note and deny on the other seats'" && ! sect em | grep -E "^ +(allow|deny) *:" | grep -qF notes \
   && ok "check: the note allow is listed as added by the launcher, not among the team's allow rules" || { bad "check: note allow line"; sect em; }
 # A user who switched every hook off keeps that choice in seats without a gate, which then get no
@@ -897,6 +907,17 @@ for p in settings.json .claude.json CLAUDE.md plugins/** skills/** agents/** com
 missing=""
 for p in $RHC/settings.json $RH/.claude.json $RHC/CLAUDE.md "$RHC/plugins/**" "$RHC/skills/**" "$RHC/agents/**" "$RHC/commands/**" "$RHC/hooks/**" "$RHC/rules/**"; do echo "$cc" | grep -qxF "Edit(/$p)" || missing="$missing $p"; done
 [ -z "$missing" ] && ok "CLAUDE_CONFIG_DIR set: ~/.claude and ~/.claude.json stay protected too" || bad "CLAUDE_CONFIG_DIR set, default config paths no longer denied:$missing"
+echo "$cc" | grep -qxF "Edit(/$RT/cfg/projects/$(enc "$T/repo")/memory/**)" && echo "$cc" | grep -qxF "Edit(/$RHC/projects/$(enc "$T/repo")/memory/**)" &&
+  ok "CLAUDE_CONFIG_DIR set: the auto-memory folder is denied under it and under ~/.claude" || { bad "auto-memory folder with CLAUDE_CONFIG_DIR"; echo "$cc" | grep memory; }
+# A folder name over 200 characters is cut to 200 with a hash of the path appended, which the
+# launcher cannot compute: the deny takes the first 200 and a *. The repo is reached through a long
+# link here, so its real path gives a short name too, and both are denied.
+LONG=$T/$(printf 'L%.0s' $(seq 1 210)); ln -s $T/repo $LONG
+mk; sed -i '' "s#{ path: $T/repo,#{ path: $LONG,#" $T/v.yaml
+lm=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml settings em | ruby -rjson -e 'puts JSON.parse(STDIN.read)["permissions"]["deny"]')
+long=$(enc "$LONG")
+[ ${#long} -gt 200 ] && echo "$lm" | grep -qxF "Edit(/$RHC/projects/${long:0:200}*/memory/**)" && echo "$lm" | grep -qxF "Edit(/$RHC/projects/$(enc "$RT/repo")/memory/**)" &&
+  ok "auto-memory folder: a name over 200 characters is denied by its first 200 and a *, the real path's short name too" || { bad "auto-memory folder, long name"; echo "$lm" | grep memory; }
 # The seat uses the folder its rules protect: the launch script pins CLAUDE_CONFIG_DIR, or unsets it.
 grep -qx "unset CLAUDE_CONFIG_DIR" $T/state/launch/em.sh && ok "unset when up ran: the launch script unsets CLAUDE_CONFIG_DIR" || { bad "launch script without CLAUDE_CONFIG_DIR"; grep CLAUDE_CONFIG_DIR $T/state/launch/em.sh; }
 CLAUDE_CONFIG_DIR=$T/cfg TEAM_STATE_DIR=$T/state3 TEAM_VIEW=0 $S -c $T/v.yaml up --no-view >/dev/null 2>&1
