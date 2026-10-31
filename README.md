@@ -291,9 +291,34 @@ and the repo's `.claude/` settings, which still apply. `check` shows each seat's
 where load-time errors (unknown modes, malformed rules, a permission flag in `args`) are reported.
 It also warns, without stopping a start, about seats whose modes would hold messages between them
 ([Which messages are held](#which-messages-are-held)), and about any role whose rules have neither a
-deny nor an ask on each of the three merge patterns (`Bash(gh pr merge *)`, `Bash(gh api *pulls/*/merge*)`,
-`Bash(gh api graphql*mergePullRequest*)`), unless that role is marked `may_merge: true` (a YAML boolean, so an unquoted `yes` or `on`
-also counts as true).
+deny nor an ask on each of the merge patterns, unless that role is marked `may_merge: true` (a YAML
+boolean, so an unquoted `yes` or `on` also counts as true). The patterns, the ones `teams/example.yaml`
+denies or asks on ([#85](../../issues/85)):
+
+- `Bash(gh pr merge *)`: `gh pr merge`, with or without arguments.
+- `Bash(gh pr -* merge *)` and `Bash(gh pr -* merge)`: the same with a flag before the subcommand
+  (`gh pr -R o/r merge 5`, `--repo o/r`, `--repo=o/r`). The space after `merge` keeps
+  `gh pr -R o/r view 5 --json mergeable` out.
+- `Bash(gh api *pulls/*/merge*)` and `Bash(gh api graphql*mergePullRequest*)`: the REST and GraphQL merge.
+- `Bash(gh api graphql*enablePullRequestAutoMerge*)`: auto-merge.
+- `Bash(gh api graphql*mergeBranch*)` and `Bash(gh api *repos/*/merges*)`: merging a branch without a PR.
+
+A team file written before these were added gets the warning until it has them. Known false matches:
+a `gh pr -R o/r <subcommand>` whose later text has ` merge ` in it, and `gh api` reads whose path or
+query names these. Not covered: a GraphQL query read from a file or stdin (`-F query=@q.graphql`,
+`--input`), `curl` or other HTTP clients against the API, `gh` aliases, extensions and scripts, a
+`git push` of a merge commit to the base branch (the base-branch push ask covers that), and other
+hosts' CLIs.
+
+Claude Code's auto memory is off in every seat: the generated settings set `autoMemoryEnabled: false`
+and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, and the launch script exports the variable. Auto memory lives
+in one folder per repository (`<config>/projects/<repo>/memory/`), shared by all its worktrees, and its
+`MEMORY.md` loads into every session there, the owner's own in the main checkout included
+([docs](https://code.claude.com/docs/en/memory#storage-location)). A seat's note there would reach every
+other seat and the owner without review, outside the PR process. Set `auto_memory: true` under
+`sessions.claude`, or on a role, to leave it to Claude Code's own settings (that seat's launch script
+unsets the variable, so it is not inherited from a tmux server started inside a seat). `check` shows it per seat
+in the MEMORY column.
 
 These rules are an accident guard, not a security boundary: every seat runs as the owner's OS user,
 with the owner's GitHub credential, and can change what loads. [#29](../../issues/29) tracks making

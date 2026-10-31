@@ -15,6 +15,8 @@
 #   team_config.rb <team.yaml> settings <id>       the seat's generated Claude Code settings (JSON)
 #   team_config.rb <team.yaml> permissions_report  each seat's mode and rules, for `check`
 #   team_config.rb <team.yaml> warnings            what `check` warns about (held messages, merging)
+#   team_config.rb <team.yaml> matching_rules <id> <command>  the seat's deny/ask rules a command
+#                                                  matches (an approximation, see #rule_matches?)
 #
 # Ruby is used because it ships with macOS and parses YAML without installing anything.
 # Unknown keys are an error, not ignored: a misspelled `volume:` that silently fell back to a
@@ -45,10 +47,10 @@ EFFORTS = %w[low medium high xhigh max].freeze
 REPO_KEYS = %w[path github base gate gate_timeout gate_max_blocks].freeze
 STORAGE_KEYS = %w[volume root].freeze
 SESSION_KEYS = %w[prefix claude].freeze
-CLAUDE_KEYS = %w[wrapper args model effort permission_mode plugin].freeze
+CLAUDE_KEYS = %w[wrapper args model effort permission_mode plugin auto_memory].freeze
 PROMPT_KEYS = %w[common].freeze
 ROLE_KEYS = %w[title summary workdir prompt prompt_text kickoff session model effort permission_mode permissions
-               gate_on_stop skills may_merge].freeze
+               gate_on_stop skills may_merge auto_memory].freeze
 WORKDIR_KEYS = %w[type path name].freeze
 ID_RE = /\A[a-z][a-z0-9]*\z/.freeze
 PREFIX_RE = /\A[a-z0-9][a-z0-9-]*\z/.freeze
@@ -78,9 +80,21 @@ PERMISSION_MODES = %w[default manual acceptEdits plan auto dontAsk bypassPermiss
 # the first match decides (https://code.claude.com/docs/en/permissions).
 PERMISSION_LISTS = %w[deny ask allow].freeze
 
-# The ways a seat could merge a PR from Bash. `check` warns about a role whose rules neither deny
-# nor ask on each of them, unless the team file says the role may merge (roles.<id>.may_merge).
-MERGE_PATTERNS = ['Bash(gh pr merge *)', 'Bash(gh api *pulls/*/merge*)', 'Bash(gh api graphql*mergePullRequest*)'].freeze
+# The ways a seat could merge a PR (or a branch) from Bash, as tl decided in #85. `check` warns about
+# a role whose rules neither deny nor ask on each of them, unless the team file says the role may
+# merge (roles.<id>.may_merge). teams/example.yaml denies or asks on the same list.
+# - `gh pr merge *` also matches a bare `gh pr merge` (a trailing ` *` that is the only wildcard).
+# - `gh pr -* merge *` is any flag before the subcommand (-R o/r, --repo o/r, --repo=o/r). The space
+#   after merge keeps `gh pr -R o/r view 5 --json mergeable` out; `gh pr -* merge` is the same with
+#   no argument after merge (the current branch's PR), since a rule with two `*` has no bare form.
+# - GraphQL: merge, auto-merge, and mergeBranch (a branch merged without a PR); REST: the PR merge
+#   endpoint, and POST /repos/{o}/{r}/merges (a branch merged without a PR).
+MERGE_PATTERNS = [
+  'Bash(gh pr merge *)', 'Bash(gh pr -* merge *)', 'Bash(gh pr -* merge)',
+  'Bash(gh api *pulls/*/merge*)', 'Bash(gh api *repos/*/merges*)',
+  'Bash(gh api graphql*mergePullRequest*)', 'Bash(gh api graphql*enablePullRequestAutoMerge*)',
+  'Bash(gh api graphql*mergeBranch*)'
+].freeze
 
 # Flags factory.sh sets itself, or that would undo this file's permission keys. :always, or
 # :with_mode (only when a seat has a permission_mode; a legacy file may still pass them in args).
@@ -430,6 +444,18 @@ class TeamConfig
     (role(id)['permission_mode'] || claude['permission_mode'])&.to_s
   end
 
+  # Claude Code's auto memory lives in <config>/projects/<repo>/memory/, one folder for the whole
+  # repository: "all worktrees and subdirectories within the same repo share one auto memory
+  # directory", and its MEMORY.md loads into every session there
+  # (https://code.claude.com/docs/en/memory#storage-location). A seat's note would reach every other
+  # seat and the owner's own sessions in the main checkout, unreviewed (#71), so it is off unless the
+  # team file turns it on (a role's value wins over sessions.claude). On means the factory sets
+  # nothing and Claude Code's own settings decide.
+  def auto_memory?(id)
+    v = role(id).key?('auto_memory') ? role(id)['auto_memory'] : claude['auto_memory']
+    v == true
+  end
+
   def args
     a = claude['args'] || []
     die "'sessions.claude.args' must be a list" unless a.is_a?(Array)
@@ -716,6 +742,13 @@ class TeamConfig
     # working until a restart (#50). The launch script exports this too; a value here also outranks
     # one in a project's .claude/settings.json. Update deliberately instead (README).
     out['env'] = { 'DISABLE_AUTOUPDATER' => '1' }
+    unless auto_memory?(id)
+      # Both documented switches (same page as #auto_memory?): --settings outranks user, project and
+      # local settings, so a seat's /memory toggle or its .claude/settings.local.json cannot turn
+      # it back on. The launch script exports the variable too.
+      out['autoMemoryEnabled'] = false
+      out['env']['CLAUDE_CODE_DISABLE_AUTO_MEMORY'] = '1'
+    end
     out['hooks'] = { 'SessionStart' => [{ 'hooks' => [session_start_hook(id)] }] }
     if gate_on_stop?(id)
       out['hooks']['Stop'] = [{ 'hooks' => [stop_gate_hook(id)] }]
@@ -789,13 +822,30 @@ class TeamConfig
   # trailing `*` is part of the rule" (https://code.claude.com/docs/en/permissions). Read as `cmd*`,
   # Bash(gh pr mer:*) would wrongly count as covering `gh pr merge *`.
   def rule_covers?(rule, pattern)
+    rule_matches?(rule, pattern[/\ABash\((.*)\)\z/m, 1].to_s)
+  end
+
+  # Whether a Bash rule matches one command's text, as the permissions docs describe it: `*` is any
+  # text, `cmd:*` is `cmd *`, and a trailing ` *` that is the rule's only wildcard also matches the
+  # bare command (`Bash(ls *)` matches `ls`). An approximation for `check` and tests: it does not
+  # split compound commands, strip wrappers or VAR= prefixes, as Claude Code does.
+  def rule_matches?(rule, command)
     return true if ['Bash', 'Bash(*)'].include?(rule)
 
     spec = rule[/\ABash\((.*)\)\z/m, 1]
     return false if spec.nil?
 
-    re = Regexp.new("\\A#{spec.sub(/:\*\z/, ' *').split('*', -1).map { |s| Regexp.escape(s) }.join('.*')}\\z", Regexp::MULTILINE)
-    re.match?(pattern[/\ABash\((.*)\)\z/m, 1])
+    spec = spec.sub(/:\*\z/, ' *')
+    return true if spec.end_with?(' *') && spec.count('*') == 1 && command == spec[0...-2]
+
+    re = Regexp.new("\\A#{spec.split('*', -1).map { |s| Regexp.escape(s) }.join('.*')}\\z", Regexp::MULTILINE)
+    re.match?(command)
+  end
+
+  # The deny and ask rules of a seat that match a command, strongest first, as "<list> <rule>".
+  def matching_rules(id, command)
+    merged = merged_permissions(id)
+    %w[deny ask].flat_map { |l| merged[l].select { |r| rule_matches?(r, command) }.map { |r| "#{l} #{r}" } }
   end
 
   # What `check` warns about. Warnings do not stop a start.
@@ -867,6 +917,7 @@ class TeamConfig
     if plugin? && !File.file?(File.join(PLUGIN_DIR, '.claude-plugin', 'plugin.json'))
       die "sessions.claude.plugin is on, but #{PLUGIN_DIR}/.claude-plugin/plugin.json is missing"
     end
+    die 'sessions.claude.auto_memory must be true or false' if claude.key?('auto_memory') && ![true, false].include?(claude['auto_memory'])
     die "sessions.claude.effort must be one of #{EFFORTS.join(', ')}" if claude['effort'] && !EFFORTS.include?(claude['effort'].to_s)
     if claude.key?('permission_mode') && !PERMISSION_MODES.include?(claude['permission_mode'].to_s)
       die "sessions.claude.permission_mode must be one of #{PERMISSION_MODES.join(', ')}"
@@ -902,6 +953,7 @@ class TeamConfig
       validate_skills(id, r['skills']) if r.key?('skills')
       # A YAML boolean: the system ruby's YAML 1.1 also reads an unquoted yes or on as true.
       die "roles.#{id}.may_merge must be true or false" if r.key?('may_merge') && ![true, false].include?(r['may_merge'])
+      die "roles.#{id}.auto_memory must be true or false" if r.key?('auto_memory') && ![true, false].include?(r['auto_memory'])
       if r.key?('permission_mode') && !PERMISSION_MODES.include?(r['permission_mode'].to_s)
         die "roles.#{id}.permission_mode must be one of #{PERMISSION_MODES.join(', ')}"
       end
@@ -971,6 +1023,7 @@ when 'role'
   when 'effort' then puts(cfg.effort(id) || '(inherit)')
   when 'permission_mode' then puts cfg.mode_label(id)
   when 'gate' then puts(cfg.gate_on_stop?(id) ? 'on-stop' : '-')
+  when 'auto_memory' then puts(cfg.auto_memory?(id) ? '(inherit)' : 'off')
   else die "unknown role key '#{key}'"
   end
 when 'workdir' then puts cfg.workdir(args.fetch(0) { die 'workdir needs a role id' })
@@ -980,5 +1033,6 @@ when 'kickoff' then puts cfg.kickoff(args.fetch(0) { die 'kickoff needs a role i
 when 'settings' then puts JSON.pretty_generate(cfg.settings(args.fetch(0) { die 'settings needs a role id' }))
 when 'permissions_report' then puts cfg.permissions_report
 when 'warnings' then puts cfg.warnings
+when 'matching_rules' then puts cfg.matching_rules(args.fetch(0) { die 'matching_rules needs a role id' }, args.fetch(1) { die 'matching_rules needs a command' })
 else die "unknown command '#{cmd}'"
 end
