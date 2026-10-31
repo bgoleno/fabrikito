@@ -181,6 +181,7 @@ cmd_check() {
   echo "(inherit = flag omitted; the seat uses model, effortLevel and permissions.defaultMode from ~/.claude/settings.json)"
   echo
   cfg permissions_report
+  cfg warnings
   echo "valid."
 }
 

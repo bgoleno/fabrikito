@@ -126,7 +126,11 @@ permissions:
 # `prompt_text` (inline). `summary` is the line shown in the roster every seat sees.
 # Optional per role: `gate_on_stop:` (see repo.gate), `model:`, `effort:` and `permission_mode:` (override sessions.claude),
 # `permissions:` (added to the team's), `session:` (tmux name), `kickoff:` (first message),
-# `skills:` (skills to name in the seat's prompt, below).
+# `skills:` (skills to name in the seat's prompt, below), `may_merge:` (below).
+# may_merge: true marks a role that is meant to merge PRs (on the owner's say-so). It is a YAML
+# boolean, so an unquoted yes or on also reads as true. `check` warns about every other role whose
+# rules have neither a deny nor an ask on each merge pattern above, so a team that drops the
+# team-wide ask learns which roles are left open. It changes no rule.
 # skills: each item is a skill name as the Skill tool shows it (`name`, or `plugin:name` for a
 # plugin's skill), or a one-entry mapping of that name to when to use it. They are listed after the
 # role's prompt with a note that a skill may not be installed, so naming one installs nothing and
