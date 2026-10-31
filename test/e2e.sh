@@ -236,6 +236,43 @@ tmux capture-pane -p -t '=tt-w1:' | grep -q "from em\] hello w1" && ok "message 
 grep -q "from em\] hello w1" $T/keys-w1.log 2>/dev/null && ok "the stand-in logged the submitted message (the key log works)" || bad "key log of w1"
 tmux show-options -t '=tt-w1:' set-titles-string | grep -q 'set-titles-string "w1 | Worker One | tt-w1"' && ok "pane title set at startup: role | title | session" || bad "pane title at startup"
 tmux set-option -t '=tt-w1:' set-titles-string "stale" && $S -c $T/team.yaml titles >/dev/null && tmux show-options -t '=tt-w1:' set-titles-string | grep -q '"w1 | Worker One | tt-w1"' && ok "titles command repairs a changed title" || bad "titles command"
+# logged <to> <outcome> <message> <escaped> <what>: one say writes exactly one log line, whose
+# message field is <escaped>, and printf %b of that field gives back the message (README format).
+logged() {
+  local n line
+  n=$(wc -l < $T/state/messages.log)
+  TEAM_ROLE=em $S -c $T/team.yaml say "$1" "$3" >/dev/null 2>&1; sleep 1
+  line=$(tail -n +$((n + 1)) $T/state/messages.log)
+  if [ "$(wc -l < $T/state/messages.log)" -eq $((n + 1)) ] && [ "$(printf '%s\n' "$line" | cut -f2-4)" = "em	$1	$2" ] &&
+    [ "$(printf '%s\n' "$line" | cut -f5-)" = "$4" ] && [ "$(printf '%b' "$(printf '%s\n' "$line" | cut -f5-)")" = "$3" ]; then
+    ok "log: $5 is one line, escaped and reversible"
+  else bad "log: $5"; printf '%s\n' "$line" | od -c | head -5; fi
+}
+logged w1 delivered $'first line\nsecond line' 'first line\nsecond line' "a multi-line message"
+logged w2 NOT-DELIVERED $'col a\tcol b' 'col a\tcol b' "a message with a tab"
+logged w2 NOT-DELIVERED $'cr\r and a literal \\n, \\t and \\\\' 'cr\r and a literal \\n, \\t and \\\\' "a message with a CR and literal backslashes"
+# Other controls are escaped so tail cannot be driven by a message (this one would retitle the
+# terminal); UTF-8 is left as it is. w2 is down, so nothing reaches a pane.
+logged w2 NOT-DELIVERED $'title \e]0;x\a, del \x7f, utf-8 é ✓' 'title \x1B]0;x\x07, del \x7F, utf-8 é ✓' "a message with ESC, BEL and DEL"
+logged all delivered $'to all,\nfrom em' 'to all,\nfrom em' "a multi-line say all"
+# C1 controls (CSI, OSC, ST) and bidi overrides are escaped by code point, as their UTF-8 bytes.
+logged w2 NOT-DELIVERED $'csi \xc2\x9b31m osc \xc2\x9d0;x\xc2\x9c rlo \xe2\x80\xae isolate \xe2\x81\xa6.' 'csi \xC2\x9B31m osc \xC2\x9D0;x\xC2\x9C rlo \xE2\x80\xAE isolate \xE2\x81\xA6.' "a message with C1 controls and bidi overrides"
+logged w2 NOT-DELIVERED $'not utf-8: \x9b, \xff' 'not utf-8: \x9B, \xFF' "a message that is not valid UTF-8"
+# No tracked file may hold a bidi embedding, override or isolate character itself (Trojan Source):
+# the escaper names those ranges with ASCII \u escapes, and so must anything else.
+bidi=$(cd $SRC && git ls-files -z | xargs -0 ruby --disable-gems -e 'ARGV.each { |f| next unless File.file?(f); File.binread(f).each_line.with_index(1) { |l, i| puts "#{f}:#{i}" if l =~ /\xE2\x80[\xAA-\xAE]|\xE2\x81[\xA6-\xA9]/n } }')
+[ -z "$bidi" ] && ok "no tracked file contains a bidi control character" || { bad "bidi control characters in: $bidi"; }
+# Outside a UTF-8 locale (a script, cron, env -i) ruby reads its -e program as US-ASCII, so the
+# escaper's source must be ASCII: the field is escaped, not the failure marker.
+n=$(wc -l < $T/state/messages.log)
+LC_ALL=C TEAM_ROLE=em $S -c $T/team.yaml say w2 $'c locale: csi \xc2\x9b, e-acute \xc3\xa9' >/dev/null 2>&1
+[ "$(wc -l < $T/state/messages.log)" -eq $((n + 1)) ] && [ "$(tail -1 $T/state/messages.log | cut -f5-)" = $'c locale: csi \\xC2\\x9B, e-acute \xc3\xa9' ] &&
+  ok "log: under LC_ALL=C the message is escaped, not logged as a failure" || { bad "log: LC_ALL=C"; tail -1 $T/state/messages.log; }
+# The sender comes from TEAM_ROLE, which nothing validates: it is escaped like the message.
+n=$(wc -l < $T/state/messages.log)
+TEAM_ROLE=$'e\tm\nx' $S -c $T/team.yaml say w2 "from an odd sender" >/dev/null 2>&1
+[ "$(wc -l < $T/state/messages.log)" -eq $((n + 1)) ] && [ "$(tail -1 $T/state/messages.log | cut -f2-5)" = 'e\tm\nx	w2	NOT-DELIVERED	from an odd sender' ] &&
+  ok "log: a TEAM_ROLE with a tab and a newline is escaped, one line" || { bad "log: odd TEAM_ROLE"; tail -2 $T/state/messages.log | od -c | head -6; }
 echo "--- migrate then up w2"
 $S -c $T/team.yaml migrate w2 2>&1 | grep -E "moved|REFUSE|skip" | cut -c1-150
 $S -c $T/team.yaml up w2 2>&1 | grep -E "start|error" | cut -c1-150
@@ -524,6 +561,14 @@ fc=$(PATH=$T/brk:/usr/bin:/bin TEAM_STATE_DIR=$T/state2 TEAM_VIEW=0 $S -c $T/tc.
 mkdir -p $T/state4/bin/claude-9.9.9 && printf 'x' > $T/state4/bin/claude-9.9.9/claude && ino=$(stat -f %i $T/state4/bin/claude-9.9.9/claude)
 fc=$(TEAM_STATE_DIR=$T/state4 TEAM_VIEW=0 $S -c $T/tc.yaml up --no-view 2>&1); rc=$?
 [ $rc -ne 0 ] && [ "$(stat -f %i $T/state4/bin/claude-9.9.9/claude)" = "$ino" ] && [ -z "$(ls -A $T/state4/bin/claude-9.9.9 | grep partial)" ] && ! tmux has-session -t '=tc-x' 2>/dev/null && ok "an existing file at the copy's path is never replaced (no partial left, and the start is refused while it is not runnable)" || { bad "copy race (rc=$rc)"; echo "$fc" | tail -2; ls -la $T/state4/bin/claude-9.9.9; }
+echo "--- rendered prompts stay short"
+# Every line of a seat's prompt is loaded on every task; the best-practice guidance is to stay under
+# about 200 lines and move procedures into skills. Measured on the example team, which uses the
+# shipped roles/ prompts. A project's own prompts add to these, so this leaves them room.
+for r in $(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml ids); do
+  n=$(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render "$r" 2>/dev/null | wc -l | tr -d ' ')
+  [ "${n:-0}" -gt 0 ] && [ "$n" -lt 200 ] && ok "example seat $r renders a prompt under 200 lines ($n)" || bad "example seat $r renders a prompt of ${n:-?} lines (limit 199)"
+done
 echo "--- cleanup"
 $S -c $T/team.yaml down --yes >/dev/null 2>&1; tmux kill-server 2>/dev/null
 for w in team-w1 team-w2; do git -C $T/repo worktree remove --force $VOL/$ROOT/$w 2>/dev/null; git -C $T/repo worktree remove --force $T/repo/.claude/worktrees/$w 2>/dev/null; done

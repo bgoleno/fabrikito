@@ -639,6 +639,24 @@ send_one() {
   tmux send-keys -t "=$sess:" Enter
 }
 
+# One messages.log field, escaped so a record stays on one line and the terminal reading the log
+# with tail cannot be driven by the message (an ESC or CSI sequence could retitle it or hide lines;
+# a bidi override could reorder how the line shows): backslash becomes \\, newline \n, CR \r, tab
+# \t, and every other C0 control, DEL, C1 control (U+0080-U+009F) and bidi embedding, override or
+# isolate (U+202A-U+202E, U+2066-U+2069) is written as its UTF-8 bytes in \xHH form. This goes by
+# code point, not by byte: the check mark is E2 9C 93, and 0x9C alone is a C1 control. Text that is
+# not valid UTF-8 has every byte from 0x80 up escaped instead, so a stray 0x9B cannot act as CSI.
+# Reversible: printf '%b' gives back the original. --disable-gems: RubyGems is not needed, and its
+# loading has failed in an unreadable working directory. If ruby fails, a fixed marker is logged
+# rather than an empty field.
+log_field() {
+  ruby --disable-gems -e '
+    s = ARGV[0].dup.force_encoding("UTF-8")
+    re = s.valid_encoding? ? /[\\\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/ : (s = s.b; /[\\\x00-\x1f\x7f-\xff]/n)
+    esc = { "\\" => "\\\\", "\n" => "\\n", "\r" => "\\r", "\t" => "\\t" }
+    print s.gsub(re) { |c| esc[c] || c.bytes.map { |b| format("\\x%02X", b) }.join }' -- "$1" || printf '%s' '<log_field failed>'
+}
+
 cmd_say() {
   local to=${1:-} from=${TEAM_ROLE:-owner} text r rc=0
   [ -n "$to" ] && [ $# -ge 2 ] || die "usage: say <role|all> <message...>"
@@ -656,9 +674,11 @@ cmd_say() {
     [ "$to" = "$from" ] && die "a seat cannot message itself"
     send_one "$to" "$text" || rc=1
   fi
-  # The log records what happened, not what was attempted: a refused delivery says so.
-  printf '%s\t%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%dT%H:%M:%S')" "$from" "$to" \
-    "$([ "$rc" -eq 0 ] && echo delivered || echo NOT-DELIVERED)" "$*" >>"$LOG"
+  # The log records what happened, not what was attempted: a refused delivery says so. One line
+  # per say (all included), in the format the README documents under "The message log". $to is a
+  # role id or all; $from comes from TEAM_ROLE, which nothing validates, so it is escaped too.
+  printf '%s\t%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%dT%H:%M:%S')" "$(log_field "$from")" "$to" \
+    "$([ "$rc" -eq 0 ] && echo delivered || echo NOT-DELIVERED)" "$(log_field "$*")" >>"$LOG"
   return "$rc"
 }
 
