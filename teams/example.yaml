@@ -286,6 +286,7 @@ roles:
     prompt: ../roles/sec.md
     skills:
       - "factory:handoff": before /clear, /compact, a restart or the end of a session
+      - "factory:security-triage": when a finding, alert or report reaches you, before it is written anywhere
       - "security-review": to review a branch's pending changes for security issues
     permissions:
       deny:
