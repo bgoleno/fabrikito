@@ -103,15 +103,31 @@ command ([docs](https://code.claude.com/docs/en/worktrees)):
 
 - `repo.copy`: paths relative to the main checkout, copied into the new worktree (files or folders;
   meant for small files). A path that does not exist is a warning; a file the worktree already has is
-  left as it is. Paths must stay inside the checkout.
+  left as it is. Paths must stay inside the checkout. Only real files and folders are copied: a path
+  that is or contains a symlink, or that a symlinked folder would lead out of the checkout or out of
+  the worktree, stops the setup.
 - `repo.bootstrap`: a command run with bash in the new worktree after the copy, with no terminal input
-  and with `TEAM_ROLE` and `TEAM_REPO` (the main checkout) set, for example `npm ci` or `uv sync`. If it
-  fails, `up` prints its output, removes that worktree (it was just made, by that exact path) so the
-  next `up` starts over, and stops before starting the seat.
+  and with `TEAM_ROLE` (the seat's role id) and `TEAM_REPO` (the main checkout) set, for example
+  `npm ci` or `uv sync`. Its output is shown, indented, as it runs. It runs without the messaging and
+  tmux variables of a seat that runs `up` (`CLAUDE_CODE_MESSAGING_*`, `CLAUDECODE`, `TMUX`,
+  `TMUX_PANE`), so a seat's messaging token does not reach an install script. There is no time limit.
+  If it fails, or `up` is interrupted meanwhile (Ctrl-C, TERM, HUP), `up` stops the bootstrap and
+  stops before starting the seat; a worktree it has just made is removed (by that exact path), so the
+  next `up` starts over.
 
-Both run only when `up` creates a worktree, not for a worktree that exists, and not for a `project`
-workdir. `check` shows them. A copied secret is a second copy on the worktree volume; the team's
-`Read` deny on `.env` files covers it like the original.
+When both have finished, `up` marks the setup done (`<state>/setup/<role>`, with the worktree's path).
+Every later `up` checks that mark for a worktree it finds, and redoes the copy and the bootstrap
+before the seat starts when the mark is missing: after a start that was killed or crashed midway, or
+when `repo.copy` or `repo.bootstrap` was added after the worktree was made. A failure there leaves
+that existing worktree as it is (it may hold work). Neither runs for a `project` workdir. `check`
+shows them.
+
+`up` starts the roles in file order and stops at the first one it cannot start, this setup included:
+the seats started before it keep running, and the next `up` starts the rest (it skips running seats).
+
+Do not list real credentials in `repo.copy`: each copy is another file on the worktree volume that a
+seat works in. Use development values, or have the bootstrap fetch what it needs. The team's `Read`
+deny on `.env` files covers a copied `.env` like the original.
 
 Package stores when worktrees are on another volume: tools that hard-link from a shared store
 (pnpm, uv) can only link within one volume, so with the store on the internal disk and the worktrees

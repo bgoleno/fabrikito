@@ -31,8 +31,9 @@ repo:
   # dependencies. `copy` lists small git-ignored files (paths relative to the checkout) copied from
   # the main checkout into each new worktree, never over a file it already has; then `bootstrap`
   # runs there with bash, no terminal input, and TEAM_ROLE and TEAM_REPO (the main checkout) set,
-  # before the seat starts. Both run only when the worktree is created. A failing bootstrap stops
-  # `up` with its output and removes that new worktree, so the next `up` tries again. See README,
+  # before the seat starts, its output shown as it runs. A failing or interrupted setup stops `up`
+  # (and removes a worktree it has just made); a worktree whose setup did not finish is set up
+  # again by the next `up`. No real credentials in copy: each copy is another file. See README,
   # "New worktrees", for where package stores should live when worktrees are on another volume.
   # copy: [.env.local]
   # bootstrap: "npm ci"

@@ -72,6 +72,7 @@ PROJECT_NAME=$(cfg get project.name)
 PROJECT_URL=$(cfg get project.url)
 BASE=$(cfg get repo.base)
 BOOTSTRAP=$(cfg get repo.bootstrap)
+COPY_PATHS=$(cfg get repo.copy)
 VOLUME=$(cfg get storage.volume)
 WT_ROOT=$(cfg get storage.worktree_root)
 PREFIX=$(cfg get sessions.prefix)
@@ -125,6 +126,10 @@ ensure_worktree() {
   dir=$(workdir "$id")
   if [ -d "$dir" ]; then
     git -C "$dir" rev-parse --git-dir >/dev/null 2>&1 || die "$dir exists but is not a git worktree"
+    if setup_wanted && ! setup_done "$id" "$dir"; then
+      echo "  $id: $dir is not marked set up (a start was stopped, or repo.copy or repo.bootstrap came later); setting it up now"
+      bootstrap_worktree "$id" "$dir" existing
+    fi
     return 0
   fi
   legacy=$(other_worktrees_named "$(cfg role "$id" worktree_name)" "$dir")
@@ -140,40 +145,99 @@ ensure_worktree() {
   git -C "$REPO" fetch --quiet origin "${BASE#origin/}" || echo "warning: fetch failed; using the local $BASE" >&2
   git -C "$REPO" worktree add --detach "$dir" "$BASE" >/dev/null
   echo "  created worktree $dir"
-  bootstrap_worktree "$id" "$dir"
+  if setup_wanted; then bootstrap_worktree "$id" "$dir" new; fi
 }
 
-# A worktree up has just made has none of the main checkout's git-ignored files and no installed
+# A worktree up has made has none of the main checkout's git-ignored files and no installed
 # dependencies (#10). Copy repo.copy's paths from the main checkout (never over a file the worktree
-# already has), then run repo.bootstrap there with no terminal input. If either fails, print why,
-# remove that new worktree by its exact path so the next up starts over, and stop: the seat would
-# otherwise start in a worktree that is set up halfway and never gets the bootstrap again.
+# already has), then run repo.bootstrap there with no terminal input, its output shown as it runs.
+# Only then is the setup marked done, in <state>/setup/<role> (the worktree's real path): up checks
+# that mark for every worktree it finds, and redoes the setup when it is missing, because a start
+# can be stopped anywhere (a signal, a kill, a crash) and the seat must never start in a worktree
+# set up halfway. A failure, or INT, TERM or HUP meanwhile, stops up; a worktree this up has just
+# made is then removed by its exact path, and an existing one (it may hold work) is left as it is.
+BOOT_DIR="" BOOT_PID="" BOOT_NEW=""
+setup_wanted() { [ -n "$BOOTSTRAP" ] || [ -n "$COPY_PATHS" ]; }
+setup_mark() { echo "$STATE/setup/$1"; }
+setup_done() { [ "$(cat "$(setup_mark "$1")" 2>/dev/null)" = "$(cd "$2" && pwd -P)" ]; }
+
 bootstrap_worktree() {
-  local id=$1 dir=$2 p out rc
+  local id=$1 dir=$2 p rc real_repo real_dir
+  BOOT_DIR=$dir BOOT_NEW=$3
+  trap 'boot_interrupted' INT TERM HUP
+  rm -f "$(setup_mark "$id")"
+  real_repo=$(cd "$REPO" && pwd -P); real_dir=$(cd "$dir" && pwd -P)
   while IFS= read -r p; do
     [ -n "$p" ] || continue
-    if [ ! -e "$REPO/$p" ]; then
+    # Neither side may lead the copy outside (sec and qa2, PR #106): a symlinked folder in the main
+    # checkout would copy from wherever it points, a symlink copied as a link would let writes go
+    # through to its target, and a tracked symlinked folder in the fresh worktree would have mkdir -p
+    # and cp write through it. The target's deepest existing folder is checked before mkdir -p,
+    # which itself writes through such a link.
+    if [ ! -e "$REPO/$p" ] && [ ! -L "$REPO/$p" ]; then
       echo "  warning: repo.copy: $REPO/$p does not exist; not copied" >&2
-    elif [ -e "$dir/$p" ]; then
+    elif ! inside "$(cd "$(dirname "$REPO/$p")" && pwd -P)" "$real_repo"; then
+      setup_failed "repo.copy: $p is outside the main checkout (a symlinked folder leads out of it)"
+    elif [ -n "$(find "$REPO/$p" -type l -print -quit 2>/dev/null)" ]; then
+      setup_failed "repo.copy: $p is or contains a symlink; repo.copy copies only real files and folders"
+    elif [ -e "$dir/$p" ] || [ -L "$dir/$p" ]; then
       echo "  repo.copy: $p is already in the worktree; left as it is"
+    elif ! inside "$(deepest_real_dir "$(dirname "$dir/$p")")" "$real_dir"; then
+      setup_failed "repo.copy: $p would be written outside the worktree (a symlinked folder leads out of it)"
     elif mkdir -p "$(dirname "$dir/$p")" && cp -pR "$REPO/$p" "$dir/$p"; then
       echo "  copied $p"
     else
-      abandon_worktree "$dir" "repo.copy could not copy $REPO/$p"
+      setup_failed "repo.copy could not copy $REPO/$p"
     fi
-  done < <(cfg get repo.copy)
-  [ -n "$BOOTSTRAP" ] || return 0
-  echo "  bootstrap: $BOOTSTRAP"
-  # set -e: a failing assignment would exit here, before the output is shown and the worktree removed.
-  out=$(cd "$dir" && TEAM_ROLE=$id TEAM_REPO=$REPO bash -c "$BOOTSTRAP" </dev/null 2>&1) && rc=0 || rc=$?
-  [ "$rc" -eq 0 ] && return 0
-  printf '%s\n' "$out" | sed 's/^/    | /' >&2
-  abandon_worktree "$dir" "repo.bootstrap failed (exit $rc) in $dir"
+  done <<<"$COPY_PATHS"
+  if [ -n "$BOOTSTRAP" ]; then
+    echo "  bootstrap: $BOOTSTRAP (output below as it runs; a long install takes a while)"
+    # In the background with job control on, so the bootstrap and everything it starts are one
+    # process group that the trap can stop (a trap waits for a foreground child, which a hung
+    # bootstrap never ends), and so a Ctrl-C reaches up, not the install. sed -l passes each line
+    # on as it comes. It runs without the messaging and tmux variables of a seat that runs up: a
+    # seat's messaging token must not reach an install script (sec, PR #106).
+    set -m
+    (
+      set +e
+      (cd "$dir" && exec env -u CLAUDE_CODE_MESSAGING_SOCKET -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDECODE \
+        -u TMUX -u TMUX_PANE TEAM_ROLE="$id" TEAM_REPO="$REPO" bash -c "$BOOTSTRAP") </dev/null 2>&1 | sed -l 's/^/    | /'
+      exit "${PIPESTATUS[0]}"
+    ) &
+    BOOT_PID=$!
+    set +m
+    wait "$BOOT_PID" && rc=0 || rc=$?
+    BOOT_PID=""
+    [ "$rc" -eq 0 ] || setup_failed "repo.bootstrap failed (exit $rc) in $dir"
+  fi
+  trap - INT TERM HUP
+  printf '%s\n' "$real_dir" >"$(setup_mark "$id")"
+  BOOT_DIR="" BOOT_NEW=""
 }
 
-abandon_worktree() {
-  git -C "$REPO" worktree remove --force "$1" >/dev/null 2>&1 || echo "  warning: could not remove $1; remove it before the next up" >&2
-  die "$2; the new worktree was removed, so the next up sets it up again"
+# Whether real path $1 is $2 or inside it.
+inside() { case "$1/" in "$2"/*) return 0 ;; *) return 1 ;; esac; }
+
+# The real path of the deepest folder of $1 that exists.
+deepest_real_dir() {
+  local d=$1
+  while [ ! -d "$d" ]; do d=$(dirname "$d"); done
+  (cd "$d" && pwd -P)
+}
+
+boot_interrupted() {
+  trap - INT TERM HUP
+  [ -z "$BOOT_PID" ] || kill -TERM -- "-$BOOT_PID" 2>/dev/null || true
+  setup_failed "up was interrupted while setting up $BOOT_DIR"
+}
+
+setup_failed() {
+  trap - INT TERM HUP
+  if [ "$BOOT_NEW" = new ]; then
+    git -C "$REPO" worktree remove --force "$BOOT_DIR" >/dev/null 2>&1 || echo "  warning: could not remove $BOOT_DIR; remove it before the next up" >&2
+    die "$1; the new worktree was removed, so the next up sets it up again"
+  fi
+  die "$1; the worktree was left as it is (it may hold work) and is not marked set up, so the next up tries again"
 }
 
 cmd_check() {
@@ -193,7 +257,7 @@ cmd_check() {
   [ -z "$hooks_note" ] || echo "hooks     : $hooks_note"
   echo "bootstrap : ${BOOTSTRAP:-none}$([ -n "$BOOTSTRAP" ] && echo ' (run in each new worktree before its seat starts)')"
   local copy
-  copy=$(cfg get repo.copy | paste -sd ',' - | sed 's/,/, /g')
+  copy=$(printf '%s' "$COPY_PATHS" | paste -sd ',' - | sed 's/,/, /g')
   echo "copy      : ${copy:-none}$([ -n "$copy" ] && echo ' (from the main checkout into each new worktree)')"
   echo "updates   : Claude Code's auto-updater is off in every seat (DISABLE_AUTOUPDATER=1); update by hand, then down and up"
   if resolve_claude; then

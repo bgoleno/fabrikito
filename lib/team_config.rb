@@ -94,10 +94,11 @@ RESERVED_FLAGS = {
 }.freeze
 
 # Folders factory.sh owns under the state folder: settings, launch and prompts are rewritten for every
-# start; bin holds the copies of claude the seats run, made by up when missing (#50). Seats may not
+# start; bin holds the copies of claude the seats run, made by up when missing (#50); setup holds the
+# mark up writes once a new worktree's repo.copy and repo.bootstrap have finished (#10). Seats may not
 # edit them (see protected_paths), so a folder added here is protected without further changes.
 # Files seats are meant to write (such as progress notes) belong in a folder that is not listed.
-GENERATED_DIRS = %w[settings launch prompts bin].freeze
+GENERATED_DIRS = %w[settings launch prompts bin setup].freeze
 
 # Folders under the state folder that hooks write, and seats must not: the gate's failure counter
 # lives in gate/, so a seat that could edit it could switch its own gate off. Protected like

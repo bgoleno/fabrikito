@@ -231,6 +231,7 @@ RWT1=$(cd $VOL/$ROOT/team-w1 2>/dev/null && pwd -P)
 grep -qE "^w1 $RWT1 env=yes repo=.*/repo$" $T/boot.log && ok "repo.bootstrap ran in w1's new worktree, after the copy, with TEAM_ROLE and TEAM_REPO" || { bad "repo.bootstrap in w1"; cat $T/boot.log 2>&1; }
 echo "$out" | grep -qF "repo.copy: $T/repo/missing.txt does not exist" && ok "repo.copy warns about a missing file and goes on" || { bad "repo.copy missing-file warning"; echo "$out" | grep -i copy; }
 ! grep -q "^em " $T/boot.log && ok "repo.bootstrap does not run for a project workdir (em)" || bad "repo.bootstrap ran for em"
+[ "$(cat $T/state/setup/w1 2>/dev/null)" = "$RWT1" ] && [ ! -e $T/state/setup/em ] && ok "the setup of w1's new worktree is marked done once copy and bootstrap finished (none for em)" || { bad "setup mark for w1"; ls -la $T/state/setup 2>&1; }
 sleep 3
 grep -q "^w1 .*--model sonnet --effort low" $T/args.log && ok "w1 launched with --model sonnet --effort low" || { bad "w1 args"; cat $T/args.log; }
 PLUG=$(cd $SRC/plugin && pwd -P)
@@ -753,6 +754,57 @@ REPO_EXTRA="bootstrap: \"$T/bin/boot-fail\"" mk "wrapper: $T/bin/wrap"; echo "  
 bf=$(TEAM_STATE_DIR=$T/state5 $S -c $T/v.yaml up --no-view w8 2>&1); rc=$?
 [ $rc -ne 0 ] && echo "$bf" | grep -qF "boom-out" && echo "$bf" | grep -qF "boom-err" && echo "$bf" | grep -qF "repo.bootstrap failed (exit 3)" && [ ! -e $VOL/$ROOT/team-w8 ] && ! git -C $T/repo worktree list | grep -q "team-w8" && ! tmux has-session -t '=tv-w8' 2>/dev/null &&
   ok "a failing repo.bootstrap stops the start with its output, removes the new worktree and starts no seat" || { bad "failing repo.bootstrap (rc=$rc)"; echo "$bf" | tail -6; git -C $T/repo worktree list; }
+# repo.copy never writes or reads through a symlinked folder that leads outside (sec, PR #106). The
+# branch `symlinked` tracks cfglink -> $T/outside, so a fresh worktree of it has that link; the
+# main checkout (on main) has a real cfglink/ to copy from, and an untracked srclink -> outside.
+mkdir -p $T/outside $T/outside2 && echo secret > $T/outside2/secret
+git -C $T/repo switch -q -c symlinked && ln -s $T/outside $T/repo/cfglink && git -C $T/repo add cfglink && git -C $T/repo commit -q -m link && git -C $T/repo push -q origin symlinked && git -C $T/repo switch -q main
+mkdir -p $T/repo/cfglink && echo '{"x":1}' > $T/repo/cfglink/x.json && ln -s $T/outside2 $T/repo/srclink && printf 'cfglink/\nsrclink\n' >> $T/repo/.git/info/exclude
+REPO_EXTRA="base: origin/symlinked, copy: [cfglink/x.json]" mk "wrapper: $T/bin/wrap"; echo "  w7: { title: L, workdir: { type: worktree }, prompt_text: \"p\" }" >> $T/v.yaml
+sl=$(TEAM_STATE_DIR=$T/state6 $S -c $T/v.yaml up --no-view w7 2>&1); rc=$?
+[ $rc -ne 0 ] && echo "$sl" | grep -qF "repo.copy: cfglink/x.json would be written outside the worktree" && [ ! -e $T/outside/x.json ] && [ ! -e $VOL/$ROOT/team-w7 ] && ! tmux has-session -t '=tv-w7' 2>/dev/null &&
+  ok "repo.copy refuses a target under a tracked symlink that leads out of the worktree, and writes nothing there" || { bad "repo.copy through a worktree symlink (rc=$rc)"; echo "$sl" | tail -4; ls -la $T/outside; }
+REPO_EXTRA="copy: [srclink/secret]" mk "wrapper: $T/bin/wrap"; echo "  w7: { title: L, workdir: { type: worktree }, prompt_text: \"p\" }" >> $T/v.yaml
+sl=$(TEAM_STATE_DIR=$T/state6 $S -c $T/v.yaml up --no-view w7 2>&1); rc=$?
+[ $rc -ne 0 ] && echo "$sl" | grep -qF "repo.copy: srclink/secret is outside the main checkout" && [ ! -e $VOL/$ROOT/team-w7 ] &&
+  ok "repo.copy refuses a source reached through a symlink that leads out of the main checkout" || { bad "repo.copy through a checkout symlink (rc=$rc)"; echo "$sl" | tail -4; }
+# The bootstrap runs without the messaging and tmux variables of a seat that runs up (sec, PR #106):
+# a seat's messaging token must not reach an install script.
+printf '#!/bin/sh\necho "token=${CLAUDE_CODE_MESSAGING_TOKEN-unset} socket=${CLAUDE_CODE_MESSAGING_SOCKET-unset} claudecode=${CLAUDECODE-unset} role=$TEAM_ROLE" >> %s/boot-env.log\n' $T > $T/bin/boot-env; chmod +x $T/bin/boot-env
+ln -s $T/outside2/secret $T/repo/linked.env && printf 'linked.env\n' >> $T/repo/.git/info/exclude
+REPO_EXTRA="copy: [linked.env]" mk "wrapper: $T/bin/wrap"; echo "  w7: { title: L, workdir: { type: worktree }, prompt_text: \"p\" }" >> $T/v.yaml
+sl=$(TEAM_STATE_DIR=$T/state6 $S -c $T/v.yaml up --no-view w7 2>&1); rc=$?
+[ $rc -ne 0 ] && echo "$sl" | grep -qF "repo.copy: linked.env is or contains a symlink" && [ ! -e $VOL/$ROOT/team-w7 ] &&
+  ok "repo.copy refuses a symlink as a source (it would be copied as a link to its target)" || { bad "repo.copy of a symlink (rc=$rc)"; echo "$sl" | tail -4; }
+REPO_EXTRA="bootstrap: \"$T/bin/boot-env\"" mk "wrapper: $T/bin/wrap"; echo "  w6: { title: E, workdir: { type: worktree }, prompt_text: \"p\" }" >> $T/v.yaml
+CLAUDE_CODE_MESSAGING_TOKEN=e2e-token CLAUDE_CODE_MESSAGING_SOCKET=$T/none.sock CLAUDECODE=1 TEAM_STATE_DIR=$T/state7 $S -c $T/v.yaml up --no-view w6 >/dev/null 2>&1
+[ "$(cat $T/boot-env.log 2>/dev/null)" = "token=unset socket=unset claudecode=unset role=w6" ] && ok "repo.bootstrap runs without the seat's messaging token, socket and CLAUDECODE" || { bad "bootstrap environment"; cat $T/boot-env.log 2>&1; }
+TEAM_STATE_DIR=$T/state7 $S -c $T/v.yaml down --yes w6 >/dev/null 2>&1; git -C $T/repo worktree remove --force $VOL/$ROOT/team-w6 2>/dev/null
+# An up interrupted during a hung bootstrap (tl, PR #106) stops the bootstrap and everything it
+# started, removes the new worktree and starts no seat, so the next up sets it up again.
+printf '#!/bin/sh\necho hanging-out\ntouch %s/boot-started\nsleep 60\n' $T > $T/bin/boot-hang; chmod +x $T/bin/boot-hang
+REPO_EXTRA="bootstrap: \"$T/bin/boot-hang\"" mk "wrapper: $T/bin/wrap"; echo "  w5: { title: H, workdir: { type: worktree }, prompt_text: \"p\" }" >> $T/v.yaml
+TEAM_STATE_DIR=$T/state8 $S -c $T/v.yaml up --no-view w5 > $T/hang.out 2>&1 & upid=$!
+for i in $(seq 1 100); do [ -e $T/boot-started ] && break; sleep 0.1; done
+kill -TERM $upid 2>/dev/null; wait $upid; rc=$?; sleep 1
+[ -e $T/boot-started ] && [ $rc -ne 0 ] && grep -qF "    | hanging-out" $T/hang.out && grep -qF "up was interrupted while setting up" $T/hang.out && [ ! -e $VOL/$ROOT/team-w5 ] && ! git -C $T/repo worktree list | grep -q "team-w5" && ! tmux has-session -t '=tv-w5' 2>/dev/null && ! pgrep -f "$T/bin/boot-hang" >/dev/null &&
+  ok "TERM during a hung bootstrap: output shown as it ran, bootstrap stopped, new worktree removed, no seat" || { bad "TERM during bootstrap (rc=$rc)"; cat $T/hang.out; pgrep -fl "$T/bin/boot-hang"; pkill -f "$T/bin/boot-hang"; }
+# Whatever stopped a start, the next up must not start the seat in a half set-up worktree (tl and
+# qa2, PR #106). After the TERM above, up runs the bootstrap again (now one that finishes).
+sed -i '' "s#bootstrap: \"$T/bin/boot-hang\"#bootstrap: \"$T/bin/boot\"#" $T/v.yaml
+nx=$(TEAM_STATE_DIR=$T/state8 $S -c $T/v.yaml up --no-view w5 2>&1); rc=$?
+[ $rc -eq 0 ] && [ "$(grep -c '^w5 ' $T/boot.log)" = 1 ] && tmux has-session -t '=tv-w5' 2>/dev/null && ok "after a TERM, the next up sets the worktree up again before it starts the seat" || { bad "up after a TERM (rc=$rc)"; echo "$nx" | tail -4; }
+TEAM_STATE_DIR=$T/state8 $S -c $T/v.yaml down --yes w5 >/dev/null 2>&1; git -C $T/repo worktree remove --force $VOL/$ROOT/team-w5 2>/dev/null
+# A KILL cannot be trapped: the worktree stays, unmarked, and the next up sets it up before the seat.
+rm -f $T/boot-started; sed -i '' "s#bootstrap: \"$T/bin/boot\"#bootstrap: \"$T/bin/boot-hang\"#" $T/v.yaml
+TEAM_STATE_DIR=$T/state8 $S -c $T/v.yaml up --no-view w5 > $T/hang2.out 2>&1 & upid=$!
+for i in $(seq 1 100); do [ -e $T/boot-started ] && break; sleep 0.1; done
+kill -KILL $upid 2>/dev/null; wait $upid 2>/dev/null; pkill -f "$T/bin/boot-hang" 2>/dev/null; sleep 1
+sed -i '' "s#bootstrap: \"$T/bin/boot-hang\"#bootstrap: \"$T/bin/boot\"#" $T/v.yaml
+nx=$(TEAM_STATE_DIR=$T/state8 $S -c $T/v.yaml up --no-view w5 2>&1); rc=$?
+[ -e $T/boot-started ] && [ $rc -eq 0 ] && echo "$nx" | grep -qF "is not marked set up" && [ "$(grep -c '^w5 ' $T/boot.log)" = 2 ] && tmux has-session -t '=tv-w5' 2>/dev/null &&
+  ok "after a KILL mid-bootstrap, the next up finds the worktree unmarked and sets it up before it starts the seat" || { bad "up after a KILL (rc=$rc)"; echo "$nx" | tail -4; cat $T/boot.log; }
+TEAM_STATE_DIR=$T/state8 $S -c $T/v.yaml down --yes w5 >/dev/null 2>&1; git -C $T/repo worktree remove --force $VOL/$ROOT/team-w5 2>/dev/null
 REPO_EXTRA='gate: "true"' reject "a non-boolean gate_on_stop" "gate_on_stop must be true or false" "" "" ", gate_on_stop: yes please"
 REPO_EXTRA='gate: ""' reject "an empty gate" "repo.gate must be a non-empty command" ""
 REPO_EXTRA='gate: "true", gate_timeout: 0' reject "a zero gate_timeout" "repo.gate_timeout must be a positive whole number of seconds" ""
