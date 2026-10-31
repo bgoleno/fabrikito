@@ -70,6 +70,7 @@ static void draw(void) {
   fflush(stdout);
 }
 int main(int n, char **v) {
+  if (n == 2 && !strcmp(v[1], "--version")) { char *fv = getenv("FAKE_VERSION"); printf("%s (Claude Code)\n", fv ? fv : "9.9.9"); return 0; }
   struct termios t; char *k = getenv("FAKE_KEYLOG"); FILE *kl = k ? fopen(k, "a") : 0, *mf;
   base = getenv("FAKE_FILES"); if (!base) base = "/nonexistent";
   char path[4096]; snprintf(path, sizeof path, "%s-mode.txt", base);
@@ -107,7 +108,7 @@ int main(int n, char **v) {
 }
 C
 cc -o $T/bin/claude $T/c.c || { echo "no compiler"; exit 2; }
-printf '#!/bin/sh\nshift\necho "$TEAM_ROLE $*" >> %s/args.log\nexport FAKE_KEYLOG=%s/keys-$TEAM_ROLE.log FAKE_FILES=%s/fake-$TEAM_ROLE\nexec %s/bin/claude "$@"\n' $T $T $T $T > $T/bin/wrap; chmod +x $T/bin/wrap
+printf '#!/bin/sh\necho "$TEAM_ROLE $1" >> %s/bin.log\nc=$1\nshift\necho "$TEAM_ROLE $*" >> %s/args.log\necho "$TEAM_ROLE DISABLE_AUTOUPDATER=${DISABLE_AUTOUPDATER-unset}" >> %s/env.log\nexport FAKE_KEYLOG=%s/keys-$TEAM_ROLE.log FAKE_FILES=%s/fake-$TEAM_ROLE\nexec "$c" "$@"\n' $T $T $T $T $T > $T/bin/wrap; chmod +x $T/bin/wrap
 mkdir -p $T/proj
 cat > $T/team.yaml <<Y
 team: tt
@@ -208,6 +209,22 @@ echo "$chk" | grep -qE "^em +Manager .* bypassPermissions " && echo "$chk" | gre
 sect() { echo "$chk" | sed -n "/^\[$1\]/,/^\[/p"; }
 sect w1 | grep -qF "deny : Read(//**/.env), Bash(touch tt-deny*), Bash(gh pr merge *)" && ok "check: w1's merged deny list" || { bad "check w1 deny"; sect w1; }
 sect em | grep -qF "allow rules have no effect in bypassPermissions" && ! sect w1 | grep -qF "no effect in bypassPermissions" && ok "check: bypass note on em only" || { bad "check bypass note"; sect em; }
+# Claude Code's auto-updater reinstalls its package under running seats, and macOS then loses
+# track of the seat's process (#50): every seat starts with it off, in the launch script and in its
+# settings, and nothing else in the tmux server gets the variable.
+grep -qx "em DISABLE_AUTOUPDATER=1" $T/env.log && grep -qx "w1 DISABLE_AUTOUPDATER=1" $T/env.log && ok "seats run with DISABLE_AUTOUPDATER=1 in their environment" || { bad "seat environment"; cat $T/env.log; }
+noenv=""; for r in em w1; do ruby -rjson -e 'exit(JSON.parse(File.read(ARGV[0])).dig("env", "DISABLE_AUTOUPDATER") == "1" ? 0 : 1)' $T/state/settings/$r.json || noenv="$noenv $r"; done
+[ -z "$noenv" ] && ok "every seat's settings set env DISABLE_AUTOUPDATER=1" || bad "settings without env DISABLE_AUTOUPDATER=1:$noenv"
+! tmux show-environment -g DISABLE_AUTOUPDATER >/dev/null 2>&1 && ! tmux show-environment -t '=tt-em:' DISABLE_AUTOUPDATER >/dev/null 2>&1 && ok "the variable is not in the tmux server's or the session's environment (other programs there are unaffected)" || bad "DISABLE_AUTOUPDATER leaked into tmux's environment"
+# Seats run the team's own copy of claude, made by up, never the shared install (#50).
+CP=$T/state/bin/claude-9.9.9/claude
+[ -x $CP ] && grep -qx "em $CP" $T/bin.log && grep -qx "w1 $CP" $T/bin.log && ok "seats run the team's copy of claude ($CP), made by up" || { bad "seats' claude copy"; cat $T/bin.log; ls -la $T/state/bin 2>&1; }
+! grep -qF -e "$T/bin/claude" -e "$RT/bin/claude" $T/state/launch/em.sh $T/state/launch/w1.sh && grep -qF "$CP" $T/state/launch/em.sh && ok "the launch script names the copy, never the shared install" || { bad "launch script claude path"; grep claude_bin $T/state/launch/em.sh; }
+echo "$chk" | grep -qF "claude    : $RT/bin/claude, version 9.9.9" && echo "$chk" | grep -qF "$T/state/bin/claude-9.9.9 (clone): em w1" && ok "check: the shared claude, its version, and each copy with the seats running it" || { bad "check: claude lines"; echo "$chk" | grep -A3 "^claude"; }
+# The shared install is replaced the way npm does it (a new file in its place): the seats keep theirs.
+cc -o $T/bin/claude.new $T/c.c && mv $T/bin/claude.new $T/bin/claude
+$S -c $T/team.yaml status | grep -E "^em " | grep -qF "$RT/state/bin/claude-9.9.9/claude" && ok "status: after the shared claude is replaced, em still runs its intact copy" || { bad "status after shared replace"; $S -c $T/team.yaml status; }
+echo "$chk" | grep -qF "updates   : Claude Code's auto-updater is off in every seat (DISABLE_AUTOUPDATER=1)" && ok "check: says the auto-updater is off in seats" || bad "check: updater line"
 echo "$chk" | grep -qF "add to" && ok "check: says the rules add to the user's and the repo's own settings" || bad "check: add-to note"
 # The gate runs as a Stop hook for roles with gate_on_stop (w1) and for no other role.
 hook=$(ruby -rjson -e 'j = JSON.parse(File.read(ARGV[0])); h = j.dig("hooks", "Stop", 0, "hooks", 0) || {}; puts [j["hooks"]["Stop"].size, h["type"], h["command"], *h["args"], h["timeout"], j["disableAllHooks"].inspect].join(" | ")' $T/state/settings/w1.json 2>&1)
@@ -526,6 +543,25 @@ mkdir -p $T/inst/lib && cp $SRC/lib/team_config.rb $T/inst/lib/
 mk; out=$(TEAM_STATE_DIR=$T/state ruby $T/inst/lib/team_config.rb $T/v.yaml validate 2>&1); rc=$?
 [ $rc != 0 ] && echo "$out" | grep -qF "plugin.json is missing" && ok "rejects plugin on with no plugin manifest in the install" || { bad "missing plugin manifest (rc=$rc)"; echo "$out"; }
 mk "plugin: false"; TEAM_STATE_DIR=$T/state ruby $T/inst/lib/team_config.rb $T/v.yaml validate >/dev/null 2>&1 && ok "accepts plugin: false with no plugin manifest in the install" || bad "plugin: false with no manifest"
+echo "--- skills named in a role's prompt"
+render_em() { ruby $SRC/lib/team_config.rb $T/v.yaml render em 2>&1; }
+accept "skills by name and with a note" "" "" ', skills: [code-review, { "superpowers:test-driven-development": "before writing implementation code" }]'
+out=$(render_em)
+echo "$out" | grep -qxF -- '- `code-review`' && echo "$out" | grep -qxF -- '- `superpowers:test-driven-development`: before writing implementation code' \
+  && ok "the rendered prompt lists each configured skill, with its note" || { bad "skills in the rendered prompt"; echo "$out"; }
+# Nothing is assumed installed: the section says a listed skill may be absent, and what to do then.
+echo "$out" | grep -qF "if it is installed" && echo "$out" | grep -qF "If one is not installed, work without it" \
+  && ok "the skills section holds when a skill is not installed" || { bad "skills wording"; echo "$out"; }
+[ "$(echo "$out" | grep -n -xF 'p' | cut -d: -f1)" -lt "$(echo "$out" | grep -n -xF '## Skills' | cut -d: -f1)" ] 2>/dev/null \
+  && ok "the skills section follows the role's own prompt" || { bad "skills section position"; echo "$out"; }
+ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render fs1 2>&1 | grep -qF -- '- `superpowers:test-driven-development`: ' \
+  && ok "the example team names skills in an engineer's prompt" || bad "the example team names skills in an engineer's prompt"
+mk ""; render_em | grep -q "Skills" && bad "a role without skills gets a skills section" || ok "a role without skills gets no skills section"
+reject "skills that are not a list" "roles.em.skills must be a list" "" "" ", skills: code-review"
+reject "a skill name with a space" "roles.em.skills: 'code review' is not a skill name" "" "" ', skills: ["code review"]'
+reject "a skill listed twice" "roles.em.skills: 'code-review' is listed twice" "" "" ", skills: [code-review, code-review]"
+reject "a skill entry with two names" "roles.em.skills: a mapping entry must be one skill name and its note" "" "" ', skills: [{ a: "x", b: "y" }]'
+reject "a skill note over two lines" "roles.em.skills: the note for 'a' must be one line of text" "" "" ', skills: [{ a: "x\ny" }]'
 # The wrapper claude runs through is protected like factory.sh: a file, or its whole .app bundle.
 mk; ws=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml settings em)
 echo "$ws" | grep -q "wrap\|\.app" && bad "no wrapper configured, but a wrapper deny was added" || ok "no wrapper configured: no wrapper deny"
@@ -571,6 +607,22 @@ $SRC/lib/stop_gate.sh $T/gstate w9 $T/g $T/gate.sh 30 2 </dev/null >/dev/null 2>
 printf '#!/bin/sh\nsleep 60 &\necho $! > %s/bgpid\nsleep 60\n' $T > $T/slow.sh; chmod +x $T/slow.sh
 t0=$(date +%s); gate s3 $T/g $T/slow.sh 2; t1=$(date +%s); sleep 1
 [ $rc = 2 ] && echo "$err" | grep -q "timed out after 2s" && ! echo "$err" | grep -q "Terminated" && [ $((t1 - t0)) -lt 15 ] && ! kill -0 "$(cat $T/bgpid)" 2>/dev/null && ok "a gate past its timeout is killed with its children, and the stop is sent back" || { bad "gate timeout (rc=$rc, $((t1 - t0))s)"; echo "$err"; }
+echo "--- the seats' claude copy: replaced, failed, mid-reinstall"
+cc -o $CP.new $T/c.c && mv $CP.new $CP
+$S -c $T/team.yaml status | grep -E "^em " | grep -q REPLACED && ok "status: a seat whose claude file was replaced under it shows REPLACED" || { bad "status REPLACED"; $S -c $T/team.yaml status; }
+TEAM_VIEW=0 $S -c $T/team.yaml up --no-view em 2>&1 | grep -q "ATTENTION em .*replaced" && ok "up: ATTENTION for a running seat whose claude was replaced" || bad "up: ATTENTION for a replaced claude"
+printf 'team: tc\nrepo: { path: %s/repo, github: local/origin.git }\nproject: { name: B, url: "https://github.com/users/x/projects/9" }\nstorage: { volume: %s, root: %s }\nsessions: { prefix: tc, claude: { wrapper: %s/bin/wrap } }\nroles:\n  x: { title: X, workdir: { type: project, path: %s/proj }, prompt_text: "x" }\n' $T $VOL $ROOT $T $T > $T/tc.yaml
+mkdir -p $T/state2/bin && chmod a-w $T/state2/bin
+fc=$(TEAM_STATE_DIR=$T/state2 TEAM_VIEW=0 $S -c $T/tc.yaml up --no-view 2>&1); rc=$?; chmod u+w $T/state2/bin
+[ $rc -ne 0 ] && echo "$fc" | grep -q "could not copy" && ! tmux has-session -t '=tc-x' 2>/dev/null && ok "a claude copy that cannot be written stops the start; nothing falls back to the shared install" || { bad "failed copy (rc=$rc)"; echo "$fc" | tail -3; }
+mkdir -p $T/brk && ln -s $T/gone/claude.exe $T/brk/claude && ln -s "$(command -v tmux)" $T/brk/tmux
+fc=$(PATH=$T/brk:/usr/bin:/bin TEAM_STATE_DIR=$T/state2 TEAM_VIEW=0 $S -c $T/tc.yaml up --no-view 2>&1); rc=$?
+[ $rc -ne 0 ] && echo "$fc" | grep -q "retry up" && ! tmux has-session -t '=tc-x' 2>/dev/null && ok "a shared claude caught mid-reinstall (a dangling link) stops the start with 'retry up'" || { bad "mid-reinstall (rc=$rc)"; echo "$fc" | tail -3; }
+# Two ups at once: the second must not replace a copy the first one's seat may already run. A file
+# put at the copy's path before the move (not executable, so up does not take it as finished) stays.
+mkdir -p $T/state4/bin/claude-9.9.9 && printf 'x' > $T/state4/bin/claude-9.9.9/claude && ino=$(stat -f %i $T/state4/bin/claude-9.9.9/claude)
+fc=$(TEAM_STATE_DIR=$T/state4 TEAM_VIEW=0 $S -c $T/tc.yaml up --no-view 2>&1); rc=$?
+[ $rc -ne 0 ] && [ "$(stat -f %i $T/state4/bin/claude-9.9.9/claude)" = "$ino" ] && [ -z "$(ls -A $T/state4/bin/claude-9.9.9 | grep partial)" ] && ! tmux has-session -t '=tc-x' 2>/dev/null && ok "an existing file at the copy's path is never replaced (no partial left, and the start is refused while it is not runnable)" || { bad "copy race (rc=$rc)"; echo "$fc" | tail -2; ls -la $T/state4/bin/claude-9.9.9; }
 echo "--- rendered prompts stay short"
 # Every line of a seat's prompt is loaded on every task; the best-practice guidance is to stay under
 # about 200 lines and move procedures into skills. Measured on the example team, which uses the
