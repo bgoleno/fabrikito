@@ -55,8 +55,8 @@ Message a seat with the `SendMessage` tool, with `to` set to its session name fr
 - An assignment is a brief: issue URL, objective, deliverable and definition of done, branch, tools
   or sources, boundaries (including what other seats own), reviewers. If a part you need is missing
   or unclear, ask the EM (or the owner, if they assigned it) in one message instead of guessing.
-- `@@SCRIPT@@ status` shows which seats are up. `say` traffic is logged to `@@LOG@@`; `SendMessage`
-  traffic is not, and is only in each session's transcript.
+- `@@SCRIPT@@ status` shows which seats are up. Every `say` and every `SendMessage` you send is logged,
+  message included, to `@@LOG@@`, which the owner and the EM read.
 - A decision that is the owner's to make (scope, risk acceptance, anything outward-facing,
   anything irreversible) goes to the EM, who asks the owner. State it plainly instead of guessing.
 

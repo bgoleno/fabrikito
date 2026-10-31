@@ -716,6 +716,16 @@ class TeamConfig
       'args' => [state_dir, id, workdir(id)], 'timeout' => 10 }
   end
 
+  # The SendMessage hook every seat gets (#39): on PostToolUse and PostToolUseFailure, it appends the
+  # message to messages.log as say does, so native seat-to-seat traffic lands in the same log. The
+  # roster's session names map a recipient to its role. Exec form: no shell quoting. It never blocks
+  # or alters the message (lib/log_message.sh), and 5s is a backstop: it normally takes milliseconds.
+  def log_message_hook(id)
+    { 'type' => 'command', 'command' => File.join(INSTALL, 'lib', 'log_message.sh'),
+      'args' => [File.join(state_dir, 'messages.log'), id, *roles.keys.map { |r| "#{session(r)}=#{r}" }],
+      'timeout' => 5 }
+  end
+
   # A line for check when the user's own settings switch every hook off: seats without a gate then
   # get no session-start note. nil when hooks are on, or the file is missing or unreadable.
   def hooks_note
@@ -725,8 +735,8 @@ class TeamConfig
 
     off = roles.keys.reject { |r| gate_on_stop?(r) }
     who = off.empty? ? 'no seat gets' : "#{off.join(', ')} #{off.size == 1 ? 'gets' : 'get'}"
-    "disableAllHooks is true in #{path}, so #{who} no session-start note (a gated seat turns hooks " \
-      'back on for its gate)'
+    "disableAllHooks is true in #{path}, so #{who} no session-start note and no SendMessage logging " \
+      '(a gated seat turns hooks back on for its gate)'
   end
 
   # The seat's Claude Code settings, written to <state>/settings/<id>.json and passed with
@@ -750,6 +760,7 @@ class TeamConfig
       out['env']['CLAUDE_CODE_DISABLE_AUTO_MEMORY'] = '1'
     end
     out['hooks'] = { 'SessionStart' => [{ 'hooks' => [session_start_hook(id)] }] }
+    %w[PostToolUse PostToolUseFailure].each { |e| out['hooks'][e] = [{ 'matcher' => 'SendMessage', 'hooks' => [log_message_hook(id)] }] }
     if gate_on_stop?(id)
       out['hooks']['Stop'] = [{ 'hooks' => [stop_gate_hook(id)] }]
       # --settings outranks project and local settings, so a disableAllHooks: true written in the
