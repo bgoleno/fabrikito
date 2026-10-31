@@ -838,12 +838,15 @@ box_full_rows() {
 }
 
 # Whether box state $2 of seat $1 shows just message $3, after its paste: text with nothing drawn
-# dim, such as a suggestion left next to it, that is the whole message (or the placeholder Claude
-# Code shows for a long paste), or else shows the message's end in a full, scrolled box. Whitespace
-# is where the box and the message may differ (the box wraps at spaces and box_state joins rows with
-# one), so both are compared with all of it removed. Whole: the visible text is the message. It is
-# not enough that it starts with the message's "[from <role>]": text typed after the message would
-# go out with it, and a box that scrolled in a small pane is whole again once grown (tl on #132).
+# dim, such as a suggestion left next to it, that is the whole message, or the placeholder Claude
+# Code shows for a long paste and nothing else, or else shows the message's end in a full, scrolled
+# box. Whitespace is where the box and the message may differ (the box wraps at spaces and
+# box_state joins rows with one), so both are compared with all of it removed. Whole: the visible
+# text is the message. It is not enough that it starts with the message's "[from <role>]": text
+# typed after the message would go out with it, and a box that scrolled in a small pane is whole
+# again once grown (tl on #132).
+# Placeholder: "[Pasted text #N]" or "[Pasted text #N +K lines]" as the whole box, so text typed
+# after it, or a second paste, does not pass either (tl on #132).
 # End: the visible text is a suffix of the message of at least 40 characters, and the box shows as
 # many rows as it can. A box only scrolls once full, so a shorter box that is not the whole message
 # holds something else. Text before the message would show at the top and text after it at the end,
@@ -852,7 +855,7 @@ box_full_rows() {
 # tall message, would go out with it (the README says so). When the box does not show just the
 # message, it prints why, so the refusal names the real cause (#84).
 box_has_message() {
-  local state dim rows vis full m v
+  local state dim rows vis full m v ph
   IFS='	' read -r state dim rows vis <<EOF
 $2
 EOF
@@ -863,9 +866,10 @@ EOF
     *) box_refusal "$1" "$2"; return 1 ;;
   esac
   [ "$dim" = 0 ] || { echo "dim text was drawn next to the message (a hint or suggestion from Claude Code)"; return 1; }
-  case $vis in "[Pasted text #"*) return 0 ;; esac
   m=$(printf '%s' "$3" | LC_ALL=C tr -d '[:space:]'); v=$(printf '%s' "$vis" | LC_ALL=C tr -d '[:space:]')
   [ "$v" != "$m" ] || return 0
+  ph='^\[Pastedtext#[0-9]+(\+[0-9]+lines?)?\]$'
+  if [[ $v =~ $ph ]]; then return 0; fi
   full=$(box_full_rows "$1") || { echo "could not read the height of $1's pane"; return 1; }
   [ "$rows" = "$full" ] || { echo "the box shows $rows of its $full rows and not just the message, so it holds something else"; return 1; }
   [ "${#v}" -ge 40 ] || { echo "only ${#v} characters of the message's end are visible (short last lines in a narrow pane), under the 40 say needs to recognise it"; return 1; }
