@@ -59,7 +59,9 @@ Message a seat with the `SendMessage` tool, with `to` set to its session name fr
 Some of these rules are also enforced as permission rules, where the team file configures them
 (`@@SCRIPT@@ check` lists yours), and those hold in every permission mode. For everything else, this
 text is the only guardrail. Neither is a security boundary: both guard against accidents, and a
-command written another way gets past a permission rule. They are not preferences.
+command written another way gets past a permission rule. A permission rule that stops a command is
+the answer, not an obstacle: do not rewrite the command to get past it; ask the EM (the EM asks the
+owner). These rules are not preferences.
 1. **Never merge a PR, and never approve one on the owner's behalf.** The owner merges. The EM may
    merge only a PR the owner has told it to merge, using the repository's own merge procedure.
 2. **Confirm the remote before every commit or push:** run `git remote -v` and check it is

@@ -95,7 +95,8 @@ kickoff: >-
 # Claude Code checks deny, then ask, then allow, and the first match wins, so a role can add or
 # tighten a rule but never loosen a team one. Syntax: https://code.claude.com/docs/en/permissions
 # - Bash rules match the command text: another spelling (`git -C . push`, a script, `sh -c`) is
-#   not caught. The sandbox is the real boundary; these rules guard against accidents.
+#   not caught. These rules are an accident guard, not a security boundary (#29 tracks making
+#   them one). The sandbox would hold whatever the command text, but factory.sh does not turn it on.
 # - Paths: //absolute, ~/home, ./relative or a bare name. A single leading / would anchor at the
 #   state folder that holds the generated file, so it is refused.
 # factory.sh adds two sets itself: an Edit deny on the files that change a seat's next start (team

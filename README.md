@@ -177,7 +177,9 @@ and the repo's `.claude/` settings, which still apply. `check` shows each seat's
 where load-time errors (unknown modes, malformed rules, a permission flag in `args`) are reported.
 
 These rules are an accident guard, not a security boundary: every seat runs as the owner's OS user,
-with the owner's GitHub credential, and can change what loads. #29 tracks making them a boundary.
+with the owner's GitHub credential, and can change what loads. [#29](../../issues/29) tracks making
+them a boundary.
+
 What the rules cannot do:
 
 - A Bash rule matches the command text. The same program under another path (`/usr/bin/gh`), inside
@@ -197,7 +199,7 @@ What the rules cannot do:
   accidents. It is not a gate that only the owner can pass.
 - Seats act with the owner's GitHub rights, so they can change a ruleset or branch protection through
   the API. No rule here stops that (an ask that matched it would also stall seats reading the
-  settings); #29 tracks the fix.
+  settings); [#29](../../issues/29) tracks the fix.
 - Settings above these files apply as well: managed settings, and, depending on the account, installed
   mods, which can approve calls these rules would stop.
 - Paths in Read and Edit rules: `//path` is absolute, `~/path` is under the home folder, `./path` or a
