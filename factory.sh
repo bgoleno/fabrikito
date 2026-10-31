@@ -223,8 +223,8 @@ cmd_up() {
   echo
   for r in $roles; do
     alive "$r" || continue
-    if pane_blocked "$r"; then
-      echo "ATTENTION $r is waiting at a startup prompt: $SELF attach $r, answer it, detach (ctrl-b d)"
+    if [ "$(box_state "$r" | cut -f1)" != empty ]; then
+      echo "ATTENTION $r is not at its input box (a startup dialog?): $SELF attach $r, answer it, detach (ctrl-b d)"
     fi
   done
   echo "Attach with: $SELF attach <role>"
@@ -405,56 +405,135 @@ has_claude() {
   ps -t "${tty#/dev/}" -o comm= | grep -qE '(^|/)claude(\.exe)?$'
 }
 
-# True when the seat's screen shows one of Claude Code's first-run dialogs.
-pane_blocked() {
-  tmux capture-pane -p -t "=$(session "$1"):" |
-    grep -qE 'Is this a project you created|Yes, I trust this folder|No, exit|Bypass Permissions mode|Enter to confirm'
+# The state of a seat's input box. `say` types into a
+# seat only when its screen ends with Claude Code's input box; everything else fails closed, so a
+# dialog say has never seen is refused like a known one. The box, as Claude Code 2.1.316 draws it
+# (captured 2026-10-30; test/e2e.sh's stand-in draws the same):
+#   ──── <session> ───   a rule: U+2500 as wide as the pane, with the session name (claude -n) in it
+#   ❯ <text>             the input: ❯ and a no-break space in column 0; more lines indented two spaces
+#   ──────────────────   a plain rule
+#     <footer>           0 to 8 lines indented two spaces: status line(s), the mode line, notes
+# An empty box may show one dim line after the ❯: a hint ('Try "…"', "Press up to edit queued
+# messages") or a suggested next prompt. A dialog (permission prompt, menu, trust or held-message
+# dialog) replaces the box. Printed as "<state><TAB><dim characters in the box><TAB><text>". States:
+#   empty       the box holds nothing, or only one line drawn entirely dim
+#   text        the box holds text: typed by someone, or left by a message that was not sent
+#   copy-mode   someone is scrolling the pane (capture-pane would still show the box)
+#   unreadable  tmux could not read the pane
+#   unknown     the screen does not end with the input box
+box_state() {
+  local sess screen
+  sess="=$(session "$1"):"
+  screen=$(tmux display-message -p -t "$sess" '#{pane_in_mode}' 2>/dev/null) || { printf 'unreadable\t0\t\n'; return; }
+  [ "$screen" = 0 ] || { printf 'copy-mode\t0\t\n'; return; }
+  screen=$(tmux capture-pane -e -p -t "$sess" 2>/dev/null) || { printf 'unreadable\t0\t\n'; return; }
+  printf '%s\n' "$screen" | LC_ALL=C awk -v name="$(session "$1")" '
+    function plain(s) { gsub(/\033\[[0-9;]*m/, "", s); sub(/[ \t]+$/, "", s); return s }
+    function rule(s) { return s ~ /^(─)+$/ && length(s) >= 60 }   # 20 or more, 3 bytes each
+    function top(s) {                                              # a rule, or one naming this seat
+      if (rule(s)) return 1
+      if (s !~ /^(─)+ [^ ].* (─)+$/) return 0
+      sub(/^(─)+ /, "", s); sub(/ (─)+$/, "", s); return s == name
+    }
+    # Counts the visible characters of s drawn dim (into dimc) and not dim (normc, spaces aside),
+    # from the first one after the cursor and no-break space when skip is set. SGR 2 turns dim on, 0
+    # and 22 turn it off; the colour forms 38/48/58;5;n and ;2;r;g;b are skipped, so a colour
+    # index of 2 is not read as dim.
+    function scan(s, skip,    c, np, ps, i, v) {
+      if (skip) { i = index(s, "❯\302\240"); s = i ? substr(s, i + 5) : "" }
+      while (s != "") {
+        if (match(s, /^\033\[[0-9;]*m/)) {
+          np = split(substr(s, 3, RLENGTH - 3), ps, ";"); if (np == 0) { isdim = 0 }
+          for (i = 1; i <= np; i++) {
+            v = ps[i] + 0
+            if (v == 38 || v == 48 || v == 58) { i += (ps[i + 1] == 5) ? 2 : 4 }
+            else if (v == 0) isdim = 0
+            else if (v == 2) isdim = 1
+            else if (v == 22) isdim = 0
+          }
+          s = substr(s, RLENGTH + 1); continue
+        }
+        c = substr(s, 1, 1); s = substr(s, 2)
+        if (c == " " || c == "\t") continue
+        if (isdim) dimc++; else normc++
+      }
+    }
+    { raw[NR] = $0; p = plain($0); if (p != "") { n++; line[n] = p; at[n] = NR } }
+    END {
+      j = n
+      for (f = 0; j > 0 && !rule(line[j]); j--) {
+        if (++f > 8 || line[j] !~ /^  [^ ]/ || line[j] ~ /❯|Enter to|Esc to/) { print "unknown\t0\t"; exit }
+      }
+      if (j < 1) { print "unknown\t0\t"; exit }
+      for (k = j - 1; k > 0 && line[k] !~ /^❯/; k--) {
+        if (j - k > 60 || line[k] !~ /^  /) { print "unknown\t0\t"; exit }
+      }
+      if (k < 2 || line[k] !~ /^❯(\302\240|$)/ || !top(line[k - 1])) { print "unknown\t0\t"; exit }
+      text = substr(line[k], 4); sub(/^\302\240/, "", text)
+      for (i = k + 1; i < j; i++) text = text " " substr(line[i], 3)
+      # One line drawn entirely dim comes from Claude Code itself: a hint (Try "…", Press up to
+      # edit queued messages) or a suggested next prompt. People and pastes cannot draw dim text, so
+      # it counts as empty. Anything else is text. The middle field counts dim characters, which
+      # must be 0 once our message is in the box.
+      isdim = 0; dimc = 0; normc = 0
+      scan(raw[at[k]], 1); for (i = k + 1; i < j; i++) scan(raw[at[i]], 0)
+      if (text == "" || (k + 1 == j && normc == 0 && dimc > 0))
+        print "empty\t" dimc "\t"
+      else
+        print "text\t" dimc "\t" text
+    }'
 }
 
-# True when the bottom of the seat's screen shows a permission prompt or a menu, where the Enter
-# that `say` sends would pick the highlighted answer. Only the last 15 non-blank lines are read, so
-# a transcript that quotes such text further up does not block delivery for good. A false match
-# fails safe: the message is not delivered.
-pane_at_prompt() {
-  tmux capture-pane -p -t "=$(session "$1"):" | awk 'NF' | tail -n 15 |
-    grep -qE 'Do you want to (proceed|make this edit|create|allow)|❯ *[0-9]+\. |Enter to select'
+# Why a message must not be typed into the seat now ($2 is its box state), or nothing.
+box_refusal() {
+  case ${2%%	*} in
+    empty) ;;
+    text) echo "the input box of $1 is not empty (someone typing, or an earlier message that was not sent): attach $1 and clear it ($SELF attach $1)" ;;
+    copy-mode) echo "$1's pane is in copy mode (someone is scrolling): leave it with q ($SELF attach $1)" ;;
+    unreadable) echo "could not read $1's screen" ;;
+    *) echo "screen not recognised as ready (a permission prompt, a menu, a dialog?): attach $1 ($SELF attach $1)" ;;
+  esac
 }
 
 # Deliver one message by bracketed paste (safe for multi-line text), then Enter. If the seat is
 # mid-turn the text queues in its input box and is submitted by the Enter all the same.
 send_one() {
-  local to=$1 text=$2 sess buf
+  local to=$1 text=$2 sess buf st why
   sess=$(session "$to")
   if ! alive "$to"; then
     echo "not delivered: $to is down ($sess)" >&2
     return 1
   fi
   # Never type into a seat that is not ready to take a message. At a shell, the text would run
-  # as a command. At a startup dialog ("trust this folder", "Bypass permissions") the Enter
-  # would pick the highlighted default, which is "No, exit".
+  # as a command. At a dialog the Enter would pick the highlighted answer.
   if ! has_claude "$to"; then
     echo "not delivered: $to has no claude process running (its pane is at a shell)" >&2
     return 1
   fi
-  if pane_blocked "$to"; then
-    echo "not delivered: $to is waiting at a startup prompt; attach and answer it first" >&2
-    return 1
-  fi
-  if pane_at_prompt "$to"; then
-    echo "not delivered: $to is waiting at a permission prompt or menu; answer it yourself ($SELF attach $to)" >&2
+  why=$(box_refusal "$to" "$(box_state "$to")")
+  if [ -n "$why" ]; then
+    echo "not delivered: $why" >&2
     return 1
   fi
   buf="team-$$-$to"
   printf '%s' "$text" | tmux load-buffer -b "$buf" -
   tmux paste-buffer -p -d -b "$buf" -t "=$sess:"
   sleep 0.5
-  # A prompt can appear while the text is pasted: check again, and leave the Enter unsent if one
-  # has. Still open: a prompt that appears after this check, and digits in a message picking an
-  # option of a menu.
-  if pane_at_prompt "$to"; then
-    echo "not delivered: $to showed a permission prompt or menu while the message was pasted; it is in the input box, not sent ($SELF attach $to)" >&2
-    return 1
-  fi
+  # Enter only when the box now holds just this message: text that starts with its "[from <role>]"
+  # (or the placeholder Claude Code shows for a long paste), and nothing drawn dim, such as a
+  # suggestion left next to it, so the Enter can only submit the message. Otherwise a dialog came
+  # up, or the paste went nowhere. Still open: a dialog that appears between the first check and
+  # the paste (the paste then lands in it; this check sees no box and sends no Enter), and one
+  # that appears after this check, before the Enter.
+  st=$(box_state "$to")
+  case $st in
+    "text	0	${text%%]*}]"* | "text	0	[Pasted text #"*) ;;
+    *)
+      why=$(box_refusal "$to" "$st")
+      echo "not delivered: the input box of $to does not show the message after the paste${why:+ ($why)}; text left in input box: it goes out with the next Enter" >&2
+      return 1
+      ;;
+  esac
   tmux send-keys -t "=$sess:" Enter
 }
 
