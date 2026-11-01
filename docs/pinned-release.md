@@ -11,7 +11,7 @@ The placeholders below stand for your own paths and names:
 | Placeholder | What it is |
 |---|---|
 | `<factory>` | Your main checkout of software-factory. |
-| `<release>` | A tag or a commit of software-factory. Cutting release tags is the owner's call. A commit works the same way. |
+| `<release>` | A tag or a commit of software-factory, for example `v0.1.0`, the first release tag. Cutting release tags is the owner's call. A commit works the same way, and `check` names a lightweight tag as well as an annotated one. |
 | `<releases>` | A folder outside `<factory>` that holds one checkout per release, for example `<releases>/factory-<release>`. |
 | `<state>` | The team's state folder, outside every checkout, on the same volume as `<factory>`. |
 | `<team>` | The team's name (`team:` in the team file). |
