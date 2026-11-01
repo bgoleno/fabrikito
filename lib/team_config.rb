@@ -1152,6 +1152,7 @@ when 'get'
   when 'state.dir' then puts cfg.state_dir
   when 'claude.config_dir' then puts cfg.claude_config_paths.first
   when 'state.generated_dirs' then puts GENERATED_DIRS
+  when 'state.hook_dirs' then puts HOOK_DIRS
   when 'state.notes_dir' then puts File.join(cfg.state_dir, NOTES_DIR)
   when 'state.triage_dir' then puts(cfg.roles.key?(TRIAGE_WRITER) ? File.join(cfg.state_dir, TRIAGE_DIR) : '')
   when 'hooks.note' then puts cfg.hooks_note.to_s
