@@ -51,7 +51,7 @@ session names, unknown placeholders and invalid UTF-8 stop the command before an
      and runs `git worktree add --detach` at `repo.base`, then copies `repo.copy` and runs
      `repo.bootstrap`. A worktree that exists is never reset or changed, because it may hold a seat's
      work. Only its setup is redone, if it was never marked done. See
-     [New worktrees](../README.md#new-worktrees).
+     [New worktrees](team-file.md#new-worktrees).
    - **Writes the seat's settings** to `.state/<team>/settings/<role>.json`, read-only. They hold the
      merged permission rules, the hooks and a few environment settings. See [Safety](../README.md#safety).
    - **Renders the seat's prompt:** `prompts.common`, then the role's prompt, then a Skills section
@@ -84,7 +84,7 @@ tmux session and keeps the worktree, and closing the iTerm tab only detaches fro
   every seat's role id, title and session name.
 - **A working directory.** Either a git worktree of its own, `<storage.volume>/<storage.root>/team-<role>`
   by default (`workdir.name` changes the folder name), created detached at the base ref, or an
-  existing folder (`workdir.type: project`). See [The team file](../README.md#the-team-file).
+  existing folder (`workdir.type: project`). See [The team file](team-file.md).
 - **A settings file,** passed with `--settings`. It holds the team's and the role's permission rules
   merged (a role can add or tighten a rule, never loosen one), the denies and allows `factory.sh` adds,
   and the hooks below. Its single values, such as `env`, win over the user, project and local
