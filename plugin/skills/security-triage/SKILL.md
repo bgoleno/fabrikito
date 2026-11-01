@@ -99,6 +99,11 @@ one finding, and does not restate them. Where the two differ, the role prompt wi
        reviewed. Give the author the details by `SendMessage`, and say no more on the PR than that
        a change was sent to the author and the EM, with no class, file or severity, posted with
        `gh pr comment --body-file <file>` (never a body in the command itself).
+     - A point held on a PR (yours, or one a reviewer or qa sent you): once its fix is reviewed at
+       a head, or you rate it low or rule it out, post on the PR only
+       `sec: held point for #<n> cleared at <short sha>`, the same way. That line is the only
+       clearance the EM and `factory:merge-train` count, and only at that head: a new commit needs
+       a new one.
      - Already written somewhere public: add nothing there, and tell the EM where it is. Editing or
        deleting it is the owner's decision.
    - "Unfixed" means not fixed on the base. A merged fix is still not disclosed until the owner says

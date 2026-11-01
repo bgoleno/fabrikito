@@ -109,12 +109,13 @@ nothing outside its scratch clone. Use it to see what a real run would do.
        (`factory:security-triage` step 6). Read any wording that says a point or change went
        privately to sec or the EM as such a marker; if unsure, stop.
      - Your progress note has an entry `one point held for #<n>` for this PR (your role prompt
-       says when you write one). A point you hold by message with no entry yet: write the entry
-       now, then stop.
-     - Cleared at `H` means one of: a `sec` verdict on the PR passing at `H`, posted after the
-       marker; or your note's entry for this PR ending `cleared by sec at <sha>` with `H`, written
-       from sec's message (sec may rule a point out privately). A clearance at an older head does
-       not count.
+       says when you write one). A point any seat reported to you as held, with no entry yet:
+       write the entry now (carried through every rewrite of your note), then stop.
+     - Cleared at `H` means: a comment on the PR from `sec`, posted after every marker for it,
+       with the line `sec: held point for #<n> cleared at <sha>` naming `H`
+       (`factory:security-triage` step 6). It may be part of a `sec` verdict. Nothing else clears
+       a hold: not a message, not a `READY` alone, not your judgment. A clearance at an older head
+       does not count.
      - Report a held point only as "a held point", never its content.
 6. **Gate the PR on the stack:**
    - `git fetch origin pull/<n>/head`; `git rev-parse FETCH_HEAD` must equal `H`.
