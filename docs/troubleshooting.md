@@ -123,11 +123,16 @@ gives the reason when it refuses:
 - "the input box ... is not empty": someone is typing, or an earlier message was not sent. Attach and
   clear the box.
 - "in copy mode": someone is scrolling. Leave copy mode with q.
-- "shows Claude Code's diff panel notice": the pane is too short. Make it 110 columns wide or more, or
-  16 rows or more, or close the diff panel in the seat.
+- "shows Claude Code's diff panel notice": the pane is too short, even after `say` grew it for the
+  check. Make it 110 columns wide or more, or 16 rows or more, or close the diff panel in the seat.
 - "has no claude process running (its pane is at a shell)": the text would run as a shell command.
   Start the seat again (`down --yes <role>`, then `up <role>`).
 - "is down": the seat is not running. Start it with `up <role>`.
+- "another say is typing into <role> and did not finish within 8 seconds": try again. "is not a
+  regular file: remove it": something other than a plain file sits at the seat's lock path,
+  `.state/<team>/say/<role>.lock`; remove it.
+- "does not show the message after the paste ... text left in input box": no Enter was sent, and
+  the text goes out with the next Enter in that seat. Attach and send or clear it.
 
 A refused message is logged as `NOT-DELIVERED`. If `say` refuses every seat after a Claude Code update,
 the update has changed how the input box is drawn, and `factory.sh` needs updating. See
