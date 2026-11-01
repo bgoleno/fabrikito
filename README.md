@@ -349,7 +349,8 @@ role's (team first; a role can add or tighten a rule, never loosen one), plus wh
       - { state: /path/to/other/state, observers: [qa2] }
     ```
 
-  A listed folder may not be, hold or sit inside this team's own state folder. If it exists, it must be
+  A listed folder may not be, hold or sit inside this team's own state folder, its repository, its
+  worktree folder or a seat's working directory, whether or not it exists yet. If it exists, it must be
   a team's state folder itself (holding `settings/`, `launch/` and `prompts/`), not its checkout or
   `.state/` above it. One that doesn't exist yet is accepted, and `check` says so. `check` lists the
   other teams found and listed, and each seat's denies. Settings are written at `up`, so a team that starts

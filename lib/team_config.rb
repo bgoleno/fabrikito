@@ -572,15 +572,36 @@ class TeamConfig
   # - listed: other_teams in the team file, for folders elsewhere (a pinned team's shared state,
   #   docs/pinned-release.md), with the roles of this team that observe that team: they may read
   #   its log and notes, as the owner approves (an observer scope), never its triage records.
-  # Neither may be, hold or sit inside this team's own state folder (real paths).
-  def overlaps_own_state?(path)
-    # macOS disks are normally case-insensitive and File.realpath keeps the case as typed, so a
-    # miscased path compares in lower case there (tl on #200); erring this way refuses more.
+  # Neither may be, hold or sit inside this team's own state folder (real paths), nor this team's own
+  # work: an Edit deny there would stop the seats working. A listed folder that does not exist yet
+  # passes the state-folder test below, so this one must also catch a future worktree (qa on #200).
+  # macOS disks are normally case-insensitive and File.realpath keeps the case as typed, so paths
+  # compare in lower case there (tl on #200); erring this way refuses more.
+  def path_overlap?(a, b)
     fold = RUBY_PLATFORM.include?('darwin') ? ->(x) { x.downcase } : ->(x) { x }
-    own = fold.call(real_path(state_dir))
-    other = fold.call(real_path(path))
-    within = ->(a, b) { a == b || a.start_with?(b.end_with?('/') ? b : "#{b}/") }
-    within.call(other, own) || within.call(own, other)
+    x = fold.call(real_path(a))
+    y = fold.call(real_path(b))
+    within = ->(i, o) { i == o || i.start_with?(o.end_with?('/') ? o : "#{o}/") }
+    within.call(x, y) || within.call(y, x)
+  end
+
+  def overlaps_own_state?(path)
+    path_overlap?(path, state_dir)
+  end
+
+  # What of this team's own work path is, holds or sits inside, or nil: the repository, the worktree
+  # folder, a seat's working directory, or this factory checkout (which it may not be or hold; the
+  # state root inside it holds the other teams' folders).
+  def own_work_overlap(path)
+    return 'this team\'s repository (repo.path)' if path_overlap?(path, repo_path)
+    return "this team's worktree folder (#{worktree_root})" if path_overlap?(path, worktree_root)
+
+    roles.each_key { |id| return "seat #{id}'s working directory" if path_overlap?(path, workdir(id)) }
+    inst = real_path(INSTALL)
+    r = real_path(path)
+    return 'this factory checkout' if path_overlap?(path, INSTALL) && !r.start_with?("#{inst}/")
+
+    nil
   end
 
   def team_state?(path)
@@ -613,6 +634,8 @@ class TeamConfig
         elsif File.directory?(p) && team_state?(p)
           if overlaps_own_state?(p)
             skipped << [p, "it is this team's own state folder, holds it or sits inside it"]
+          elsif (what = own_work_overlap(p))
+            skipped << [p, "it is, holds or sits inside #{what}"]
           else
             found << { 'path' => p, 'observers' => [], 'how' => 'found' }
           end
@@ -637,6 +660,8 @@ class TeamConfig
       die "other_teams: observers of #{p} must be a list of role ids" unless obs.is_a?(Array) && obs.all? { |o| o.is_a?(String) }
       obs.each { |o| die "other_teams: observer #{o} of #{p} is not a role of this team" unless roles.key?(o) }
       die "other_teams: #{p} is this team's own state folder, holds it or sits inside it" if overlaps_own_state?(p)
+      what = own_work_overlap(p)
+      die "other_teams: #{p} is, holds or sits inside #{what}" if what
       # Only a team's state folder: a wrong entry such as ~, the volume or repo.path would deny this
       # team's own work, and a .state root one level too high would protect nothing while check said
       # it did (tl on #200). One that does not exist yet (that team has not started) is accepted, and
