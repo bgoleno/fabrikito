@@ -70,13 +70,26 @@ From then on, run every command for this team with that checkout's `factory.sh` 
 
 A seat protects only the checkout it runs from. A release checkout is a worktree of your main checkout,
 so another team on this machine, one working on software-factory above all, could edit it, or remove
-or prune it with git, and change the code the pinned team runs at its next start. The same goes for
-the shared `<state>` folder, which holds the pinned team's notes, log and records. Add a deny for both
-folders to every other team file's `permissions`. For a releases folder at `/path/to/releases` and a
-state folder at `/path/to/state`, that is
-`deny: ["Edit(//path/to/releases/**)", "Edit(//path/to/state/**)"]` (an absolute path takes `//` in a
-rule). Like the other rules, it is an accident guard: a shell command that writes there another way is
-not stopped. Or keep both folders where those teams never work.
+or prune it with git, and change the code the pinned team runs at its next start. Add a deny for the
+releases folder to every other team file's `permissions`. For a releases folder at `/path/to/releases`,
+that is `deny: ["Edit(//path/to/releases/**)"]` (an absolute path takes `//` in a rule). Or keep it
+where those teams never work.
+
+The shared `<state>` folder, which holds the pinned team's notes, log and records, needs the same care
+in both directions, and the factory finds neither direction itself. It finds another team's state only
+as a real folder beside its own: `<state>` is not beside the other teams' folders, and the pinned
+team's checkout holds only a link to it, which is never followed. So list them under `other_teams` (see [Safety](../README.md#safety)), in **both** team files:
+
+- in every other team's file, the pinned team's `<state>`:
+  `other_teams: [{ state: /path/to/state }]`;
+- in the pinned team's file, each other team's state folder, for example
+  `other_teams: [{ state: <factory>/.state/<other team> }]`.
+
+Each seat then gets a Read deny on the listed team's triage records, message log and notes, and an Edit
+deny on the whole folder, from its next start. Add `observers: [<role>]` to an entry for a role the
+owner allows to read that team's log and notes. Run `check` with each team file to see the denies.
+Like the other rules, these are accident guards: a shell command that reads or writes there another
+way is not stopped.
 
 ## Move an existing team to a release (once)
 
