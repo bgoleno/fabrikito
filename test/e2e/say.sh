@@ -112,4 +112,11 @@ rm $T/state/messages.log && mv $T/msglog.real $T/state/messages.log
 [ $rc != 0 ] && cmp -s $T/sent-log $T/sent-log.want && echo "$lout" | grep -qF "$T/state/messages.log is a symlink" && echo "$lout" | grep -qF "could not be written" \
   && tmux has-session -t '=tt-w1' 2>/dev/null && ! tmux capture-pane -p -t '=tt-w1:' | grep -q "through a linked log" \
   && ok "say: a link at messages.log is refused, nothing is delivered or written through it, and say says the line was not written" || { bad "say through a linked log (rc=$rc)"; echo "$lout"; cat $T/sent-log; }
+# A hard link is a regular file to [ -L ], [ -p ] and [ -f ] (tl on #206): say refuses a second link.
+mv $T/state/messages.log $T/msglog.real && ln $T/sent-log $T/state/messages.log
+lout=$(TEAM_ROLE=em $S -c $T/team.yaml say w1 "through a hard-linked log" 2>&1); rc=$?; sleep 1
+rm $T/state/messages.log && mv $T/msglog.real $T/state/messages.log
+[ $rc != 0 ] && cmp -s $T/sent-log $T/sent-log.want && echo "$lout" | grep -qF "$T/state/messages.log is a symlink, a FIFO or a hard link" && echo "$lout" | grep -qF "could not be written" \
+  && tmux has-session -t '=tt-w1' 2>/dev/null && ! tmux capture-pane -p -t '=tt-w1:' | grep -q "through a hard-linked log" \
+  && ok "say: a hard link at messages.log is refused, nothing is delivered or written through it, and say says the line was not written" || { bad "say through a hard-linked log (rc=$rc)"; echo "$lout"; cat $T/sent-log; }
 e2e_end=say # the last line: test/e2e.sh checks that the file ran to here

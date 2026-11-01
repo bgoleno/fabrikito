@@ -98,4 +98,12 @@ for f in log count; do
     && ok "a link at gate/w9.$f: the hook does not run the gate or write through it, and sends the seat back naming it" || { bad "a link at gate/w9.$f (rc=$rc, gate runs $before -> $(runs))"; echo "$err"; diff -r $T/gsent $T/gsent.want; }
   rm $T/gstate/gate/w9.$f
 done
+# A hard link is a regular file to every test above (tl on #206): the hook refuses a second link.
+for f in log count; do
+  rm -f $T/gstate/gate/w9.$f && ln $T/gsent/w9.$f $T/gstate/gate/w9.$f
+  before=$(runs); gate s7
+  [ $rc = 2 ] && echo "$err" | grep -qF "$T/gstate/gate/w9.$f is a symlink, a hard link" && [ "$(runs)" = "$before" ] && diff -r $T/gsent $T/gsent.want >/dev/null \
+    && ok "a hard link at gate/w9.$f: the hook does not run the gate or write through it, and sends the seat back naming it" || { bad "a hard link at gate/w9.$f (rc=$rc, gate runs $before -> $(runs))"; echo "$err"; diff -r $T/gsent $T/gsent.want; }
+  rm $T/gstate/gate/w9.$f
+done
 e2e_end=gate # the last line: test/e2e.sh checks that the file ran to here

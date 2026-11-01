@@ -119,4 +119,10 @@ o4=$(printf '{"hook_event_name":"PostToolUse","tool_name":"SendMessage","tool_in
   | $SRC/lib/log_message.sh $T/lstate/linked.log w9 tt-w2=w2 2>&1); r4=$?
 [ $r4 = 0 ] && [ -z "$o4" ] && cmp -s $T/sent-hlog $T/sent-hlog.want && [ -L $T/lstate/linked.log ] \
   && ok "SendMessage log: a link at messages.log is not written through (exit 0, nothing printed)" || { bad "SendMessage log through a link (rc=$r4)"; echo "$o4"; cat $T/sent-hlog; }
+# A hard link is a regular file to O_NOFOLLOW and to the type check (tl on #206): a second link is refused.
+ln $T/sent-hlog $T/lstate/hard.log
+o4=$(printf '{"hook_event_name":"PostToolUse","tool_name":"SendMessage","tool_input":{"to":"tt-w2","message":"m"},"tool_response":{"success":true,"message":"in inbox"}}' \
+  | $SRC/lib/log_message.sh $T/lstate/hard.log w9 tt-w2=w2 2>&1); r4=$?
+[ $r4 = 0 ] && [ -z "$o4" ] && cmp -s $T/sent-hlog $T/sent-hlog.want \
+  && ok "SendMessage log: a hard link at messages.log is not written through (exit 0, nothing printed)" || { bad "SendMessage log through a hard link (rc=$r4)"; echo "$o4"; cat $T/sent-hlog; }
 e2e_end=hooks # the last line: test/e2e.sh checks that the file ran to here
