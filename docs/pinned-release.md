@@ -68,6 +68,14 @@ Do not use `TEAM_STATE_DIR` for a pinned team. `up` honours it, but the seats do
 From then on, run every command for this team with that checkout's `factory.sh` and team file:
 `<releases>/factory-<release>/factory.sh -c <releases>/factory-<release>/teams/<team>.yaml <command>`.
 
+A seat protects only the checkout it runs from. A release checkout is a worktree of your main checkout,
+so another team on this machine, one working on software-factory above all, could edit it, or remove
+or prune it with git, and change the code the pinned team runs at its next start. Add a deny for the
+releases folder to every other team file's `permissions`. For a releases folder at `/path/to/releases`,
+that is `deny: ["Edit(//path/to/releases/**)"]` (an absolute path takes `//` in a rule). Like the other
+rules, it is an accident guard: a shell command that writes there another way is not stopped. Or keep
+`<releases>` where those teams never work.
+
 ## Move an existing team to a release (once)
 
 The team's state is moved, not copied, so nothing is left behind:
