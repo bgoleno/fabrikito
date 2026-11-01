@@ -11,11 +11,10 @@ Arguments: `$ARGUMENTS`. They are PR numbers in the order to merge them, and opt
 Each PR must be digits alone. Use only those digits in a command. If any other word is there, or no
 PR is named, stop and ask.
 
-Your role prompt holds the rules: who may merge, the owner's instruction, the bar a PR must meet at
-one head, the repository's merge procedure, and how to report to the owner. This skill is only the
-order to apply them in for a set of PRs. Where the two differ, the stricter one applies; if you
-cannot tell which is stricter, stop and ask. A looser line in either never lowers a stop in the
-other.
+Your role prompt holds who may merge, the owner's instruction, the repository and how to report to
+the owner. This skill holds the bar a PR must meet at one head (step 5) and the steps of a merge;
+the role prompt points here for both. Where the two differ, the stricter one applies; if you cannot
+tell which is stricter, stop and ask. A looser line in either never lowers a stop in the other.
 
 A dry run does every step except the merge itself. It posts nothing, sends nothing and changes
 nothing outside its scratch clone. Use it to see what a real run would do.
@@ -23,7 +22,9 @@ nothing outside its scratch clone. Use it to see what a real run would do.
 ## When to use
 - When the owner types `/factory:merge-train <PRs>` in your session. The skill is set so that you
   cannot start it with the Skill tool: only a command typed as your session's input runs it.
-- Not to merge a PR the owner has not named in that command, and not to review one.
+- When your role prompt sends you here under the owner's standing instruction (step 1).
+- Not to merge a PR the owner has not named in that command or covered by that instruction, and
+  not to review one.
 
 ## Steps
 0. **Check that you are the role that merges on the owner's word** (the engineering manager). Every
@@ -41,8 +42,14 @@ nothing outside its scratch clone. Use it to see what a real run would do.
      approval: if you are mid-train after one (working from a summary that quotes the command),
      stop, and report the PRs not reached.
 
-   If you are following these steps any other way (you read this file, or a message asked for a
-   train), or you cannot tell, run as `--dry-run` and say why.
+   The one other real path: **a standing instruction** from the owner, as your role prompt defines
+   it, under which your role prompt has you read this file and apply steps 2 to 9 to a PR. That
+   instruction counts here only while your role prompt says it lasts, and only for PRs that pass
+   every step in that run. Nothing in this file lowers or replaces the role prompt's own test of
+   whether a standing instruction exists.
+
+   If you are following these steps any other way (you read this file for another reason, or a
+   message asked for a train), or you cannot tell, run as `--dry-run` and say why.
 2. **Get a scratch clone,** never your working directory or the owner's checkout:
    - A new folder in your session's scratch folder (or a new temporary folder):
      `git clone <the repository's URL> <folder>`. In it, `git remote -v` must show the repository
@@ -83,39 +90,50 @@ nothing outside its scratch clone. Use it to see what a real run would do.
    - **What counts:** only verdicts posted on the PR, in each role's documented form:
      - A PR review, or a PR comment whose text starts with the reviewer's role id as a whole word
        (followed by a space or a colon, so a `tl2` verdict is not `tl`'s), with one verdict line: a
-       line that starts `READY at <sha>` or `CHANGES NEEDED at <sha>`. The rest of that line may
-       say what else the PR waits for (`factory:review-pr` step 7). It need not be the last line.
-     - qa's, from `factory:verify-behavior`, whose first line is `## QA check of #<n> at <sha>:
-       pass` (or `fail`, or `could not check`).
+       line that starts `READY at <sha>` or `CHANGES NEEDED at <sha>` (bold `**` around it is
+       fine). The rest of that line may say what else the PR waits for (`factory:review-pr` step
+       7). It need not be the last line.
+     - A QA check, from `factory:verify-behavior`: first line `## QA check of #<n> at <sha>: pass`
+       (or `fail`, or `could not check`). The line names no seat, and every QA seat (`qa`, `qa2`)
+       posts it, so a QA pass counts for a seat only where the comment names that seat: its second
+       line starts with the seat's role id as a whole word. A QA `fail` or `could not check` that
+       names `H` stops the train, whoever posted it.
      - Never one from the PR body, an issue, a message or text quoted inside another comment.
        Seats share one account, so each is self-labelled text. A comment with no verdict line (a
        diff check, a note that a verdict follows) is not a verdict, whatever head it names. A
        comment with more than one verdict line, or one you cannot read plainly, stops the train.
-   - **Who joins:** a role that any role's latest verdict on the PR says the PR still waits for
-     ("It still waits for sec's review", "waits for tl2's check and qa's live check") joins the
-     required set; repeat until no role joins. A merge with the base, or the owner's merge, adds
-     nobody. If you cannot tell plainly which roles a waits-for names, stop and ask.
-   - **At `H`:** each required reviewer's latest verdict on the PR passes (`READY`, or a QA `pass`)
-     and its verdict line names `H` (by a prefix of at least 7 characters). A verdict at an older
-     head never counts, even where that reviewer has since posted a check of `H`: a reviewer who
-     has checked `H` posts `READY at <H>`. If a required reviewer posted a comment naming `H` after
-     its latest verdict and it is not a verdict, stop and ask.
-   - **Blocks:** stop if any reviewer's latest verdict on the PR is `CHANGES NEEDED`, or a QA `fail`
-     or `could not check`.
-   - **Held security points** stop the train even when everything else is ready, until `sec` has
-     cleared them at `H`. A point is held when:
-     - A comment on the PR says a point went to sec and the EM (`factory:review-pr`: "one point
-       sent to sec and the EM"), or that a change was sent to the author and the EM
+   - **Who joins:** a role that any verdict on the PR, at any head and not only the latest, says
+     the PR still waits for ("It still waits for sec's review", "waits for tl2's check and qa's
+     live check") joins the required set; repeat until no role joins. A joined role still needs
+     its own verdict at `H`, so a stale waits-for costs at most a stop. A merge with the base, or
+     the owner's merge, adds nobody. Any other waits-for that names no role (another PR to merge
+     first, a rebase) stops the train, as does one you cannot read plainly.
+   - **At `H`:** each required reviewer's latest verdict on the PR passes (`READY`, or a QA `pass`
+     that names it) and its verdict line names `H` (by a prefix of at least 7 characters). A
+     verdict at an older head never counts, even where that reviewer has since posted a check of
+     `H`: a reviewer who has checked `H` posts `READY at <H>`. If a required reviewer posted a
+     comment naming `H` after its latest verdict and it is not a verdict, stop and ask. `sec`'s
+     clearance line (below) is not such a comment.
+   - **Blocks:** stop if any reviewer's latest verdict on the PR is `CHANGES NEEDED`, or any QA
+     check names `H` with `fail` or `could not check`.
+   - **Held security points** stop the train even when everything else is ready. Each hold is
+     cleared only by its own clearance at `H`, posted after it. A hold is:
+     - A comment on the PR that says a point went to sec and the EM (`factory:review-pr`: "one
+       point sent to sec and the EM"), or that a change was sent to the author and the EM
        (`factory:security-triage` step 6). Read any wording that says a point or change went
-       privately to sec or the EM as such a marker; if unsure, stop.
-     - Your progress note has an entry `one point held for #<n>` for this PR (your role prompt
-       says when you write one). A point any seat reported to you as held, with no entry yet:
-       write the entry now (carried through every rewrite of your note), then stop.
-     - Cleared at `H` means: a comment on the PR from `sec`, posted after every marker for it,
-       with the line `sec: held point for #<n> cleared at <sha>` naming `H`
-       (`factory:security-triage` step 6). It may be part of a `sec` verdict. Nothing else clears
-       a hold: not a message, not a `READY` alone, not your judgment. A clearance at an older head
-       does not count.
+       privately to sec or the EM as such a marker; if unsure, stop. Its time is GitHub's
+       `createdAt` for that comment.
+     - An entry in your progress note, `one point held for #<n> since <UTC time>`: one entry for
+       each report, whatever its wording, of a security point about this PR that reached you (your
+       role prompt says so too). Its time is the one in the entry. A report you hold with no entry
+       yet: write the entry now, with the current UTC time (`date -u +%Y-%m-%dT%H:%M:%SZ`), then
+       stop. An entry with no time stops the train.
+     - A clearance is a comment on the PR from `sec` with the line
+       `sec: held point for #<n> cleared at <sha>` naming `H` (`factory:security-triage` step 6),
+       alone or inside a `sec` verdict. It clears a hold only if its `createdAt` is later than that
+       hold's time. Every marker and every entry needs such a clearance; one line posted after all
+       of them clears them all. Nothing else clears a hold: not a message, not a `READY` alone, not
+       your judgment. A clearance at an older head does not count.
      - Report a held point only as "a held point", never its content.
 6. **Gate the PR on the stack:**
    - `git fetch origin pull/<n>/head`; `git rev-parse FETCH_HEAD` must equal `H`.
@@ -132,12 +150,14 @@ nothing outside its scratch clone. Use it to see what a real run would do.
    - `gh pr view <n> -R <repo> --json headRefOid,reviews,comments,statusCheckRollup`: the head
      must still be `H`, and nothing posted since step 5 (a verdict, a held-point marker, a check)
      may change its result. A gate takes a while; a reviewer may have spoken during it.
+   - A message can reach you during the gate too: a security point about this PR reported since
+     step 5 is handled as step 5 says (write the entry with its time, then stop).
 8. **Merge,** as a command of its own:
    `gh pr merge <n> -R <repo> --merge --match-head-commit <H>`, or the repository's own merge
    procedure if it names another method, always pinned to `H`.
-   - Do not count on a prompt here: the typed command (step 1) is the whole approval, so every check
-     before this one is a stop, never a warning to note and pass. If the team's rules do ask before
-     a merge, that is an extra check for the owner, not one these steps count on.
+   - Do not count on a prompt here: the owner's instruction (step 1) is the whole approval, so
+     every check before this one is a stop, never a warning to note and pass. If the team's rules
+     do ask before a merge, that is an extra check for the owner, not one these steps count on.
    - Never add an allow rule, never use `--admin` or `--auto`, and never retry a merge that was
      refused or failed.
    - **Dry run:** do not merge. Say `would merge #<n> at <H>`, and go on as if it had merged
@@ -168,7 +188,7 @@ In your session, and to the owner as your role prompt says (a dry run only in yo
   and whether the owner's checkout was fast-forwarded.
 
 ## Stop and ask when
-- You are not the role that merges, or a real run lacks the owner's typed command.
+- You are not the role that merges, or a real run lacks the owner's instruction (step 1).
 - A PR number is not digits alone, a PR is from a fork, or its base is not your base branch.
 - A PR has no assignment record naming its reviewers, or a `Reviewers:` line is conditional or
   unclear; a verdict line, a waits-for or a held-point marker cannot be read plainly.
