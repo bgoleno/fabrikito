@@ -4,9 +4,10 @@
 # Uses the running seats. Restarts em.
 echo "--- generated settings"
 # The user's rules, in team-then-role order, without duplicates. Rules the launcher adds itself
-# (Edit denies on its own files, and the Read rules on the log and the triage folder) are checked
-# separately, so they are left out of these lists.
-perms() { ruby -rjson -e 'p = JSON.parse(File.read(ARGV[0]))["permissions"] || {}; %w[deny ask allow].each { |k| l = (p[k] || []).reject { |r| r.start_with?("Edit(//", "Bash(git push ") || r =~ %r{\ARead\(//.*/state/(messages\.log|triage/\*\*)\)\z} }; puts "#{k}=#{l.join(" | ")}" }; puts "disable=#{p["disableBypassPermissionsMode"]}"' "$1" 2>&1; }
+# (Edit denies on its own files, the Read rules on the log and the triage folder, and the Read denies
+# on other teams' log, triage records and notes, #197) are checked separately, so they are left out
+# of these lists.
+perms() { ruby -rjson -e 'p = JSON.parse(File.read(ARGV[0]))["permissions"] || {}; %w[deny ask allow].each { |k| l = (p[k] || []).reject { |r| r.start_with?("Edit(//", "Bash(git push ") || r =~ %r{\ARead\(//.*/state/(messages\.log|triage/\*\*)\)\z} || r =~ %r{\ARead\(//.*/(messages\.log|triage/\*\*|notes/\*\*)\)\z} }; puts "#{k}=#{l.join(" | ")}" }; puts "disable=#{p["disableBypassPermissionsMode"]}"' "$1" 2>&1; }
 # rules <file> <deny|ask|allow>: one rule per line
 rules() { ruby -rjson -e 'puts((JSON.parse(File.read(ARGV[0]))["permissions"] || {})[ARGV[1]] || [])' "$1" "$2"; }
 want_em='deny=Read(//**/.env) | Bash(touch tt-deny*)
@@ -223,8 +224,8 @@ echo "--- other teams' state folders (#197)"
 # quietly. A folder elsewhere is listed under other_teams, where an observer role (w1) may read its
 # log and notes, never its triage records. em, which reads its own team's log, is denied the other's.
 X=$T/xroot
-for d in $X/xa $X/xb $T/elsewhere; do mkdir -p $d/settings $d/launch $d/prompts; done
-mkdir -p $X/junk/notes $T/far/xc && ln -s $X/xa $X/xlink && ln -s $T/elsewhere $X/xlink2
+for d in $X/xa $X/xb $T/far/elsewhere; do mkdir -p $d/settings $d/launch $d/prompts; done
+mkdir -p $X/junk/notes $T/far/xc && ln -s $X/xa $X/xlink && ln -s $T/far/elsewhere $X/xlink2
 sed 's/^team: tt$/team: xa/' $T/sec.yaml > $T/xa.yaml && printf 'other_teams:\n  - { state: %s/far/xc, observers: [w1] }\n' $T >> $T/xa.yaml
 sed 's/^team: tt$/team: xb/' $T/sec.yaml > $T/xb.yaml
 xset() { TEAM_STATE_DIR=$X/$1 ruby $SRC/lib/team_config.rb $T/$1.yaml settings $2 | ruby -rjson -e 'puts((JSON.parse(STDIN.read)["permissions"] || {})[ARGV[0]] || [])' "$3"; }
@@ -258,7 +259,7 @@ echo "$xchk" | grep -qxF "other teams: $X/xb (found), $T/far/xc (listed; observe
 # A team alone in its state root gets no rule of these, and a link or a folder without state beside it adds none.
 mkdir -p $T/aroot/solo/settings $T/aroot/solo/launch $T/aroot/solo/prompts; s0=$(TEAM_STATE_DIR=$T/aroot/solo ruby $SRC/lib/team_config.rb $T/sec.yaml settings w1)
 mkdir -p $T/aroot/stuff/notes && ln -s $T/aroot/solo $T/aroot/solink; s1=$(TEAM_STATE_DIR=$T/aroot/solo ruby $SRC/lib/team_config.rb $T/sec.yaml settings w1)
-[ -n "$s0" ] && [ "$s0" = "$s1" ] && ! echo "$s0" | grep -qF "/aroot/s" && ok "other teams: a team alone gets none of these rules, and a link or a folder without state beside it adds none" || { bad "other teams: a team alone"; diff <(echo "$s0") <(echo "$s1"); }
+[ -n "$s0" ] && [ "$s0" = "$s1" ] && ! echo "$s0" | grep -qE "/aroot/(stuff|solink)" && ok "other teams: a team alone gets none of these rules, and a link or a folder without state beside it adds none" || { bad "other teams: a team alone"; diff <(echo "$s0") <(echo "$s1"); }
 reject "other_teams: this team's own state folder" "other_teams: $T/state is this team's own state folder, holds it or sits inside it" "" "other_teams: [{ state: $T/state }]"
 reject "other_teams: a folder that holds this team's state (/)" "other_teams: / is this team's own state folder, holds it or sits inside it" "" "other_teams: [{ state: / }]"
 reject "other_teams: a folder inside this team's state" "other_teams: $T/state/sub is this team's own state folder, holds it or sits inside it" "" "other_teams: [{ state: $T/state/sub }]"
