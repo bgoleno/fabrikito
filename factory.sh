@@ -320,9 +320,27 @@ setup_failed() {
   die "$1; the worktree was left as it is (it may hold work) and is not marked set up, so the next up tries again"
 }
 
+# The factory checkout this script runs from, and its commit (#189). A team pinned to a release runs
+# from a checkout of its own (docs/pinned-release.md), and its seats' say, hooks and plugin come from
+# the checkout that started them, so check says which one before a seat is restarted. Only a checkout
+# whose top folder is this one counts: an install copied into some other repository is not described
+# as that repository. GIT_OPTIONAL_LOCKS=0 keeps describe --dirty from writing the checkout's index.
+install_line() {
+  local top real d
+  real=$(cd -P "$HERE" && pwd -P)
+  top=$(git -C "$HERE" rev-parse --show-toplevel 2>/dev/null) || top=""
+  if [ -n "$top" ] && [ "$(cd -P "$top" && pwd -P)" = "$real" ] &&
+    d=$(GIT_OPTIONAL_LOCKS=0 git -C "$HERE" describe --always --dirty 2>/dev/null); then
+    echo "install   : $HERE at $d"
+  else
+    echo "install   : $HERE (not a git checkout)"
+  fi
+}
+
 cmd_check() {
   local r on="not mounted" d real users
   mount | grep -qF " on $VOLUME (" && on="mounted"
+  install_line
   echo "team file : $CONFIG"
   echo "team      : $TEAM (tmux prefix '$PREFIX')"
   echo "repo      : $GITHUB at $REPO (origin must contain '$GITHUB', base $BASE)"

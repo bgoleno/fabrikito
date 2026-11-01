@@ -65,6 +65,12 @@ Bash(git push */main)
 Bash(git push */main *)'
 [ "$(rules $T/state/settings/em.json ask | grep '^Bash(git push ')" = "$base_rules" ] && ok "ask on any push to the base branch (main, from origin/main): the 8 patterns" || { bad "base-branch ask"; rules $T/state/settings/em.json ask; }
 chk=$($S -c $T/team.yaml check 2>&1)
+# check names the factory checkout the team runs from and its commit (#189): a team pinned to a
+# release runs from its own checkout. $SRC is a git checkout here; an install of links is not.
+idesc=$(git -C $SRC describe --always --dirty 2>/dev/null)
+[ -n "$idesc" ] && echo "$chk" | grep -qxF "install   : $SRC at $idesc" && ok "check: the install line names the factory checkout and its git describe" || { bad "check: install line (describe '$idesc')"; echo "$chk" | grep -E "^install "; }
+mkdir -p $T/linst/teams; for p in factory.sh lib roles plugin; do ln -s $SRC/$p $T/linst/$p; done; cp $T/team.yaml $T/linst/teams/team.yaml
+$T/linst/factory.sh -c $T/linst/teams/team.yaml check 2>&1 | grep -qxF "install   : $T/linst (not a git checkout)" && ok "check: an install outside any git checkout says so" || { bad "check: install line outside git"; $T/linst/factory.sh -c $T/linst/teams/team.yaml check 2>&1 | grep -E "^(install|error)"; }
 echo "$chk" | grep -qxF "bootstrap : $T/bin/boot (run in each new worktree before its seat starts)" && echo "$chk" | grep -qxF "copy      : .env.local, conf/dev.json, missing.txt (from the main checkout into each new worktree)" && ok "check: bootstrap and copy lines" || { bad "check: bootstrap and copy lines"; echo "$chk" | grep -E "^(bootstrap|copy) "; }
 echo "$chk" | grep -qE "^em +Manager .* bypassPermissions " && echo "$chk" | grep -qE "^w1 +Worker One .* default " && ok "check: MODE column per role" || { bad "check MODE column"; echo "$chk"; }
 echo "$chk" | grep -qE "^w1 +Worker One +tt-w1 +sonnet +low " && echo "$chk" | grep -qE "^em +Manager +tt-em +\(inherit\) +\(inherit\) " \
