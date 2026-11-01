@@ -105,6 +105,12 @@ prompts:
                                # @@GITHUB_REPO@@ @@GITHUB_URL@@ @@PROJECT_NAME@@ @@PROJECT_URL@@
                                # @@WORKDIR@@ @@WORKTREE_ROOT@@ @@VOLUME@@ @@ROSTER@@ @@GATE_MAX_BLOCKS@@
                                # @@NOTE@@ (the seat's progress note, <state>/notes/<role>.md)
+  # project: ../projects/myapp/project.md
+                               # optional: your project's specifics (what the product is, folders
+                               # that are off limits, a running instance never to touch, the gate,
+                               # the merge procedure), rendered after common and before each role's
+                               # prompt, so the shipped prompts need no copy. Same placeholders; no
+                               # [from ...] label; its lines count toward check's 199-line warning.
 
 # First message typed into a seat at startup (a role can override it with its own `kickoff`).
 kickoff: >-

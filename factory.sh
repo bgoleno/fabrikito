@@ -340,6 +340,9 @@ cmd_check() {
   plugin=$(cfg get sessions.plugin)
   if [ -n "$plugin" ]; then echo "plugin    : $plugin (skills as /factory:<skill>)"; else echo "plugin    : off (sessions.claude.plugin: false)"; fi
   echo "gate      : $(cfg get repo.gate_summary)"
+  echo "prompts   : $(cfg get prompts.summary)"
+  prompts_warn=$(cfg get prompts.warning)
+  [ -z "$prompts_warn" ] || echo "$prompts_warn"
   hooks_note=$(cfg get hooks.note)
   [ -z "$hooks_note" ] || echo "hooks     : $hooks_note"
   echo "bootstrap : ${BOOTSTRAP:-none}$([ -n "$BOOTSTRAP" ] && echo ' (run in each new worktree before its seat starts)')"
