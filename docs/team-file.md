@@ -8,7 +8,7 @@ the reference for each key, and the file to copy.
 
 - `repo`, `project`, `owner`: the local checkout, its GitHub repo (`owner/name`), the GitHub Project the
   team tracks work on, and the human it works for. The prompts name them, so this is the only edit to
-  retarget a team. `repo.gate` is the repo's pass/fail command: see [The gate](../README.md#the-gate).
+  retarget a team. `repo.gate` is the repo's pass/fail command: see [The gate](gate.md).
 - `storage`: `volume` and `root`. Every worktree is created under `<volume>/<root>/`. The volume must be
   mounted, checked from the mount table when a worktree is created; the launcher never falls back to
   another disk.
