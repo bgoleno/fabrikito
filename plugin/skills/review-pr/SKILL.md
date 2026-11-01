@@ -87,7 +87,7 @@ differ, the role prompt wins.
    - last line: `READY at <short sha>` or `CHANGES NEEDED at <short sha>`, and what else the PR
      waits for (another reviewer, qa, a merge with its base, the owner);
    - if the PR needs a reviewer its assignment record does not name, a line of its own
-     `Requires: <role ids>`, reviewing roles only (`tl`, `tl2`, `qa`, `qa2`, `sec`).
+     `Requires: <role ids>`, naming only your roster's tech lead, QA and security roles.
      `factory:merge-train` reads only that line to add a reviewer, never the prose. A request
      with a condition ("sec, if ...") goes to the EM to record instead.
 
@@ -98,10 +98,12 @@ differ, the role prompt wins.
      whatever severity you think it has. Only `sec` rates findings, and a real medium posted as a
      low is public. Send it to `sec` and the EM only, with `SendMessage` (`say` only as your role
      prompt's fallback). Tell the author nothing about it: sec's triage decides who is told. Do
-     not post READY while it is open; a blocking point says only "one point sent to sec and the
-     EM", with no class, file, line or severity. That line is the marker `factory:merge-train`
-     holds a merge on: send your message to `sec` and the EM after posting (step 8), with the
-     comment's URL, so sec can match the point to its marker.
+     not post READY while it is open. For each such point, once, post a marker: a PR comment
+     whose whole text is the one line `<your role id>: one point sent to sec and the EM`
+     (`gh pr comment --body-file`), which `factory:merge-train` holds a merge on. A blocking point
+     in your verdict gives only that marker's URL, with no class, file, line or severity; a later
+     verdict that still has the point gives the same URL and posts no new marker. Send `sec` and
+     the EM the marker's URL with the point, so sec can match them.
    - **The security engineer:** triage it with `factory:security-triage`. A low or ruled-out
      finding may go in the verdict as that skill's step 6 says. A medium or higher (what your role
      prompt's rule 5 keeps out of public trackers) is held back, and the skill says who is told
