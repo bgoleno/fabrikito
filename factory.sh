@@ -1362,7 +1362,7 @@ cmd_say() {
   # just before it. Anything else that cannot be appended to (a folder, a file without write
   # permission) fails the append itself, after the delivery, as before (#128).
   if log_unsafe && [ -z "$why" ]; then
-    why="$LOG is a symlink or a FIFO, and say does not write through one: report it to the EM (only a seat could have put it there; it is removed by its exact path)"
+    why="$LOG is a symlink, a FIFO or a hard link, and say does not write through one: report it to the EM (only a seat could have put it there; it is removed by its exact path)"
   fi
   # Record before report (#128): the messages.log line is written before any terminal message.
   # The log is the record the owner and the EM go by. A write to the terminal or a pipe can fail:
@@ -1409,16 +1409,17 @@ cmd_say() {
   # delivered message again (sec on #137).
   if [ "$lrc" != 0 ]; then
     if [ "$rc" = 0 ]; then out=delivered; elif [ "$to" = all ]; then out="not delivered to every seat"; else out="not delivered"; fi
-    echo "say: this say's record could not be written to $LOG$(log_unsafe && echo ', a symlink or a FIFO') (the message was $out)" >&2
+    echo "say: this say's record could not be written to $LOG$(log_unsafe && echo ', a symlink, a FIFO or a hard link') (the message was $out)" >&2
     return 1
   fi
   return "$rc"
 }
 
-# messages.log is something say must not append to (#194): a link (to anywhere, -L tests the link
-# itself), or a FIFO, which >> would block on.
+# messages.log is something say must not append to (#194): a symlink (to anywhere, -L tests the link
+# itself); a FIFO, which >> would block on; or a hard link, a regular file to every other test here
+# that shares its data with another name (tl and sec on #206). The real log never has a second link.
 log_unsafe() {
-  [ -L "$LOG" ] || [ -p "$LOG" ]
+  [ -L "$LOG" ] || [ -p "$LOG" ] || { [ -f "$LOG" ] && [ "$(stat -f %l "$LOG" 2>/dev/null || echo 1)" -gt 1 ]; }
 }
 
 # send_one, with what it prints held for cmd_say to show after the log line (#128).

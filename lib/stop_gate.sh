@@ -68,11 +68,15 @@ if [ -L "$dir" ] || { [ -e "$dir" ] && [ ! -d "$dir" ]; }; then
   unsafe=$dir
 else
   for p in "$log" "$count"; do
-    if [ -L "$p" ] || { [ -e "$p" ] && [ ! -f "$p" ]; }; then unsafe=$p && break; fi
+    # A hard link is a regular file that shares its data with another name: the real log and count
+    # never have a second link (tl and sec on #206).
+    if [ -L "$p" ] || { [ -e "$p" ] && [ ! -f "$p" ]; } || { [ -f "$p" ] && [ "$(stat -f %l "$p" 2>/dev/null || echo 1)" -gt 1 ]; }; then
+      unsafe=$p && break
+    fi
   done
 fi
 if [ -n "$unsafe" ]; then
-  why="The stop gate did not run: $unsafe is a symlink, or not a regular file or folder, and the hook does not write or read its state through one (#194). Report it to the EM: only a seat could have put it there, and it is removed by its exact path."
+  why="The stop gate did not run: $unsafe is a symlink, a hard link, or not a regular file or folder, and the hook does not write or read its state through one (#194). Report it to the EM: only a seat could have put it there, and it is removed by its exact path."
   if [ "$active" = true ]; then
     ruby -rjson -e 'puts JSON.generate("continue" => false, "stopReason" => ARGV[0])' "$why"
     exit 0

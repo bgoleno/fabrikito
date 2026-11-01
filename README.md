@@ -269,11 +269,11 @@ kept all the same. If the line itself cannot be appended, `say` still prints its
 record could not be written and whether the message was delivered (so that a delivered message is not
 sent again), and exits with status 1.
 
-The log is never written through a symlink ([#194](../../issues/194)). When `messages.log` is a
-symlink or a FIFO, `say` delivers nothing and writes no line: it prints why, says the record could not
-be written, and exits with status 1. Only a seat could put one there; remove it by its exact path.
-`lib/log_message.sh` (below) opens the log without following a symlink and writes only to a regular
-file, so there it costs that line.
+The log is never written through a link ([#194](../../issues/194)). When `messages.log` is a symlink, a
+FIFO or a hard link (a file with a second name), `say` delivers nothing and writes no line: it prints
+why, says the record could not be written, and exits with status 1. Only a seat could put one there;
+remove it by its exact path. `lib/log_message.sh` (below) opens the log without following a symlink and
+writes only to a regular file with one link, so there it costs that line.
 
 Each `SendMessage` from a seat appends one line in the same format, written by `lib/log_message.sh`, a
 `PostToolUse` and `PostToolUseFailure` hook on `SendMessage` in every seat's settings:
@@ -483,11 +483,11 @@ Roles without the switch never run it. The example gives it to the engineers and
   with no hook input, `lib/stop_gate.sh` runs the gate and reports but leaves the count alone. Claude
   Code also ends such a loop itself after 8 continuations with no tool call in between (raise it with
   `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`).
-- The hook never writes or reads its state through a symlink ([#194](../../issues/194)). A symlink, or
-  anything other than a folder or a regular file, at `.state/<team>/gate/` or at the role's log or
-  count in it, is refused: no gate runs and nothing is written. The seat is sent back, told to report
-  it; in a turn the hook has already sent back, the stop goes through with a note naming it. Only a
-  seat could put one there; remove it by its exact path.
+- The hook never writes or reads its state through a link ([#194](../../issues/194)). A symlink, a
+  hard link, or anything other than a folder or a regular file, at `.state/<team>/gate/` or at the
+  role's log or count in it, is refused: no gate runs and nothing is written. The seat is sent back,
+  told to report it; in a turn the hook has already sent back, the stop goes through with a note naming
+  it. Only a seat could put one there; remove it by its exact path.
 - The gate runs with a time limit (`repo.gate_timeout`, default 600 s) in a process group of its own,
   which is killed whole when the time is up. A program that detaches from that group (a daemon, a tmux
   server) is not killed.
