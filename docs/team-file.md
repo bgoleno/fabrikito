@@ -15,7 +15,7 @@ the reference for each key, and the file to copy.
 - `sessions`: tmux name prefix, an optional claude `wrapper`, `args`, and an optional default `model`,
   `effort` and `permission_mode`. Unset means the flag is omitted and the seat inherits
   `~/.claude/settings.json`. `sessions.claude.plugin` (default `true`) loads the factory plugin into
-  every seat: see [The factory plugin](../README.md#the-factory-plugin).
+  every seat: see [The factory plugin](plugin.md).
 - `permissions` (`deny`, `ask`, `allow`), at the top level and per role: see
   [Safety](../README.md#safety).
 - `prompts.common` and a per-role `prompt` (file) or `prompt_text` (inline). Placeholders such as
