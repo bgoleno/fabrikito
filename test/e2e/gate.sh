@@ -77,4 +77,25 @@ before=$(runs); gate s8 $T/plain/sub
 # Every send-back above (first, last, new turn, new session, timeout, failed status, unreadable
 # repository and worktree) carried it.
 [ "$bounces" -ge 10 ] && [ -z "$nopurp" ] && ok "every send-back ($bounces) says how to stop on purpose and gives the limit (2)" || bad "send-backs without the stop-on-purpose sentence and limit (sessions:$nopurp; $bounces send-backs)"
+echo "--- the stop gate never writes or trusts its state through a link (#194)"
+# up refuses a link at gate/ (#174), but the hook runs later, so one made after up is met here. The
+# hook writes gate/, its log and its count, and trusts the count: a planted count could let a stop
+# through ungated. Each link points at a sentinel, which must come out byte for byte as it went in.
+# The tree is dirty and the gate fails, so without the check the hook would run it and write.
+touch $T/g/new.txt
+mkdir -p $T/gsent && printf 'sentinel log\n' > $T/gsent/w9.log && printf 's5 1\n' > $T/gsent/w9.count && cp -R $T/gsent $T/gsent.want
+mv $T/gstate/gate $T/gstate/gate.real && ln -s $T/gsent $T/gstate/gate
+before=$(runs); gate s5; r1=$rc; e1=$err; ACTIVE=true gate s5; r2=$rc; o2=$out
+[ $r1 = 2 ] && echo "$e1" | grep -qF "$T/gstate/gate is a symlink" && [ "$(runs)" = "$before" ] && diff -r $T/gsent $T/gsent.want >/dev/null \
+  && ok "a link at gate/: the hook does not run the gate or write through it, and sends the seat back naming it" || { bad "a link at gate/ (rc=$r1, gate runs $before -> $(runs))"; echo "$e1"; diff -r $T/gsent $T/gsent.want; }
+[ $r2 = 0 ] && [ "$(runs)" = "$before" ] && echo "$o2" | L="$T/gstate/gate" ruby -rjson -e 'j = JSON.parse(STDIN.read); exit(j["continue"] == false && j["stopReason"].include?(ENV["L"] + " is a symlink") ? 0 : 1)' \
+  && diff -r $T/gsent $T/gsent.want >/dev/null && ok "a link at gate/, in a turn the hook already sent back: the stop goes through, with a stopReason naming it" || { bad "a link at gate/, second stop (rc=$r2)"; echo "$o2"; }
+rm $T/gstate/gate && mv $T/gstate/gate.real $T/gstate/gate
+for f in log count; do
+  rm -f $T/gstate/gate/w9.$f && ln -s $T/gsent/w9.$f $T/gstate/gate/w9.$f
+  before=$(runs); gate s6
+  [ $rc = 2 ] && echo "$err" | grep -qF "$T/gstate/gate/w9.$f is a symlink" && [ "$(runs)" = "$before" ] && diff -r $T/gsent $T/gsent.want >/dev/null \
+    && ok "a link at gate/w9.$f: the hook does not run the gate or write through it, and sends the seat back naming it" || { bad "a link at gate/w9.$f (rc=$rc, gate runs $before -> $(runs))"; echo "$err"; diff -r $T/gsent $T/gsent.want; }
+  rm $T/gstate/gate/w9.$f
+done
 e2e_end=gate # the last line: test/e2e.sh checks that the file ran to here
