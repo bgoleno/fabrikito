@@ -589,17 +589,18 @@ class TeamConfig
     path_overlap?(path, state_dir)
   end
 
-  # What of this team's own work path is, holds or sits inside, or nil: the repository, the worktree
-  # folder, a seat's working directory, or this factory checkout (which it may not be or hold; the
-  # state root inside it holds the other teams' folders).
+  # How path overlaps this team's own work, or nil: it is, holds or sits inside the repository, the
+  # worktree folder or a seat's working directory, or it is or holds the home folder or this factory
+  # checkout (a state folder may sit inside either: the state root is in the checkout).
   def own_work_overlap(path)
-    return 'this team\'s repository (repo.path)' if path_overlap?(path, repo_path)
-    return "this team's worktree folder (#{worktree_root})" if path_overlap?(path, worktree_root)
+    return "is, holds or sits inside this team's repository (repo.path)" if path_overlap?(path, repo_path)
+    return "is, holds or sits inside this team's worktree folder (#{worktree_root})" if path_overlap?(path, worktree_root)
 
-    roles.each_key { |id| return "seat #{id}'s working directory" if path_overlap?(path, workdir(id)) }
-    inst = real_path(INSTALL)
+    roles.each_key { |id| return "is, holds or sits inside seat #{id}'s working directory" if path_overlap?(path, workdir(id)) }
     r = real_path(path)
-    return 'this factory checkout' if path_overlap?(path, INSTALL) && !r.start_with?("#{inst}/")
+    holds = ->(dir) { d = real_path(dir); d == r || d.start_with?(r.end_with?('/') ? r : "#{r}/") }
+    return 'is or holds the home folder' if holds.call(home_utf8)
+    return 'is or holds this factory checkout' if holds.call(INSTALL)
 
     nil
   end
@@ -635,7 +636,7 @@ class TeamConfig
           if overlaps_own_state?(p)
             skipped << [p, "it is this team's own state folder, holds it or sits inside it"]
           elsif (what = own_work_overlap(p))
-            skipped << [p, "it is, holds or sits inside #{what}"]
+            skipped << [p, "it #{what}"]
           else
             found << { 'path' => p, 'observers' => [], 'how' => 'found' }
           end
@@ -661,7 +662,7 @@ class TeamConfig
       obs.each { |o| die "other_teams: observer #{o} of #{p} is not a role of this team" unless roles.key?(o) }
       die "other_teams: #{p} is this team's own state folder, holds it or sits inside it" if overlaps_own_state?(p)
       what = own_work_overlap(p)
-      die "other_teams: #{p} is, holds or sits inside #{what}" if what
+      die "other_teams: #{p} #{what}" if what
       # Only a team's state folder: a wrong entry such as ~, the volume or repo.path would deny this
       # team's own work, and a .state root one level too high would protect nothing while check said
       # it did (tl on #200). One that does not exist yet (that team has not started) is accepted, and
