@@ -41,18 +41,19 @@ logged w2 NOT-DELIVERED $'not utf-8: \x9b, \xff' 'not utf-8: \x9B, \xFF' "a mess
 # going out as a turn of its own. A tmux stand-in first on PATH logs each call and runs the real tmux,
 # so a say that did reach tmux would deliver as before and fail here.
 mkdir -p $T/tmuxlog && printf '#!/bin/sh\necho "$*" >> %s/tmuxlog.log\nexec %s "$@"\n' $T "$(command -v tmux)" > $T/tmuxlog/tmux && chmod +x $T/tmuxlog/tmux
-# no_message <what> <from, or - for TEAM_ROLE unset> <to> <message>: refused, no tmux call, no key to any
-# seat, one NOT-DELIVERED line (sender '?' when TEAM_ROLE is unset: telling a seat from the owner takes tmux).
+# no_message <what> <from, or - for TEAM_ROLE unset> <to> <message...>: refused, no tmux call, no key to
+# any seat, one NOT-DELIVERED line (sender '?' when TEAM_ROLE is unset: telling a seat from the owner takes tmux).
 no_message() {
-  local n k out rc calls line lf=$2
+  local what=$1 lf=$2 to=$3 n k out rc calls line
+  shift 3
   n=$(wc -l < $T/state/messages.log); k=$(cat $T/keys-*.log 2>/dev/null | wc -c); : > $T/tmuxlog.log
-  if [ "$2" = - ]; then lf='?'; out=$(env -u TEAM_ROLE "PATH=$T/tmuxlog:$PATH" $S -c $T/team.yaml say "$3" "$4" 2>&1); rc=$?
-  else out=$(env "PATH=$T/tmuxlog:$PATH" TEAM_ROLE="$2" $S -c $T/team.yaml say "$3" "$4" 2>&1); rc=$?; fi
+  if [ "$lf" = - ]; then lf='?'; out=$(env -u TEAM_ROLE "PATH=$T/tmuxlog:$PATH" $S -c $T/team.yaml say "$to" "$@" 2>&1); rc=$?
+  else out=$(env "PATH=$T/tmuxlog:$PATH" TEAM_ROLE="$lf" $S -c $T/team.yaml say "$to" "$@" 2>&1); rc=$?; fi
   sleep 1; calls=$(wc -l < $T/tmuxlog.log | tr -d ' '); line=$(tail -n +$((n + 1)) $T/state/messages.log)
   if [ $rc != 0 ] && [ "$calls" = 0 ] && echo "$out" | grep -qF "not delivered: the message is empty" && [ "$(cat $T/keys-*.log 2>/dev/null | wc -c)" = "$k" ] &&
-    [ "$(wc -l < $T/state/messages.log)" -eq $((n + 1)) ] && [ "$(printf '%s\n' "$line" | cut -f2-4)" = "$lf	$3	NOT-DELIVERED" ]; then
-    ok "say refuses $1 before any tmux call: no keys, logged NOT-DELIVERED"
-  else bad "say $1 (rc=$rc, tmux calls=$calls)"; echo "$out" | tail -3; printf '%s\n' "$line"; fi
+    [ "$(wc -l < $T/state/messages.log)" -eq $((n + 1)) ] && [ "$(printf '%s\n' "$line" | cut -f2-4)" = "$lf	$to	NOT-DELIVERED" ]; then
+    ok "say refuses $what before any tmux call: no keys, logged NOT-DELIVERED"
+  else bad "say $what (rc=$rc, tmux calls=$calls)"; echo "$out" | tail -3; printf '%s\n' "$line"; fi
 }
 no_message "an empty message to one seat" em w1 ""
 no_message "a message of spaces to one seat" em w1 "   "
@@ -60,6 +61,10 @@ no_message "a message of a tab and a newline to one seat" em w1 $'\t\n'
 no_message "an empty message to all" em all ""
 no_message "a message of spaces to all" em all "   "
 no_message "an empty message with TEAM_ROLE unset" - w1 ""
+# Several empty arguments (tl on #202): bash 3.2 puts \177 for each in "${*:2}", which is not
+# whitespace, while say sends and logs "$*", which is.
+no_message "two empty arguments to one seat" em w1 "" ""
+no_message "spaces and an empty argument to one seat" em w1 "   " ""
 # No tracked file may hold a bidi embedding, override or isolate character itself (Trojan Source):
 # the escaper names those ranges with ASCII \u escapes, and so must anything else.
 bidi=$(cd $SRC && git ls-files -z | xargs -0 ruby --disable-gems -e 'ARGV.each { |f| next unless File.file?(f); File.binread(f).each_line.with_index(1) { |l, i| puts "#{f}:#{i}" if l =~ /\xE2\x80[\xAA-\xAE]|\xE2\x81[\xA6-\xA9]/n } }')
