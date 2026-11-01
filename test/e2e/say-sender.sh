@@ -142,7 +142,7 @@ lastlog '?' w1 'from a pane on server 2' && [ "$(wc -c < $T/keys-w1.log)" = "$k"
 n=$(wc -l < $XLOG); k=$(wc -c < $T/keys-em.log)
 tmux send-keys -t '=tt-w1:' -l "!$SRC/test/live-env.sh run $LIVE_D $S -c $T/xs.yaml say em 'driven through live-env' > $T/xs3.out 2>&1"; tmux send-keys -t '=tt-w1:' Enter
 waitfile $XLOG "$n"; sleep 1
-[ "$(tail -1 $XLOG | cut -f2-4)" = "live-test	em	delivered" ] && tail -c +$((k + 1)) $T/keys-em.log | grep -qF "[from live-test] driven through live-env" &&
+[ "$(tail -1 $XLOG | cut -f2-4)" = "live-test	em	delivered" ] && tail -c +$((k + 1)) $T/keys-em.log | keytext | grep -qF "[from live-test] driven through live-env" &&
   ok "a live-env driver inside a seat sends as [from live-test], logged live-test" || { bad "live-env driver label"; tail -1 $XLOG; cat $T/xs3.out; }
 # 4. live-test addressed to the default server is refused before say runs any tmux command: TMUX and
 # TMUX_TMPDIR unset, and a stand-in tmux first on PATH that records every call and runs none. The team

@@ -1,5 +1,8 @@
 # Sourced by test/e2e.sh, in its shell and in the order of AREAS there (#70); not run alone.
 # say delivers only to a seat showing its input box. Its own team (tp) on the same tmux server and state.
+# Its label goes in as a paste of its own, and the message only once the box holds just that label
+# (#150): a missing or other label, a failed paste, and a placeholder without its label are refused
+# with no Enter; owner and live-test labels go in the same way.
 echo "--- say delivers only to a seat showing its input box"
 # The stand-in draws Claude Code 2.1.316's input box unless a seat has a dialog file, which it draws
 # instead (a dialog replaces the box). pp, pm, pd and ph show dialogs copied from 2.1.316 screens
@@ -8,7 +11,7 @@ echo "--- say delivers only to a seat showing its input box"
 # with no numbers and no key hint: any dialog say does not know must fail closed too.
 roles=""
 # em is a seat here too: say takes its sender from TEAM_ROLE=em, which must be a role of the team (#89).
-for r in em pp pm pd ph pu pb pf ps pg px pk pq po pn pz ta tb tc td te pv pw py sa sb sc sd se sf; do roles="$roles  $r: { title: Seat $r, workdir: { type: project, path: $T/proj }, prompt_text: \"$r\" }
+for r in em pp pm pd ph pu pb pf ps pg px pk pq po pn pz ta tb tc td te tn to pv pw py sa sb sc sd se sf; do roles="$roles  $r: { title: Seat $r, workdir: { type: project, path: $T/proj }, prompt_text: \"$r\" }
 "; done
 cat > $T/tp.yaml <<Y
 team: tp
@@ -75,7 +78,7 @@ cat > $T/fake-pu-prompt.txt <<'M'
  ❯ Leave it as it is
    Change it
 M
-echo tall > $T/fake-ta-mode.txt; echo tall > $T/fake-te-mode.txt; echo tall-dim > $T/fake-tb-mode.txt; echo tall-typed > $T/fake-tc-mode.txt; echo tall-short > $T/fake-td-mode.txt
+echo tall > $T/fake-ta-mode.txt; echo tall > $T/fake-te-mode.txt; echo tall-nolabel > $T/fake-tn-mode.txt; echo tall-otherlabel > $T/fake-to-mode.txt; echo tall-dim > $T/fake-tb-mode.txt; echo tall-typed > $T/fake-tc-mode.txt; echo tall-short > $T/fake-td-mode.txt
 echo below > $T/fake-pb-mode.txt; echo prefill > $T/fake-pf-mode.txt; echo swallow > $T/fake-ps-mode.txt
 echo suggest > $T/fake-pg-mode.txt; echo mixed > $T/fake-px-mode.txt; echo sticky > $T/fake-pk-mode.txt
 echo mention > $T/fake-pn-mode.txt; echo mentionsel > $T/fake-pz-mode.txt
@@ -159,7 +162,7 @@ cf=$(PATH=$T/shim:$PATH TEAM_ROLE=em $S -c $T/tp.yaml say pq "capture fails" 2>&
 # the end of the text; below 801 characters and 4 lines it is not collapsed to a placeholder. ta..te
 # model that box in a 110x16 pane, which shows 3 rows: the smallest pane say does not resize (#84),
 # so the scrolled box is still what it reads there.
-for r in ta tb tc td te; do tmux resize-window -t "=tp-$r:" -x 110 -y 16; tmux send-keys -t "=tp-$r:" C-l; done; sleep 1
+for r in ta tb tc td te tn to; do tmux resize-window -t "=tp-$r:" -x 110 -y 16; tmux send-keys -t "=tp-$r:" C-l; done; sleep 1
 msg() { local m="" i=0; while [ ${#m} -lt $1 ]; do i=$((i+1)); m="$m w$(printf %03d $i)"; done; m=${m# }; printf '%s' "${m:0:$1}"; }
 # tall <role> <ok|refused> <message> <what>: say's exit status, and whether an Enter followed the paste.
 tall() {
@@ -173,8 +176,11 @@ tall() {
   fi
 }
 tall ta ok "$(msg 490)" "a message taller than the box (500 characters, 5 rows in a 3-row box)"
-tall ta ok "$(msg 790)" "a tall message at the 800-character edge (shown as text)"
-tall ta ok "$(msg 791)" "a message one past the edge (801 characters, a placeholder)"
+# The edge counts the message alone: its label is a paste of its own (#150).
+tall ta ok "$(msg 800)" "a tall message at the 800-character edge (shown as text)"
+tmux capture-pane -p -J -S -60 -t '=tp-ta:' | grep '^❯ ' | tail -1 | grep -qE '^❯ \[from em\] w001 .* w[0-9]*$' && ok "the 800-character message reached the seat as text" || bad "the 800-character message was not text"
+tall ta ok "$(msg 801)" "a message one past the edge (801 characters, a placeholder)"
+tmux capture-pane -p -S -60 -t '=tp-ta:' | grep '^❯ ' | tail -1 | grep -qE '^❯ \[from em\] \[Pasted text #[0-9]+\]$' && ok "the 801-character message reached the seat as its label and a placeholder" || bad "the 801-character message was not a placeholder"
 tall ta ok "$(msg 140)"$'\n'"$(msg 140)"$'\n'"$(msg 140)" "a tall message of 3 lines (shown as text)"
 tall ta ok "$(msg 60)"$'\n'"$(msg 60)"$'\n'"$(msg 60)"$'\n'"$(msg 60)" "a message of 4 lines (a placeholder)"
 # Each refusal after the paste names its own cause (#84), not the generic "not empty" one.
@@ -191,6 +197,81 @@ tmux send-keys -t '=tp-tc:' C-u; sleep 0.5
 tall td refused "$(msg 490)" "the end of a tall message in a box that is not full"; why "shows 2 of its 3 rows" "the box shows 2 of its 3 rows"
 # A full box whose visible end matches but is under 40 characters is too little to go on: refused.
 tall te refused "$(msg 110)"$'\n'"ok"$'\n'"go" "a tall message whose visible end is under 40 characters"; why "under the 40 say needs" "too little of the message's end is visible"
+# The label outside the paste (#150). Claude Code hands a collapsed paste to the seat inside
+# <pasted_content> tags, and a label in there made seats doubt the sender (fs1's live runs on #150).
+# So say pastes "[from <role>] " on its own, then the message: a paste that short is never collapsed,
+# and the box shows "[from em] [Pasted text #N +K lines]". It is pasted, not typed: typed keys could
+# answer a dialog (tl on #150). The Enter goes only to the label and one placeholder as the whole box.
+m4="$(msg 60)"$'\n'"$(msg 60)"$'\n'"$(msg 60)"$'\n'"$(msg 60)"
+# pastes <role> <offset>: the pastes in the seat's key log after byte <offset>, one per line, each
+# shown with inspect, and " +Enter" when an Enter followed it.
+pastes() { tail -c +$(($2 + 1)) $T/keys-$1.log | ruby -e 'STDIN.binmode.read.scan(/\e\[200~(.*?)\e\[201~(\r?)/m) { |t, e| puts t.inspect + (e == "\r" ? " +Enter" : "") }'; }
+# lastsub <role>: the last message the stand-in submitted (its transcript shows "❯ " with a plain space).
+lastsub() { tmux capture-pane -p -S -60 -t "=tp-$1:" | grep '^❯ ' | tail -1; }
+# label_first <role> <offset> <label> <what>: two pastes after <offset>, the label alone and then the
+# message, and an Enter after the second only.
+label_first() {
+  local p; p=$(pastes "$1" "$2")
+  [ "$(printf '%s\n' "$p" | wc -l | tr -d ' ')" = 2 ] && [ "$(printf '%s\n' "$p" | head -1)" = "\"$3\"" ] &&
+    printf '%s\n' "$p" | tail -1 | grep -q '^"w001.* +Enter$' && ok "$4" || { bad "$4"; printf '%s\n' "$p" | cut -c1-120; }
+}
+k=$(wc -c < $T/keys-ta.log)
+tall ta ok "$m4" "a 4-line message (a placeholder) with its label"
+label_first ta "$k" "[from em] " "the label is pasted on its own, then the message, then Enter"
+lastsub ta | grep -qE '^❯ \[from em\] \[Pasted text #[0-9]+ \+3 lines\]$' && ok "the seat receives the label as its own text, before the placeholder" || { bad "label before the placeholder"; lastsub ta; }
+# A line over 800 characters collapses with no "+K lines" (qa on #132).
+k=$(wc -c < $T/keys-ta.log)
+tall ta ok "$(msg 900)" "a 900-character line (a placeholder with no line count) with its label"
+label_first ta "$k" "[from em] " "the label of the 900-character line is pasted on its own"
+lastsub ta | grep -qE '^❯ \[from em\] \[Pasted text #[0-9]+\]$' && ok "the seat receives the label, then the one-line placeholder" || { bad "label before the one-line placeholder"; lastsub ta; }
+# [from owner] (TEAM_ROLE unset, outside every seat) and [from live-test] go in the same way. The
+# owner's say runs in a pane of the test's own server that is not a seat (say-sender.sh says why: this
+# test may itself run inside a seat, where TEAM_ROLE unset is refused).
+printf '%s' "$m4" > $T/m4.txt
+for who in owner live-test; do
+  k=$(wc -c < $T/keys-ta.log)
+  if [ $who = owner ]; then
+    rm -f $T/owner.rc
+    tmux new-session -d -s ownerpane "env -u TEAM_ROLE $S -c $T/tp.yaml say ta \"\$(cat $T/m4.txt)\" >$T/tall.out 2>&1; echo \$? > $T/owner.rc; sleep 30"
+    for i in $(seq 1 80); do [ -s $T/owner.rc ] && break; sleep 0.25; done; tmux kill-session -t '=ownerpane' 2>/dev/null
+    rc=$(cat $T/owner.rc 2>/dev/null || echo none)
+  else TEAM_ROLE=live-test $S -c $T/tp.yaml say ta "$m4" >$T/tall.out 2>&1; rc=$?; fi
+  sleep 1
+  [ $rc = 0 ] && lastsub ta | grep -qE "^❯ \[from $who\] \[Pasted text #[0-9]+ \+3 lines\]$" && ok "say delivers a 4-line message as [from $who]" || { bad "say as $who (rc=$rc)"; cat $T/tall.out; lastsub ta; }
+  label_first ta "$k" "[from $who] " "the [from $who] label is pasted on its own too"
+done
+# A placeholder whose label did not reach the box (tn), or under another role's label (to), is
+# not this message: refused, no Enter.
+# say checks the box after the label's paste and pastes the message only when it holds just the label
+# (tl on #175). A tall message that is not collapsed scrolls the label out of view, so the check after
+# its paste cannot see a missing label: without the check before, it would go out unlabelled.
+k=$(wc -c < $T/keys-tn.log)
+tall tn refused "$(msg 490)" "a tall message (text, 500 characters) whose label is missing from the box"; why "the box is empty after the label's paste" "the label did not reach the box (a tall message)"
+[ "$(pastes tn "$k")" = '"[from em] "' ] && ok "the tall message is not pasted when its label is missing" || { bad "the tall message was pasted without its label"; pastes tn "$k" | cut -c1-80; }
+k=$(wc -c < $T/keys-tn.log)
+tall tn refused "$m4" "a 4-line message whose label is missing from the box (a placeholder alone)"; why "the box is empty after the label's paste" "the label did not reach the box (a 4-line message)"
+[ "$(pastes tn "$k")" = '"[from em] "' ] && ok "the 4-line message is not pasted when its label is missing" || { bad "the 4-line message was pasted without its label"; pastes tn "$k" | cut -c1-80; }
+k=$(wc -c < $T/keys-to.log)
+tall to refused "$m4" "a 4-line message whose box shows another role's label"; why "something other than the label" "the box holds another label"
+[ "$(pastes to "$k")" = '"[from em] "' ] && ok "the message is not pasted when the box shows another label" || { bad "the message was pasted after another label"; pastes to "$k" | cut -c1-80; }
+tmux send-keys -t '=tp-tn:' C-u; tmux send-keys -t '=tp-to:' C-u; sleep 0.5
+# A paste that fails (fshim: the paste-buffer call number $T/fshim.fail, from 0, fails). The first:
+# nothing reached the box; say says it could not paste. The second: the label is in the box alone,
+# and say says the text is left there. Neither sends an Enter, and both log NOT-DELIVERED.
+mkdir -p $T/fshim && printf '#!/bin/sh\nif [ "$1" = paste-buffer ]; then n=$(cat %s/fshim.n 2>/dev/null || echo 0); echo $((n + 1)) > %s/fshim.n; [ "$n" = "$(cat %s/fshim.fail)" ] && exit 1; fi\nexec %s "$@"\n' $T $T $T "$(command -v tmux)" > $T/fshim/tmux && chmod +x $T/fshim/tmux
+for f in 0 1; do
+  echo $f > $T/fshim.fail; rm -f $T/fshim.n; k=$(wc -c < $T/keys-ta.log)
+  fo=$(PATH=$T/fshim:$PATH TEAM_ROLE=em $S -c $T/tp.yaml say ta "$m4" 2>&1); rc=$?; sleep 1
+  p=$(pastes ta "$k"); box=$(tmux capture-pane -p -t '=tp-ta:' | grep $'^\xe2\x9d\xaf\xc2\xa0' | sed 's/ *$//')
+  if [ $f = 0 ]; then
+    [ $rc -ne 0 ] && echo "$fo" | grep -qF "could not paste into the input box of ta" && [ -z "$p" ] && [ "$(wc -c < $T/keys-ta.log)" = "$k" ] &&
+      tail -1 $T/state/messages.log | grep -q "	ta	NOT-DELIVERED	" && ok "a failed paste of the label: not delivered, nothing reached the seat" || { bad "failed label paste (rc=$rc)"; echo "$fo"; echo "$p"; }
+  else
+    [ $rc -ne 0 ] && echo "$fo" | grep -qF "text left in input box" && [ "$p" = '"[from em] "' ] && [ "$box" = "$(printf '❯\302\240[from em]')" ] &&
+      tail -1 $T/state/messages.log | grep -q "	ta	NOT-DELIVERED	" && ok "a failed paste of the message after its label: not delivered, the label left in the box, no Enter, and say says so" || { bad "failed message paste (rc=$rc)"; echo "$fo"; echo "$p"; echo "$box"; }
+  fi
+  tmux send-keys -t '=tp-ta:' C-u; sleep 0.5
+done
 # Short panes (#84). The team view gives seats panes of 89x13 (10 seats) and 10 to 11 rows (12
 # seats). There the diff panel notice can push the box off the screen (sa: 89x13, the notice, its
 # window-size unset), and a paste can grow the box past the bottom (sb at 80x10, no notice,
@@ -214,28 +295,43 @@ steps() {
 # (i) checks that pass in a small window: no resize at all.
 PATH=$T/rshim:$PATH tall sb ok "short pane, one line" "a one-line message to a seat in an 89x13 pane whose checks pass"
 PATH=$T/rshim:$PATH tall sb ok "$(msg 400)" "a 400-character line to the 89x13 seat (its box scrolls)"
-[ "$(steps sb)" = "paste paste " ] && [ "$(geo sb)" = "$gb" ] && ok "say does not resize a small seat whose checks pass (the owner's view does not flash)" || { bad "the small seat whose checks pass was resized ($(steps sb); $(geo sb), was $gb)"; cat $T/resize.log; }
+[ "$(steps sb)" = "paste paste paste paste " ] && [ "$(geo sb)" = "$gb" ] && ok "say does not resize a small seat whose checks pass (the owner's view does not flash)" || { bad "the small seat whose checks pass was resized ($(steps sb); $(geo sb), was $gb)"; cat $T/resize.log; }
 # (iii) the notice in place of the box: the check before the paste refuses, so say grows the window,
 # checks again, pastes and sends Enter in the grown window, then puts it back.
 : > $T/resize.log
 PATH=$T/rshim:$PATH tall sa ok "short pane, one line" "a one-line message to a seat in an 89x13 pane with the diff panel notice"
 PATH=$T/rshim:$PATH tall sa ok "line one"$'\n'"line two"$'\n'"line three" "a three-line message to the 89x13 seat"
-[ "$(steps sa)" = "grow paste shrink grow paste shrink " ] && ok "say grows the seat with the notice before the paste, once per message, and puts it back" || { bad "steps for the seat with the notice ($(steps sa))"; cat $T/resize.log; }
+[ "$(steps sa)" = "grow paste paste shrink grow paste paste shrink " ] && ok "say grows the seat with the notice before the paste, once per message, and puts it back" || { bad "steps for the seat with the notice ($(steps sa))"; cat $T/resize.log; }
 # (ii) #84's own case: the box is whole before the paste, and the paste grows it past the bottom of an
 # 80x10 pane. The check after the paste refuses, so say grows the window, checks again and sends Enter.
 tmux resize-window -t '=tp-sb:' -x 80 -y 10; sleep 1; gb=$(geo sb); : > $T/resize.log
 [ "$gb" = "80x10 opt=[window-size manual]" ] || bad "test setup: sb geometry ($gb)"
 PATH=$T/rshim:$PATH tall sb ok "$(msg 400)" "a 400-character line to a seat in an 80x10 pane (the paste grows its box past the bottom)"
 PATH=$T/rshim:$PATH tall sb ok "$(msg 290)"$'\n'"two" "a two-line, 300-character message to the 80x10 seat"
-[ "$(steps sb)" = "paste grow shrink paste grow shrink " ] && ok "say grows the 80x10 seat only after the paste, when the check after it refuses, and puts it back" || { bad "steps for the 80x10 seat ($(steps sb))"; cat $T/resize.log; }
+[ "$(steps sb)" = "paste paste grow shrink paste paste grow shrink " ] && ok "say grows the 80x10 seat only after the paste, when the check after it refuses, and puts it back" || { bad "steps for the 80x10 seat ($(steps sb))"; cat $T/resize.log; }
+# A collapsed message there (#150): its label and its placeholder are two pastes, read as one box,
+# "[from em] [Pasted text #N +3 lines]". That is one row, which fits at 80x10 (qa on #132): no resize.
+: > $T/resize.log; k=$(wc -c < $T/keys-sb.log)
+PATH=$T/rshim:$PATH tall sb ok "$m4" "a 4-line message (a placeholder) to the 80x10 seat"
+[ "$(steps sb)" = "paste paste " ] && [ "$(geo sb)" = "$gb" ] && ok "the 80x10 seat took the label and the placeholder at its own size" || { bad "steps for the 80x10 seat with a placeholder ($(steps sb); $(geo sb), was $gb)"; cat $T/resize.log; }
+label_first sb "$k" "[from em] " "the label of the message to the 80x10 seat is pasted on its own"
+lastsub sb | grep -qE '^❯ \[from em\] \[Pasted text #[0-9]+ \+3 lines\]$' && ok "the 80x10 seat receives the label, then the placeholder" || { bad "label before the placeholder at 80x10"; lastsub sb; }
+# A pane that cannot show even the label's one row (the tight file): the check after the label's paste
+# refuses, so say grows the window, checks the label again there, pastes the message and checks it in
+# the grown window, then puts the window back.
+touch $T/fake-sb-tight.txt; : > $T/resize.log; k=$(wc -c < $T/keys-sb.log)
+PATH=$T/rshim:$PATH tall sb ok "$m4" "a 4-line message to an 80x10 seat that cannot show the label's row"
+[ "$(steps sb)" = "paste grow paste shrink " ] && [ "$(geo sb)" = "$gb" ] && ok "the tight 80x10 seat was grown at the label's check, took the message there, and was put back ($gb)" || { bad "steps for the tight 80x10 seat ($(steps sb); $(geo sb), was $gb)"; cat $T/resize.log; }
+lastsub sb | grep -qE '^❯ \[from em\] \[Pasted text #[0-9]+ \+3 lines\]$' && ok "the tight 80x10 seat receives the label, then the placeholder" || { bad "label before the placeholder at 80x10, tight"; lastsub sb; }
+rm $T/fake-sb-tight.txt
 # A seat slow to redraw after the resize (sd, 1.5s): until it does, its old 80x10 frame is still on
 # the screen, so say waits for a rule as wide as the grown window before it checks again (tl on #132).
 # lastrule <role>: the width, in columns, of the last plain rule on the seat's screen (its box's bottom rule).
 lastrule() { tmux capture-pane -p -t "=tp-$1:" | LC_ALL=C awk '{ sub(/[ \t]+$/, "") } /^(\342\224\200)+$/ { last = length($0) / 3 } END { print last + 0 }'; }
 tmux resize-window -t '=tp-sd:' -x 80 -y 10; for i in $(seq 1 50); do [ "$(lastrule sd)" = 80 ] && break; sleep 0.1; done
 [ "$(lastrule sd)" = 80 ] || bad "test setup: sd did not redraw at 80 columns"
-: > $T/resize.log; PATH=$T/rshim:$PATH tall sd ok "slow seat, one line" "a message to a seat slow to redraw after the resize (say waits for the redrawn box)"
-[ "$(steps sd)" = "paste grow shrink " ] || { bad "steps for the slow seat ($(steps sd))"; cat $T/resize.log; }
+: > $T/resize.log; PATH=$T/rshim:$PATH tall sd ok "$(msg 400)" "a message to a seat slow to redraw after the resize (say waits for the redrawn box)"
+[ "$(steps sd)" = "paste paste grow shrink " ] || { bad "steps for the slow seat ($(steps sd))"; cat $T/resize.log; }
 # Text typed after the message (sf, tl on #132). In a big pane the box is whole and starts with the
 # label, so only the whole visible text can tell the typed text is there: refused, no resize. In an
 # 80x10 pane the paste grows the box past the bottom, so the check after the paste refuses and say
@@ -245,12 +341,15 @@ tmux resize-window -t '=tp-sd:' -x 80 -y 10; for i in $(seq 1 50); do [ "$(lastr
 ! grep -q '^resize-window' $T/resize.log || { bad "the big seat with typed text was resized"; cat $T/resize.log; }
 tmux send-keys -t '=tp-sf:' C-u; tmux resize-window -t '=tp-sf:' -x 80 -y 10; sleep 1; gf=$(geo sf); : > $T/resize.log
 PATH=$T/rshim:$PATH tall sf refused "$(msg 400)" "a 400-character line with text typed after it, in an 80x10 pane (grown, then checked again)"; why "not just the message" "the box holds more than the message (an 80x10 pane, grown)"
-[ "$(steps sf)" = "paste grow shrink " ] && [ "$(geo sf)" = "$gf" ] && ok "the 80x10 seat with typed text was grown after the paste, refused there, and put back ($gf)" || { bad "steps for the seat with typed text ($(steps sf); $(geo sf), was $gf)"; cat $T/resize.log; }
+[ "$(steps sf)" = "paste paste grow shrink " ] && [ "$(geo sf)" = "$gf" ] && ok "the 80x10 seat with typed text was grown after the paste, refused there, and put back ($gf)" || { bad "steps for the seat with typed text ($(steps sf); $(geo sf), was $gf)"; cat $T/resize.log; }
 tmux send-keys -t '=tp-sf:' C-u; sleep 0.5
-# The same with a placeholder (sec on #132): a 900-character line, grown after the paste, refused there.
-: > $T/resize.log
+# The same with a placeholder (sec on #132): a 900-character line, refused in the grown window. Its box,
+# label, placeholder and typed text, is one row, which fits at 80x10, so the tight file makes the label's
+# row not fit: say grows the window at the label's check, then the message's check refuses there.
+touch $T/fake-sf-tight.txt; : > $T/resize.log
 PATH=$T/rshim:$PATH tall sf refused "$(msg 900)" "a 900-character line (a placeholder) with text typed after it, in an 80x10 pane (grown, then checked again)"; why "not just the message" "the box holds more than the placeholder (a 900-character line, an 80x10 pane, grown)"
-[ "$(steps sf)" = "paste grow shrink " ] && [ "$(geo sf)" = "$gf" ] && ok "the 80x10 seat with a placeholder and typed text was grown after the paste, refused there, and put back ($gf)" || { bad "steps for the seat with a placeholder and typed text ($(steps sf); $(geo sf), was $gf)"; cat $T/resize.log; }
+rm $T/fake-sf-tight.txt
+[ "$(steps sf)" = "paste grow paste shrink " ] && [ "$(geo sf)" = "$gf" ] && ok "the 80x10 seat with a placeholder and typed text was grown after the paste, refused there, and put back ($gf)" || { bad "steps for the seat with a placeholder and typed text ($(steps sf); $(geo sf), was $gf)"; cat $T/resize.log; }
 tmux send-keys -t '=tp-sf:' C-u; sleep 0.5
 [ "$(geo sa)" = "$ga" ] && [ "$(geo sb)" = "$gb" ] && ok "after each, the small seats' size and window-size are as before ($ga; $gb)" || bad "small seat geometry after say (sa $(geo sa), was $ga; sb $(geo sb), was $gb)"
 : > $T/resize.log; PATH=$T/rshim:$PATH tall sc ok "big pane" "a message to a seat in a 220x50 pane"
@@ -261,8 +360,10 @@ tmux send-keys -t '=tp-sf:' C-u; sleep 0.5
 for i in 1 2; do ( TEAM_ROLE=em $S -c $T/tp.yaml say sa "concurrent $i $(msg 200)" >$T/conc$i.out 2>&1; echo $? > $T/conc$i.rc ) & done; wait; sleep 1
 conc=$(ruby -e '
   s = File.binread(ARGV[0]); b = s.scan(/\e\[200~(.*?)\e\[201~(\r?)/m)
-  whole = b.map { |t, e| "\e[200~#{t}\e[201~#{e}" }.join == s && b.all? { |t, e| e == "\r" && t =~ /\A\[from em\] concurrent [12] w001/ }
-  puts "#{whole ? "whole" : "MIXED"} #{b.size}"' $T/keys-sa.log)
+  m = b.each_slice(2).to_a
+  whole = b.map { |t, e| "\e[200~#{t}\e[201~#{e}" }.join == s && b.size.even? &&
+    m.all? { |(l, le), (t, e)| l == "[from em] " && le == "" && e == "\r" && t =~ /\Aconcurrent [12] w001/ }
+  puts "#{whole ? "whole" : "MIXED"} #{m.size}"' $T/keys-sa.log)
 r1=$(cat $T/conc1.rc); r2=$(cat $T/conc2.rc)
 if [ "$r1" = 0 ] && [ "$r2" = 0 ]; then [ "$conc" = "whole 2" ] && ok "two concurrent says to a small seat both deliver, one after the other, never mixed" || { bad "concurrent says ($conc)"; od -c $T/keys-sa.log | head; }
 else [ "$conc" = "whole 1" ] && grep -qhF "another say" $T/conc1.out $T/conc2.out && ok "of two concurrent says to a small seat, one delivers and the other is refused with a reason" || { bad "concurrent says (rc $r1 $r2, $conc)"; cat $T/conc1.out $T/conc2.out; }; fi
@@ -273,7 +374,8 @@ mkdir -p $T/pshim && printf '#!/bin/sh\n[ "$1" = paste-buffer ] && sleep 3\nexec
 : > $T/keys-sa.log; PATH=$T/pshim:$PATH TEAM_ROLE=em $S -c $T/tp.yaml say sa "stopped midway" >$T/term.out 2>&1 & tp=$!
 for i in $(seq 1 100); do case "$(geo sa)" in 220x50*) break ;; esac; sleep 0.1; done; sleep 1   # grown, and into the held-up paste
 kill -TERM $tp; wait $tp; trc=$?; sleep 1
-[ $trc -ne 0 ] && grep -qF "stopped midway" $T/keys-sa.log && [ "$(geo sa)" = "$ga" ] && [ "$(tail -c 1 $T/keys-sa.log | od -An -c | tr -d ' \n')" != '\r' ] && ok "a say stopped with TERM mid-delivery puts sa's size and window-size back, and sends no Enter" || { bad "say stopped mid-delivery (rc=$trc, $(geo sa), was $ga)"; cat $T/term.out; }
+# The TERM lands in the first (held-up) paste, the label's (#150): the message never follows it.
+[ $trc -ne 0 ] && keytext $T/keys-sa.log | grep -qxF "[from em] " && [ "$(geo sa)" = "$ga" ] && [ "$(tail -c 1 $T/keys-sa.log | od -An -c | tr -d ' \n')" != '\r' ] && ok "a say stopped with TERM mid-delivery puts sa's size and window-size back, pastes nothing after the label, and sends no Enter" || { bad "say stopped mid-delivery (rc=$trc, $(geo sa), was $ga)"; cat $T/term.out; od -c $T/keys-sa.log | head; }
 tmux send-keys -t '=tp-sa:' C-u; sleep 0.5
 # The lock path must be a plain file (sec on #132): opening a FIFO there to append would block with
 # no limit, and a symlink could point anywhere. say refuses at once, naming the file; nothing is typed.
@@ -308,7 +410,7 @@ rm $T/fake-se-prompt.txt; tmux send-keys -t '=tp-se:' C-l; sleep 0.5
 # only after the paste (its check there refuses at 80x10), so it is the Enter that is held up here,
 # which keeps the window grown while the session is killed.
 mkdir -p $T/kshim && printf '#!/bin/sh\n[ "$1" = send-keys ] && sleep 3\nexec %s "$@"\n' "$(command -v tmux)" > $T/kshim/tmux && chmod +x $T/kshim/tmux
-PATH=$T/kshim:$PATH TEAM_ROLE=em $S -c $T/tp.yaml say se "session gone" >$T/se.out 2>&1 & ep=$!
+PATH=$T/kshim:$PATH TEAM_ROLE=em $S -c $T/tp.yaml say se "session gone $(msg 400)" >$T/se.out 2>&1 & ep=$!
 for i in $(seq 1 100); do case "$(tmux display-message -p -t '=tp-se:' '#{window_width}x#{window_height}' 2>/dev/null)" in 220x50) break ;; esac; sleep 0.1; done; sleep 0.5
 tmux kill-session -t '=tp-se'; kill -TERM $ep; wait $ep; erc=$?
 [ $erc = 143 ] && ok "a say stopped with TERM after its seat's session ended exits 143 (the trap runs to its end)" || { bad "TERM after the session ended (rc=$erc)"; cat $T/se.out; }

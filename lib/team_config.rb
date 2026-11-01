@@ -68,7 +68,9 @@ REPO_KEYS = %w[path github base gate gate_timeout gate_max_blocks bootstrap copy
 STORAGE_KEYS = %w[volume root].freeze
 SESSION_KEYS = %w[prefix claude].freeze
 CLAUDE_KEYS = %w[wrapper args model effort permission_mode plugin auto_memory].freeze
-PROMPT_KEYS = %w[common].freeze
+PROMPT_KEYS = %w[common project].freeze
+# The #117 budget for one seat's rendered prompt: every line is loaded on every task.
+PROMPT_MAX_LINES = 199
 ROLE_KEYS = %w[title summary workdir prompt prompt_text kickoff session model effort permission_mode permissions
                gate_on_stop skills may_merge auto_memory].freeze
 WORKDIR_KEYS = %w[type path name].freeze
@@ -410,11 +412,30 @@ class TeamConfig
     out
   end
 
+  # common, then the project's addendum (prompts.project), then the role's own prompt and skills.
+  # Without prompts.project the text is exactly what it was before the key existed (#190).
   def render(id)
     common = prompts_common
     own = role_prompt(id)
     own = "#{own.chomp}\n\n#{skills_section(id)}" unless skills(id).empty?
-    subst(common + "\n" + own, id)
+    project = prompts_project
+    middle = project ? "#{check_project_text(project, id).chomp}\n\n" : ''
+    subst(common + "\n" + middle + own, id)
+  end
+
+  # The project file is the team's own text in every seat's system prompt, so, like a kickoff, it may
+  # not carry a [from ...] label that could read as another sender's. Checked after substitution and
+  # on a normalised copy, as the kickoff is. Returns the text unsubstituted (render substitutes all).
+  def check_project_text(text, id)
+    norm = subst(text, id).unicode_normalize(:nfkc).gsub(/\p{Cf}/, '')
+    die "prompts.project must not contain a [from ...] label: it would read as another sender's" if norm =~ /\[\s*from\b/i
+    text
+  end
+
+  # Lines a seat's rendered prompt has, counted as wc -l counts the output of `render`.
+  def render_lines(id)
+    t = render(id)
+    t.count("\n") + (t.end_with?("\n") ? 0 : 1)
   end
 
   # roles.<id>.skills: each item is a skill name, or a one-entry mapping of a name to when to use
@@ -458,6 +479,32 @@ class TeamConfig
     return '' if p.nil?
 
     read_prompt_file(p['common'])
+  end
+
+  def prompts_project
+    p = @c['prompts']
+    p && p['project'] ? read_prompt_file(p['project']) : nil
+  end
+
+  def prompts_project_path
+    p = @c['prompts']
+    p && p['project'] ? expand(p['project']) : nil
+  end
+
+  # For check: where each part of the prompts comes from, and the longest rendered seat.
+  def prompts_summary
+    lens = roles.keys.map { |id| [id, render_lines(id)] }
+    long = lens.max_by { |_, n| n }
+    "common #{prompts_common_path || 'none'}; project #{prompts_project_path || 'none'}; " \
+      "longest rendered prompt #{long[1]} lines (#{long[0]})"
+  end
+
+  def prompts_warning
+    over = roles.keys.map { |id| [id, render_lines(id)] }.select { |_, n| n > PROMPT_MAX_LINES }
+    return '' if over.empty?
+
+    "warning: #{over.map { |id, n| "#{id} (#{n})" }.join(', ')} render prompts over #{PROMPT_MAX_LINES} lines. " \
+      'Every line is loaded on every task (#117): move procedure into skills, or shorten prompts.project.'
   end
 
   def kickoff(id)
@@ -769,7 +816,7 @@ class TeamConfig
       File.join(state_dir, 'messages.log'),
       # the team file and the prompts it loads into every seat
       @path,
-      *([prompts_common_path] + roles.values.map { |r| r['prompt'] && expand(r['prompt']) }).compact,
+      *([prompts_common_path, prompts_project_path] + roles.values.map { |r| r['prompt'] && expand(r['prompt']) }).compact,
       # the launcher itself, and the wrapper it runs claude through
       File.join(INSTALL, 'factory.sh'), File.join(INSTALL, 'lib', '**'), File.join(INSTALL, 'roles', '**'),
       # the factory's plugin, which every seat loads at its next start
@@ -1286,7 +1333,8 @@ class TeamConfig
       kickoff(id)
     end
     prompts_common
-    roles.each_key { |id| render(id) } # unknown @@placeholders fail here, not at launch
+    prompts_project
+    roles.each_key { |id| render(id) } # unknown @@placeholders and a project label fail here, not at launch
     any_mode = claude.key?('permission_mode') || roles.values.any? { |r| r.key?('permission_mode') }
     args.each do |a|
       flag = a.split('=', 2).first
@@ -1328,9 +1376,12 @@ when 'get'
   when 'state.dir' then puts cfg.state_dir
   when 'claude.config_dir' then puts cfg.claude_config_paths.first
   when 'state.generated_dirs' then puts GENERATED_DIRS
+  when 'state.hook_dirs' then puts HOOK_DIRS
   when 'state.notes_dir' then puts File.join(cfg.state_dir, NOTES_DIR)
   when 'state.triage_dir' then puts(cfg.roles.key?(TRIAGE_WRITER) ? File.join(cfg.state_dir, TRIAGE_DIR) : '')
   when 'hooks.note' then puts cfg.hooks_note.to_s
+  when 'prompts.summary' then puts cfg.prompts_summary
+  when 'prompts.warning' then puts cfg.prompts_warning
   when 'repo.bootstrap' then puts(cfg.bootstrap || '')
   when 'repo.copy' then puts cfg.copy_paths
   when 'repo.gate_summary'

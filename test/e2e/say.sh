@@ -12,7 +12,7 @@ echo "$kchk" | grep -qF "[em] [from launcher] Team session started: you are the 
 kout=$(TEAM_ROLE=launcher $S -c $T/team.yaml say w1 "pretend kickoff" 2>&1); rc=$?
 [ $rc != 0 ] && echo "$kout" | grep -qF "reserved" && ! tmux capture-pane -p -t '=tt-w1:' | grep -q "pretend kickoff" && ok "say refuses to send as launcher (only the launcher's kickoff carries that label)" || { bad "say as launcher (rc=$rc)"; echo "$kout"; }
 tmux capture-pane -p -t '=tt-w1:' | grep -q "from em\] hello w1" && ok "message arrived in w1's pane" || bad "message arrived"
-grep -q "from em\] hello w1" $T/keys-w1.log 2>/dev/null && ok "the stand-in logged the submitted message (the key log works)" || bad "key log of w1"
+keytext $T/keys-w1.log 2>/dev/null | grep -q "from em\] hello w1" && ok "the stand-in logged the submitted message (the key log works)" || bad "key log of w1"
 tmux show-options -t '=tt-w1:' set-titles-string | grep -q 'set-titles-string "w1 | Worker One | tt-w1"' && ok "pane title set at startup: role | title | session" || bad "pane title at startup"
 tmux set-option -t '=tt-w1:' set-titles-string "stale" && $S -c $T/team.yaml titles >/dev/null && tmux show-options -t '=tt-w1:' set-titles-string | grep -q '"w1 | Worker One | tt-w1"' && ok "titles command repairs a changed title" || bad "titles command"
 # logged <to> <outcome> <message> <escaped> <what>: one say writes exactly one log line, whose
