@@ -1,5 +1,5 @@
 # Sourced by test/e2e.sh, in its shell and in the order of AREAS there (#70); not run alone.
-# say: delivery to a seat, the kickoff label, titles, the messages.log line.
+# say: delivery to a seat, the kickoff label, titles, the messages.log line, an empty message refused (#157).
 echo "--- say"
 TEAM_ROLE=em $S -c $T/team.yaml say w1 "hello w1 from em" && sleep 1
 echo "--- kickoff label"
