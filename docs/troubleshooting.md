@@ -32,8 +32,9 @@ The launcher reads worktree paths with `git worktree list -z`, which git 2.36 ad
 
 ### `up` stops: "claude not found on PATH" or "could not read the version"
 
-Claude Code is missing from the `PATH`, or `up` caught it in the middle of a reinstall. Wait for the
-update to finish, then run `up` again.
+Claude Code is not installed, is not on the `PATH` of the shell you run `factory.sh` from, or `up`
+caught it in the middle of a reinstall. Install Claude Code or add it to that `PATH`; after an update,
+wait for it to finish. Then run `up` again.
 
 ### `check` or `up` says the team file "is not valid YAML: ... found unexpected ':'"
 
@@ -97,20 +98,19 @@ hook, so no note and no message logging. `check` prints a `hooks` line naming th
 
 ### A seat keeps being sent back by the gate
 
-The gate fails at each stop while the seat has uncommitted changes, and the seat is sent back with the
-end of the output and the path of the full log, `.state/<team>/gate/<role>.log`. Read the log. If the
-seat is stopping on purpose (waiting for an answer, or with a test red before the fix), it should say
-so in its report: after `repo.gate_max_blocks` failures in a row in one turn, the next stop goes
-through. A gate that runs past `repo.gate_timeout` is killed and reported as "gate timed out". See
-[The gate](../README.md#the-gate).
+The gate fails at each stop while the seat has uncommitted changes. Read the full log,
+`.state/<team>/gate/<role>.log`, and fix the cause; "gate timed out" means the gate ran past
+`repo.gate_timeout`. If the seat is stopping on purpose (waiting for an answer, or with a test red
+before the fix), it should say so in its report. See [The gate](../README.md#the-gate) for the limit
+on send-backs.
 
 ## Messages
 
 ### `check` warns: "seat-to-seat messages will be held"
 
 Some seats run in `bypassPermissions` and others in a prompting mode. Messages between the two
-classes wait at an approval dialog in the receiver's pane and are dropped when it expires (5 minutes
-by default), so in an unattended team they are lost. Give every seat a `permission_mode` of the same
+classes wait at an approval dialog in the receiver's pane and are dropped when it expires, so in an
+unattended team they are lost. Give every seat a `permission_mode` of the same
 class, or set `crossSessionInbound`. See [Which messages are held](../README.md#which-messages-are-held).
 
 ### `say` refuses to send
@@ -175,6 +175,7 @@ These cost time when changing `factory.sh` or its tests.
 - **`say` must refuse a pane at a shell** (the text would run) **and one at a startup dialog** (the
   Enter would pick "No, exit").
 - **System ruby is 2.6:** no endless method definitions.
-- **Window sizing uses NSScreen** (`lib/screen_bounds.js`): Finder's desktop bounds span all displays.
+- **A view window stretched across every display** comes from sizing it with Finder's desktop
+  bounds, which span all displays. Window sizing uses NSScreen (`lib/screen_bounds.js`) instead.
 - **Scripting iTerm needs a macOS Automation grant,** and a pending prompt blocks `osascript`
   forever, so run it with a time limit.

@@ -42,7 +42,8 @@ session names, unknown placeholders and invalid UTF-8 stop the command before an
    replace the file under them. See [Updating Claude Code](../README.md#updating-claude-code).
 4. **Starts each role in turn,** in file order or in the order given on the command line, and stops
    at the first role it cannot start. A role whose tmux session already exists is skipped and left
-   alone. For each other role it:
+   alone; if the claude file it runs was replaced under it, `up` prints an `ATTENTION` line saying
+   to restart it. For each other role it:
    - **Makes the worktree,** for a `worktree` seat that has none. No worktree of the same name may be
      registered elsewhere (`migrate` moves an old one); the volume must be mounted and the folder must
      be on it; the main checkout's `origin` must name `repo.github`; `up` fetches the base
@@ -68,7 +69,8 @@ session names, unknown placeholders and invalid UTF-8 stop the command before an
    a trust dialog until someone answers it once; `up` prints an `ATTENTION` line for each seat whose
    screen is not its input box.
 6. **Opens the iTerm view,** a tab with every running seat in a pane, when it started at least one
-   seat, unless `--no-view` is given or `display.iterm` is `false`. See [The iTerm view](../README.md#the-iterm-view).
+   seat, unless `--no-view` is given, `display.iterm` is `false` or `TEAM_VIEW=0` is set
+   (the tests use it). See [The iTerm view](../README.md#the-iterm-view).
 
 A seat's tmux session is a shell that runs claude. Quitting claude leaves the shell and the session
 alive, and `up` then skips that seat; run `down --yes <role>` first to start it fresh. `down` kills the
@@ -82,10 +84,13 @@ tmux session and keeps the worktree, and closing the iTerm tab only detaches fro
 - **A working directory.** Either a git worktree of its own, `<storage.volume>/<storage.root>/team-<role>`
   by default (`workdir.name` changes the folder name), created detached at the base ref, or an
   existing folder (`workdir.type: project`). See [The team file](../README.md#the-team-file).
-- **A settings file,** passed with `--settings`, which outranks the user, project and local settings
-  files (managed settings still apply). It holds the team's and the role's permission rules merged
-  (a role can add or tighten a rule, never loosen one), the denies and allows `factory.sh` adds, and
-  the hooks below.
+- **A settings file,** passed with `--settings`. It holds the team's and the role's permission rules
+  merged (a role can add or tighten a rule, never loosen one), the denies and allows `factory.sh` adds,
+  and the hooks below. Its single values, such as `env`, win over the user, project and local
+  settings files. Its permission rules do not replace theirs: Claude Code applies the rules of every
+  settings file together, deny first, then ask, then allow, so an `allow` in the project's or the
+  user's settings still approves a call this file neither denies nor asks on. Managed settings, and,
+  depending on the account, installed mods apply above all of them.
   When a seat's permission mode is set and is not `bypassPermissions`, the file also sets
   `disableBypassPermissionsMode`, so the seat cannot be switched into bypass from inside the session.
 - **The factory plugin,** loaded with `--plugin-dir` unless `sessions.claude.plugin` is `false`. See
@@ -115,9 +120,8 @@ hook is installed into your own settings.
   uncommitted changes. If the gate fails, the seat is sent back to work with the failure. See
   [The gate](#the-gate) below.
 
-A user setting of `disableAllHooks: true` switches off every hook in a seat without a gate, and
-`check` names those seats. A gated seat's settings set `disableAllHooks: false`, which turns hooks
-back on for that seat, so a project setting cannot switch its gate off.
+A user setting of `disableAllHooks: true` switches hooks off, with an exception for gated seats:
+see [Progress notes](../README.md#progress-notes) and [The gate](../README.md#the-gate).
 
 ## How seats talk
 
@@ -128,18 +132,20 @@ prompt tells seats to send with `SendMessage` to that name and to check `ListAge
 
 - **Held messages.** Claude Code decides whether to deliver a message from the two sessions'
   permission modes. Seats in one class (all `bypassPermissions`, or all other modes) get each other's
-  messages at once; across classes a message waits for a human to approve it in the receiver's pane,
-  and expires if nobody does. `check` warns when a team's seats fall into both classes. See
+  messages at once; across classes a message waits for a human to approve it in the receiver's pane.
+  `check` warns when a team's seats fall into both classes. See
   [Which messages are held](../README.md#which-messages-are-held).
 - **`say`** is how the owner and scripts reach a seat, and the seats' fallback when `SendMessage`
   cannot reach one. It types the message into the seat's tmux pane, labelled `[from <role>]`, and it
-  types only when the pane shows Claude Code's input box ready for input, so it never answers a
-  dialog or runs text at a shell. See [`say`](../README.md#say).
+  types only when it sees Claude Code's input box ready for input, so it does not type into a dialog
+  or a shell it can see. A dialog that appears in the moment between its checks and its keys is not
+  caught. See [`say`](../README.md#say).
 - **The kickoff** is each seat's first message, labelled `[from launcher]`, so it never reads as the
   owner typing. See [The kickoff](../README.md#the-kickoff).
 - **The message log,** `.state/<team>/messages.log`, records every `say` with whether it was
   delivered, and every `SendMessage` a seat sends (through the hook above). Every seat but `em` has a
-  `Read` deny on it. See [The message log](../README.md#the-message-log).
+  `Read` deny on it, an accident guard like the other rules (see [Safety](../README.md#safety)). See
+  [The message log](../README.md#the-message-log).
 
 Session names and `[from …]` labels are claims, not identities. The prompt tells seats to act only on
 roster names, which guards against mistakes, not impersonation. See
@@ -148,9 +154,8 @@ roster names, which guards against mistakes, not impersonation. See
 ## The gate
 
 `repo.gate` is the repository's pass/fail command. A seat with `gate_on_stop: true` runs it through the
-`Stop` hook each time it ends a turn with uncommitted changes, within a time limit, and is sent back to
-work with the end of the output while it fails. After `repo.gate_max_blocks` failures in a row in one
-turn, the next stop goes through. The shared prompt also tells every seat to run the whole gate
+`Stop` hook each time it ends a turn with uncommitted changes, and is sent back to work while it
+fails, up to a limit. The shared prompt also tells every seat to run the whole gate
 before new work. The reviewer's own run of the gate on the pull request is the real check. See
 [The gate](../README.md#the-gate).
 
