@@ -270,7 +270,7 @@ reject "other_teams: not a list" "other_teams must be a list of { state, observe
 # root one level too high would deny this team's own work or protect nothing. A missing one is noted.
 reject "other_teams: the home folder" "other_teams: $HOME is or holds the home folder" "" "other_teams: [{ state: \"~\" }]"
 reject "other_teams: a folder holding the home folder" "other_teams: $(dirname $HOME) is or holds the home folder" "" "other_teams: [{ state: $(dirname $HOME) }]"
-reject "other_teams: the repo" "other_teams: $T/repo is not a team's state folder" "" "other_teams: [{ state: $T/repo }]"
+reject "other_teams: the repo" "other_teams: $T/repo is, holds or sits inside this team's repository (repo.path)" "" "other_teams: [{ state: $T/repo }]"
 reject "other_teams: a state root one level too high" "other_teams: $X is not a team's state folder" "" "other_teams: [{ state: $X }]"
 # Nor, existing or not, this team's own work: a future worktree would get an Edit deny once up made it (qa on #200).
 reject "other_teams: this team's storage root" "other_teams: $VOL/$ROOT is, holds or sits inside this team's worktree folder" "" "other_teams: [{ state: $VOL/$ROOT }]"
