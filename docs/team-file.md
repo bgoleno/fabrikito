@@ -20,6 +20,12 @@ the reference for each key, and the file to copy.
   [Safety](../README.md#safety).
 - `prompts.common` and a per-role `prompt` (file) or `prompt_text` (inline). Placeholders such as
   `@@ROSTER@@`, `@@GITHUB_REPO@@`, `@@PROJECT_URL@@` and `@@WORKTREE_ROOT@@` are filled in per seat.
+- `prompts.project` (optional): a file with your project's specifics, such as what the product is,
+  folders that are off limits, a running instance never to touch, the gate and the merge procedure.
+  Every seat's prompt is the common prompt, then this file, then the role's prompt and skills, so a
+  team can keep the shipped prompts and add only this. It takes the same placeholders, may not
+  contain a `[from ...]` label, and seats may not edit it. `check` shows it, with the longest rendered
+  prompt, and warns when a seat's prompt goes over 199 lines. Without it, prompts are unchanged.
 - `roles`: ordered; each has `title`, `workdir` (`project` folder or `worktree`), a prompt, and
   optional `model`, `effort`, `session`, `kickoff`, `summary`, `skills`.
 - `skills` (per role): skills to name in that seat's prompt, each a name (`plugin:name` for a plugin's
