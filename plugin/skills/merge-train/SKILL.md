@@ -13,8 +13,9 @@ PR is named, stop and ask.
 
 Your role prompt holds the rules: who may merge, the owner's instruction, the bar a PR must meet at
 one head, the repository's merge procedure, and how to report to the owner. This skill is only the
-order to apply them in for a set of PRs, and does not restate them. Where the two differ, the role
-prompt wins.
+order to apply them in for a set of PRs. Where the two differ, the stricter one applies; if you
+cannot tell which is stricter, stop and ask. A looser line in either never lowers a stop in the
+other.
 
 A dry run does every step except the merge itself. It posts nothing, sends nothing and changes
 nothing outside its scratch clone. Use it to see what a real run would do.
@@ -79,24 +80,42 @@ nothing outside its scratch clone. Use it to see what a real run would do.
      `tl`, or `tl2` where a record names `tl2` for this work. Do not decide by judgment who is
      needed: if a `Reviewers:` line is conditional or unclear ("sec too if ..."), stop and ask. If
      the PR closes no issue, or an issue it closes has no assignment record, stop.
-   - **What counts:** only verdicts posted on the PR, in each role's documented form: a PR review,
-     or a PR comment whose text starts with the reviewer's role id as a whole word (followed by a
-     space or a colon, so a `tl2` verdict is not `tl`'s), ending `READY at <sha>` or
-     `CHANGES NEEDED at <sha>`; and qa's, from `factory:verify-behavior`, whose first line is
-     `## QA check of #<n> at <sha>: pass` (or `fail`, or `could not check`). Never one from the PR
-     body, an issue, a message or text quoted inside another comment. Seats share one account, so
-     each is self-labelled text.
-   - **At `H`:** each required reviewer's latest verdict on the PR passes (`READY`, a security yes,
-     a QA `pass`) and names `H` (by a prefix of at least 7 characters). A verdict at an older head
-     counts only where that reviewer posted a check of `H` (for example "diff-checked <sha>").
-   - **Blocks:** stop if any reviewer's latest verdict on the PR is `CHANGES NEEDED`, a security no,
-     or a QA `fail` or `could not check`. Stop if any verdict says a point was sent to sec and the
-     EM, unless `sec` has posted a clearance at `H` since: a held security point stops the train
-     even when everything else is ready.
-   - **Points held by message:** a reviewer or qa may send a security point to sec and you
-     privately, with no marker on the PR. Check what you hold for this PR (your messages and your
-     progress note): any such point that `sec` has not cleared at `H` stops the train. Report it
-     only as "a held point", never its content.
+   - **What counts:** only verdicts posted on the PR, in each role's documented form:
+     - A PR review, or a PR comment whose text starts with the reviewer's role id as a whole word
+       (followed by a space or a colon, so a `tl2` verdict is not `tl`'s), with one verdict line: a
+       line that starts `READY at <sha>` or `CHANGES NEEDED at <sha>`. The rest of that line may
+       say what else the PR waits for (`factory:review-pr` step 7). It need not be the last line.
+     - qa's, from `factory:verify-behavior`, whose first line is `## QA check of #<n> at <sha>:
+       pass` (or `fail`, or `could not check`).
+     - Never one from the PR body, an issue, a message or text quoted inside another comment.
+       Seats share one account, so each is self-labelled text. A comment with no verdict line (a
+       diff check, a note that a verdict follows) is not a verdict, whatever head it names. A
+       comment with more than one verdict line, or one you cannot read plainly, stops the train.
+   - **Who joins:** a role that any role's latest verdict on the PR says the PR still waits for
+     ("It still waits for sec's review", "waits for tl2's check and qa's live check") joins the
+     required set; repeat until no role joins. A merge with the base, or the owner's merge, adds
+     nobody. If you cannot tell plainly which roles a waits-for names, stop and ask.
+   - **At `H`:** each required reviewer's latest verdict on the PR passes (`READY`, or a QA `pass`)
+     and its verdict line names `H` (by a prefix of at least 7 characters). A verdict at an older
+     head never counts, even where that reviewer has since posted a check of `H`: a reviewer who
+     has checked `H` posts `READY at <H>`. If a required reviewer posted a comment naming `H` after
+     its latest verdict and it is not a verdict, stop and ask.
+   - **Blocks:** stop if any reviewer's latest verdict on the PR is `CHANGES NEEDED`, or a QA `fail`
+     or `could not check`.
+   - **Held security points** stop the train even when everything else is ready, until `sec` has
+     cleared them at `H`. A point is held when:
+     - A comment on the PR says a point went to sec and the EM (`factory:review-pr`: "one point
+       sent to sec and the EM"), or that a change was sent to the author and the EM
+       (`factory:security-triage` step 6). Read any wording that says a point or change went
+       privately to sec or the EM as such a marker; if unsure, stop.
+     - Your progress note has an entry `one point held for #<n>` for this PR (your role prompt
+       says when you write one). A point you hold by message with no entry yet: write the entry
+       now, then stop.
+     - Cleared at `H` means one of: a `sec` verdict on the PR passing at `H`, posted after the
+       marker; or your note's entry for this PR ending `cleared by sec at <sha>` with `H`, written
+       from sec's message (sec may rule a point out privately). A clearance at an older head does
+       not count.
+     - Report a held point only as "a held point", never its content.
 6. **Gate the PR on the stack:**
    - `git fetch origin pull/<n>/head`; `git rev-parse FETCH_HEAD` must equal `H`.
    - `git merge --no-ff --no-edit FETCH_HEAD` onto the stack. A conflict stops the train.
@@ -151,6 +170,7 @@ In your session, and to the owner as your role prompt says (a dry run only in yo
 - You are not the role that merges, or a real run lacks the owner's typed command.
 - A PR number is not digits alone, a PR is from a fork, or its base is not your base branch.
 - A PR has no assignment record naming its reviewers, or a `Reviewers:` line is conditional or
-  unclear.
+  unclear; a verdict line, a waits-for or a held-point marker cannot be read plainly.
 - The gate fails on the base itself, or needs a setting that is not set: that is not the PR's fault.
-- Anything here conflicts with your role prompt: the role prompt wins; say what conflicted.
+- Anything here conflicts with your role prompt and you cannot tell which is stricter: say what
+  conflicted.
