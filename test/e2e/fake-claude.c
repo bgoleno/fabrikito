@@ -42,8 +42,9 @@ static void mention_list(void) {
 /* mode tall*: the input box as Claude Code 2.1.316 draws long text. Rows wrap at word boundaries
    with a 2-space indent; the box shows at most max(3, (terminal rows - 10) / 2) rows and scrolls to
    keep the end in view, with the prompt on the first VISIBLE row and no scroll marker. tall-dim
-   adds a dim suggestion after the text, tall-short shows one row fewer than a full box. */
-static void tall(void) {
+   adds a dim suggestion after the text, tall-short shows one row fewer than a full box. Returns the
+   number of rows the text wraps to. */
+static int tall(void) {
   struct winsize ws; int cols = 220, rows = 50, w, v, nr = 0; static size_t rs[8192], rl[8192];
   if (ioctl(1, TIOCGWINSZ, &ws) == 0 && ws.ws_col && ws.ws_row) { cols = ws.ws_col; rows = ws.ws_row; }
   w = cols - 4 < 20 ? 20 : cols - 4; v = (rows - 10) / 2; if (v < 3) v = 3;
@@ -66,6 +67,7 @@ static void tall(void) {
   }
   if (blen == 0) printf("\033[2mTry \"something\"\033[0m");
   else if (!strcmp(mode, "tall-dim")) printf(" \033[2mrun the tests\033[0m");
+  return nr;
 }
 static void draw(void) {
   struct winsize ws; int cols = 220, rows = 50;
@@ -80,8 +82,11 @@ static void draw(void) {
   if (name[0]) printf("────────────────────────────────────────── %s ──\r\n\xe2\x9d\xaf\xc2\xa0", name);
   else printf("%s\r\n\xe2\x9d\xaf\xc2\xa0", RULE);
   if (!strncmp(mode, "tall", 4) || small) {
-    tall();
-    if ((notice && rows <= 13) || (small && blen && rows < 12)) { fflush(stdout); return; }
+    int nr = tall();
+    /* Under 12 rows, text of more than one row grows the box past the bottom of the pane; one row
+       still fits (qa on #132: a 58-character line at 80x10 showed as itself). A seat with a tight
+       file pushes even one row off, so a test can make say's check after the label's paste grow. */
+    if ((notice && rows <= 13) || (small && blen && rows < 12 && (nr > 1 || has("tight")))) { fflush(stdout); return; }
     printf("\r\n%s\r\n  SL line one\r\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle)\r\n", RULE);
     fflush(stdout); return;
   }
@@ -95,11 +100,24 @@ static void draw(void) {
   printf("  SL line one\r\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle)\r\n");
   fflush(stdout);
 }
+/* Whether the paste that just ended is a message's label alone, "[from <x>] ", which say pastes on
+   its own before the message (#150). */
+static int labelpaste(void) {
+  size_t len = blen - pstart;
+  if (len < 9 || strncmp(buf + pstart, "[from ", 6) || buf[blen - 2] != ']' || buf[blen - 1] != ' ') return 0;
+  return memchr(buf + pstart + 6, ']', len - 8) == 0;
+}
 /* At the end of a paste, Claude Code 2.1.316 shows a paste of more than 800 characters, or of 4 or
    more lines, as a placeholder (measured 2026-10-30). tall-typed and small-typed: text typed right
-   after the paste. */
+   after the message (after its body, not between its label and its body). tall-nolabel: a label
+   paste never reaches the box. tall-otherlabel: it reaches it as another role's label. */
 static void endpaste(void) {
   if (strncmp(mode, "tall", 4) && strncmp(mode, "small", 5)) return;
+  if (labelpaste()) {
+    if (!strcmp(mode, "tall-nolabel")) blen = pstart;
+    if (!strcmp(mode, "tall-otherlabel")) blen = pstart + (size_t)snprintf(buf + pstart, sizeof buf - pstart, "[from xx] ");
+    return;
+  }
   size_t len = blen - pstart; int nl = 0;
   for (size_t i = pstart; i < blen; i++) if (buf[i] == '\n') nl++;
   if (len > 800 || nl >= 3) {
