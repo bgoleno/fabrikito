@@ -15,7 +15,7 @@ run `up` again. See [The team file](../README.md#the-team-file).
 The team file is outside `teams/`, so the launcher takes it for a throwaway copy, and a copy would
 reach the real team's seats. `down`, `say`, `attach`, `view` and `titles` refuse it the same way. Run
 a test team on a private server with `test/live-env.sh`, as the message shows. If the team is meant to
-run on the default server, pass `--default-socket`. See [Use](../README.md#use).
+run on the default server, pass `--default-socket`. See [Throwaway teams](commands.md#throwaway-teams).
 
 ### `up` stops: "'<role>' already has a worktree elsewhere"
 
@@ -23,12 +23,12 @@ The repository has a worktree with this seat's folder name at another path, from
 example. Stop the seat, then run `./factory.sh migrate <role>`, which removes that worktree so that
 `up` makes a new one in the right place. `migrate` refuses, and says why, a worktree with uncommitted
 or untracked files, a branch checked out, or commits that are not in the base, and any worktree a
-running process works in: move that work by hand first. See [Use](../README.md#use).
+running process works in: move that work by hand first. See [The commands](commands.md#the-commands).
 
 ### `up` stops: "cannot list the worktrees ... (needs git 2.36 or later)"
 
 The launcher reads worktree paths with `git worktree list -z`, which git 2.36 added. Update git. See
-[Requirements](../README.md#requirements).
+[Requirements](commands.md#requirements).
 
 ### `up` stops: "claude not found on PATH" or "could not read the version"
 
@@ -53,7 +53,7 @@ dialog, and detach with ctrl-b d. See [Safety](../README.md#safety).
 The first run asks macOS for permission to control iTerm, and a permission prompt that nobody has
 answered blocks AppleScript. Answer the prompt (or allow your terminal to control iTerm under
 System Settings, Privacy & Security, Automation), then run `./factory.sh view`. The seats are running
-either way. See [The iTerm view](../README.md#the-iterm-view).
+either way. See [The iTerm view](commands.md#the-iterm-view).
 
 ### A seat gets "Operation not permitted" on `~/Downloads` or a removable volume
 
@@ -88,7 +88,7 @@ rule. Claude Code could not parse the command, so it matched the rule against th
 
 The seat's worktree folder is not there, for example because the storage volume is not mounted. Mount
 the volume. A worktree seat should stop and tell the EM rather than work elsewhere. See
-[Use](../README.md#use).
+[The commands](commands.md#the-commands).
 
 ### A seat starts without its progress note
 

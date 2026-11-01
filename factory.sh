@@ -748,7 +748,7 @@ has_claude() {
 # The state of a seat's input box. `say` types into a
 # seat only when its screen ends with Claude Code's input box; everything else fails closed, so a
 # dialog say has never seen is refused like a known one. The box, as Claude Code 2.1.316 draws it
-# (captured 2026-10-30; test/e2e.sh's stand-in draws the same):
+# (captured 2026-10-30; the e2e stand-in, test/e2e/fake-claude.c, draws the same):
 #   ──── <session> ───   a rule: U+2500 as wide as the pane, with the session name (claude -n) in it
 #   ❯ <text>             the input: ❯ and a no-break space in column 0; more lines indented two spaces
 #   ──────────────────   a plain rule
