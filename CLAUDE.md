@@ -9,7 +9,11 @@ together in one iTerm tab. Read `README.md` for use and `teams/example.yaml` for
 - `lib/team_config.rb`: parses and validates a team YAML file for the script (system ruby, no gems).
 - `lib/screen_bounds.js`: usable area of the screen a point is on, for sizing the iTerm window.
 - `roles/`: generic prompts. `teams/example.yaml`: documented example team file.
-- `test/e2e.sh`: end-to-end test with a stand-in `claude`, a private tmux server and a throwaway repo.
+- `test/e2e.sh`: end-to-end test with a stand-in `claude`, a private tmux server and a throwaway repo: the entry point,
+  with the shared setup, count and cleanup.
+- `test/e2e/`: the e2e cases by area, sourced by `test/e2e.sh` in the order of its `AREAS`; `lib.sh` (helpers
+  more than one area uses) and `fake-claude.c` (the stand-in). A new case goes in its area's file; a new
+  area file goes in `AREAS` and ends with `e2e_end=<its name>`.
 - `test/live-env.sh`: a private tmux server and state folder for a live test (README: Tests).
 - Git-ignored, local to each project: `teams/*` other than the example, `projects/`, `.state/`.
 
