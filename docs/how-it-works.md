@@ -33,7 +33,7 @@ session names, unknown placeholders and invalid UTF-8 stop the command before an
 
 1. **Refuses a throwaway team on the default tmux server.** A team file outside `teams/` looks like a
    test copy, and a copy shares the real team's session names. Unless `--default-socket` is given,
-   `up` stops before any tmux call. See [Use](../README.md#use).
+   `up` stops before any tmux call. See [Throwaway teams](commands.md#throwaway-teams).
 2. **Makes the state folders**, the progress-note folder and, when the team has a `sec` role, the
    security-triage record folder.
 3. **Makes the team's own copy of claude.** It finds `claude` on the `PATH`, reads its version and,
@@ -70,7 +70,7 @@ session names, unknown placeholders and invalid UTF-8 stop the command before an
    screen is not its input box.
 6. **Opens the iTerm view,** a tab with every running seat in a pane, when it started at least one
    seat, unless `--no-view` is given, `display.iterm` is `false` or `TEAM_VIEW=0` is set
-   (the tests use it). See [The iTerm view](../README.md#the-iterm-view).
+   (the tests use it). See [The iTerm view](commands.md#the-iterm-view).
 
 A seat's tmux session is a shell that runs claude. Quitting claude leaves the shell and the session
 alive, and `up` then skips that seat; run `down --yes <role>` first to start it fresh. `down` kills the

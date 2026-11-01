@@ -1,7 +1,7 @@
 # Commands
 
 What software-factory needs, every `factory.sh` command and its options, which team file a command
-uses, and the iTerm view.
+uses, and the iTerm view. For what `up` does step by step, see [How it works](how-it-works.md).
 
 ## Requirements
 
