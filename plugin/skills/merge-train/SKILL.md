@@ -94,6 +94,10 @@ nothing outside its scratch clone. Use it to see what a real run would do.
      `tl`, or `tl2` where a record names `tl2` for this work. Do not decide by judgment who is
      needed: if a `Reviewers:` line is conditional or unclear ("sec too if ..."), stop and ask. If
      the PR closes no issue, or an issue it closes has no assignment record, stop.
+   - **Every seat that has posted a verdict on the PR** (any form below, at any head) is a required
+     reviewer too, whatever the records say (the owner's decision). A record posted after the PR's
+     first verdict counts toward the set, and can add a reviewer but never drop one who reviewed
+     or objected.
    - **Security-sensitive changes** (the owner's rule), an extra stop only, never a reason to
      leave `sec` out: list the files the PR touches with `gh pr diff <n> -R <repo> --name-only`
      (the head must still be `H`). If any is one of these, `sec` is required even where no record
