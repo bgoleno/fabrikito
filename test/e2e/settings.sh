@@ -226,26 +226,38 @@ chmod 755 $T/secstate/triage; echo record > $T/secstate/triage/pr-1.md
 TEAM_STATE_DIR=$T/secstate $S -c $T/sec2.yaml up --no-view sec >/dev/null 2>&1
 [ "$(stat -f %Lp $T/secstate/triage)" = 700 ] && [ "$(cat $T/secstate/triage/pr-1.md 2>/dev/null)" = record ] \
   && ok "up gives an existing triage folder mode 700 and leaves its records" || { bad "up: existing triage folder"; ls -la $T/secstate/triage; }
-# up refuses a symlink, or anything else that is not a real folder, at <state>/triage and
-# <state>/notes, naming it, and makes or chmods nothing through it (#148). Each link points at a
-# sentinel folder (mode 755, one file) whose mode, size, mtime and contents must come out unchanged.
+# up refuses a symlink, or anything else that is not a real folder, at every folder it makes or
+# writes under the state folder, naming it: triage and notes (#148), the generated folders, the
+# hooks' gate folder and the folder of the team's claude copy (#168). It makes, writes or chmods
+# nothing through it and starts no seat: sec's session is stopped first, so an up that went on would
+# start it. Each link points at a sentinel folder (mode 755, one file) whose mode, size, mtime and
+# contents must come out unchanged. A folder that was not there (gate, which a gated seat's hook
+# makes) is linked all the same, and the link is removed afterwards.
 # snap <dir>: each entry's path, mode, size and mtime, then each file's checksum.
 snap() { (cd "$1" && find . -exec stat -f '%N %Lp %z %m' {} + | sort && find . -type f -exec shasum {} + | sort); }
-for sd in triage notes; do
-  sn=$T/sentinel-$sd; mkdir -p $sn && echo keep > $sn/kept.md && chmod 755 $sn; before=$(snap $sn)
-  mv $T/secstate/$sd $T/secstate/$sd.real && ln -s $sn $T/secstate/$sd
+tmux kill-session -t '=ts-sec' 2>/dev/null
+cpd=$(cd $T/secstate && ls -d bin/claude-*/ 2>/dev/null | head -1); cpd=${cpd%/}
+[ -n "$cpd" ] || bad "no claude copy folder under $T/secstate/bin to test"
+for sd in triage notes settings launch prompts bin setup gate $cpd; do
+  sn=$T/sentinel-${sd//\//-}; mkdir -p $sn && echo keep > $sn/kept.md && chmod 755 $sn; before=$(snap $sn)
+  had=; if [ -e $T/secstate/$sd ]; then had=1; mv $T/secstate/$sd $T/secstate/$sd.real; fi
+  ln -s $sn $T/secstate/$sd
   sout=$(TEAM_STATE_DIR=$T/secstate $S -c $T/sec2.yaml up --no-view sec 2>&1); src=$?
   [ $src != 0 ] && echo "$sout" | grep -qxF "error: $T/secstate/$sd is not a real folder (a symlink, or not a folder): remove it, then run up again" \
-    && [ "$(snap $sn)" = "$before" ] && [ -L $T/secstate/$sd ] \
-    && ok "up refuses a symlink at <state>/$sd, naming it, and leaves the folder it points at unchanged" || { bad "up: symlink at <state>/$sd (rc=$src)"; echo "$sout" | tail -3; diff <(echo "$before") <(snap $sn); }
-  rm $T/secstate/$sd && mv $T/secstate/$sd.real $T/secstate/$sd
+    && [ "$(snap $sn)" = "$before" ] && [ -L $T/secstate/$sd ] && ! tmux has-session -t '=ts-sec' 2>/dev/null \
+    && ok "up refuses a symlink at <state>/$sd, naming it, leaves the folder it points at unchanged and starts no seat" || { bad "up: symlink at <state>/$sd (rc=$src)"; echo "$sout" | tail -3; diff <(echo "$before") <(snap $sn); }
+  tmux kill-session -t '=ts-sec' 2>/dev/null
+  rm $T/secstate/$sd; [ -z "$had" ] || mv $T/secstate/$sd.real $T/secstate/$sd
 done
 # A plain file at the name is refused the same way, and left as it was.
-mv $T/secstate/notes $T/secstate/notes.real && echo plain > $T/secstate/notes
-sout=$(TEAM_STATE_DIR=$T/secstate $S -c $T/sec2.yaml up --no-view sec 2>&1); src=$?
-[ $src != 0 ] && echo "$sout" | grep -qxF "error: $T/secstate/notes is not a real folder (a symlink, or not a folder): remove it, then run up again" && [ "$(cat $T/secstate/notes)" = plain ] \
-  && ok "up refuses a plain file at <state>/notes, naming it" || { bad "up: plain file at <state>/notes (rc=$src)"; echo "$sout" | tail -3; }
-rm $T/secstate/notes && mv $T/secstate/notes.real $T/secstate/notes
+for sd in notes settings; do
+  mv $T/secstate/$sd $T/secstate/$sd.real && echo plain > $T/secstate/$sd
+  sout=$(TEAM_STATE_DIR=$T/secstate $S -c $T/sec2.yaml up --no-view sec 2>&1); src=$?
+  [ $src != 0 ] && echo "$sout" | grep -qxF "error: $T/secstate/$sd is not a real folder (a symlink, or not a folder): remove it, then run up again" && [ "$(cat $T/secstate/$sd)" = plain ] \
+    && ! tmux has-session -t '=ts-sec' 2>/dev/null && ok "up refuses a plain file at <state>/$sd, naming it, and starts no seat" || { bad "up: plain file at <state>/$sd (rc=$src)"; echo "$sout" | tail -3; }
+  tmux kill-session -t '=ts-sec' 2>/dev/null
+  rm $T/secstate/$sd && mv $T/secstate/$sd.real $T/secstate/$sd
+done
 tmux kill-session -t '=ts-sec' 2>/dev/null; git -C $T/repo worktree remove --force $VOL/$ROOT/team-sec 2>/dev/null
 # A user who switched every hook off keeps that choice in seats without a gate, which then get no
 # note: check says which. Throwaway config folders, so the owner's own settings play no part.

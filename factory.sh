@@ -375,7 +375,7 @@ cmd_check() {
 }
 
 cmd_up() {
-  local want_view=1 started=0 args="" roles r sess dir launch a args_q settings default_ok=0 tdir ndir d
+  local want_view=1 started=0 args="" roles r sess dir launch a args_q settings default_ok=0 tdir ndir d gdirs hdirs
   for a in "$@"; do
     case $a in
       --no-view) want_view=0 ;;
@@ -389,20 +389,32 @@ cmd_up() {
   command -v tmux >/dev/null || die "tmux not found"
   resolve_claude || die "$CLAUDE_ERR"
   for r in $roles; do check_role "$r"; done
+  # Assignments, so a cfg failure stops up here (set -e) rather than leaving the list below short.
   ndir=$(cfg get state.notes_dir)
   tdir=$(cfg get state.triage_dir)
-  # The notes and triage folders must be real folders or not there yet (#148, sec on #141), checked
-  # before up makes anything: mkdir -p and chmod follow a symlink, so up would make or chmod the
-  # folder it points at, and seats would write notes and records there. A plain file at the name
-  # is refused too. Only a seat could put one there, so this is hardening; as in seat_lock (#132),
-  # the check is not atomic with the mkdir below.
-  for d in "$ndir" "$tdir"; do
+  gdirs=$(cfg get state.generated_dirs)
+  hdirs=$(cfg get state.hook_dirs)
+  # Every folder up makes or writes under the state folder must be a real folder or not there yet,
+  # checked before up makes, writes or starts anything: the generated folders (settings, prompts and
+  # launch scripts are written there; bin holds the claude copy the seats run; setup the marks),
+  # the folder of this claude copy, the hooks' gate folder (a gated seat's hook makes it), and the
+  # notes and triage folders (#148, sec on #141; the rest #168, sec on #165). mkdir -p, chmod and a
+  # write follow a symlink, so up would make, chmod or write wherever it points, and the seats' Edit
+  # denies name the state-folder path, not the link's target. A plain file at the name is refused
+  # too. Only a seat could put one there, so this is hardening; as in seat_lock (#132), the check is
+  # not atomic with the mkdir below. bin comes before the copy's folder in it, so a link at bin is
+  # the one named. No supported setup links one of these on purpose: TEAM_STATE_DIR moves the whole
+  # state folder, which may itself be reached through a link and is not checked here (#168).
+  while IFS= read -r d; do
     [ -n "$d" ] || continue
     if [ -L "$d" ] || { [ -e "$d" ] && [ ! -d "$d" ]; }; then
       die "$d is not a real folder (a symlink, or not a folder): remove it, then run up again"
     fi
-  done
-  for a in $(cfg get state.generated_dirs); do mkdir -p "$STATE/$a"; done
+  done < <(for a in $gdirs; do echo "$STATE/$a"; done
+    dirname "$CLAUDE_COPY"
+    for a in $hdirs; do echo "$STATE/$a"; done
+    printf '%s\n' "$ndir" "$tdir")
+  for a in $gdirs; do mkdir -p "$STATE/$a"; done
   # Progress notes (#5): seats write them, so up only makes the folder and never touches a note.
   mkdir -p "$ndir"
   # The security-triage record folder (#138), when the team has the role that writes it: up only
