@@ -224,8 +224,8 @@ echo "--- other teams' state folders (#197)"
 # quietly. A folder elsewhere is listed under other_teams, where an observer role (w1) may read its
 # log and notes, never its triage records. em, which reads its own team's log, is denied the other's.
 X=$T/xroot
-for d in $X/xa $X/xb $T/far/elsewhere; do mkdir -p $d/settings $d/launch $d/prompts; done
-mkdir -p $X/junk/notes $T/far/xc && ln -s $X/xa $X/xlink && ln -s $T/far/elsewhere $X/xlink2
+for d in $X/xa $X/xb $T/far/elsewhere $T/far/xc; do mkdir -p $d/settings $d/launch $d/prompts; done
+mkdir -p $X/junk/notes && ln -s $X/xa $X/xlink && ln -s $T/far/elsewhere $X/xlink2
 sed 's/^team: tt$/team: xa/' $T/sec.yaml > $T/xa.yaml && printf 'other_teams:\n  - { state: %s/far/xc, observers: [w1] }\n' $T >> $T/xa.yaml
 sed 's/^team: tt$/team: xb/' $T/sec.yaml > $T/xb.yaml
 xset() { TEAM_STATE_DIR=$X/$1 ruby $SRC/lib/team_config.rb $T/$1.yaml settings $2 | ruby -rjson -e 'puts((JSON.parse(STDIN.read)["permissions"] || {})[ARGV[0]] || [])' "$3"; }
