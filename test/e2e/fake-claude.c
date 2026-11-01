@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
@@ -10,6 +11,8 @@ static char buf[65536], hist[65536], head[4096], mode[64], name[256];
 static size_t blen, hlen, pstart;
 static int npaste;
 static const char *base;
+static volatile sig_atomic_t winch;
+static void onwinch(int s) { (void)s; winch = 1; }
 static void cat(const char *what) {
   char path[4096]; snprintf(path, sizeof path, "%s-%s.txt", base, what);
   FILE *f = fopen(path, "r"); int c; if (!f) return;
@@ -20,7 +23,7 @@ static int has(const char *what) {
   char path[4096]; snprintf(path, sizeof path, "%s-%s.txt", base, what);
   return access(path, R_OK) == 0;
 }
-static const char *RULE = "────────────────────────────────────────────────────────────";
+static char RULE[4096];   /* the box's plain rule, as wide as the pane (draw() fills it), as Claude Code draws it */
 /* Claude Code 2.1.316's @-mention list, captured on 2026-10-30: drawn above the box's top rule,
    each row indented two spaces in colour 246; a row picked with the arrow keys gets a ❯ in colour
    153, and only then does Enter complete the mention instead of submitting. */
@@ -65,15 +68,20 @@ static void tall(void) {
   else if (!strcmp(mode, "tall-dim")) printf(" \033[2mrun the tests\033[0m");
 }
 static void draw(void) {
+  struct winsize ws; int cols = 220, rows = 50;
+  if (ioctl(1, TIOCGWINSZ, &ws) == 0 && ws.ws_col && ws.ws_row) { cols = ws.ws_col; rows = ws.ws_row; }
+  int small = !strncmp(mode, "small", 5), notice = !strcmp(mode, "small") && cols < 110;
+  { size_t o = 0; for (int i = 0; i < cols && o + 4 < sizeof RULE; i++) o += (size_t)snprintf(RULE + o, sizeof RULE - o, "\xe2\x94\x80"); }
   printf("\033[H\033[2J%s\r\n", head);
   fwrite(hist, 1, hlen, stdout);
   if (has("prompt")) { cat("prompt"); fflush(stdout); return; }
-  cat("output");
+  if (!small || notice) cat("output");
   if (mention_open()) mention_list();
   if (name[0]) printf("────────────────────────────────────────── %s ──\r\n\xe2\x9d\xaf\xc2\xa0", name);
   else printf("%s\r\n\xe2\x9d\xaf\xc2\xa0", RULE);
-  if (!strncmp(mode, "tall", 4)) {
+  if (!strncmp(mode, "tall", 4) || small) {
     tall();
+    if ((notice && rows <= 13) || (small && blen && rows < 12)) { fflush(stdout); return; }
     printf("\r\n%s\r\n  SL line one\r\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle)\r\n", RULE);
     fflush(stdout); return;
   }
@@ -88,9 +96,10 @@ static void draw(void) {
   fflush(stdout);
 }
 /* At the end of a paste, Claude Code 2.1.316 shows a paste of more than 800 characters, or of 4 or
-   more lines, as a placeholder (measured 2026-10-30). tall-typed: text typed right after the paste. */
+   more lines, as a placeholder (measured 2026-10-30). tall-typed and small-typed: text typed right
+   after the paste. */
 static void endpaste(void) {
-  if (strncmp(mode, "tall", 4)) return;
+  if (strncmp(mode, "tall", 4) && strncmp(mode, "small", 5)) return;
   size_t len = blen - pstart; int nl = 0;
   for (size_t i = pstart; i < blen; i++) if (buf[i] == '\n') nl++;
   if (len > 800 || nl >= 3) {
@@ -98,7 +107,7 @@ static void endpaste(void) {
     blen = pstart + (size_t)(nl ? snprintf(buf + pstart, sizeof buf - pstart, "[Pasted text #%d +%d lines]", npaste, nl)
                                 : snprintf(buf + pstart, sizeof buf - pstart, "[Pasted text #%d]", npaste));
   }
-  if (!strcmp(mode, "tall-typed")) blen += (size_t)snprintf(buf + blen, sizeof buf - blen, " typed after");
+  if (!strcmp(mode, "tall-typed") || !strcmp(mode, "small-typed")) blen += (size_t)snprintf(buf + blen, sizeof buf - blen, " typed after");
 }
 int main(int n, char **v) {
   if (n == 2 && !strcmp(v[1], "--version")) { char *fv = getenv("FAKE_VERSION"); printf("%s (Claude Code)\n", fv ? fv : "9.9.9"); return 0; }
@@ -114,9 +123,16 @@ int main(int n, char **v) {
   for (int i = 1; i + 1 < n; i++) if (!strcmp(v[i], "-n")) snprintf(name, sizeof name, "%s", v[i + 1]);
   signal(SIGCHLD, SIG_IGN);                      /* ! commands are not waited for; no zombies */
   tcgetattr(0, &t); cfmakeraw(&t); tcsetattr(0, TCSANOW, &t);
+  struct sigaction sw; memset(&sw, 0, sizeof sw); sw.sa_handler = onwinch; sigaction(SIGWINCH, &sw, 0);  /* no SA_RESTART */
   printf("\033[?2004h"); draw();
   int c, esc = 0, paste = 0; char seq[8]; int sl = 0;
-  while (read(0, &c, 1) == 1) {
+  for (;;) {
+    ssize_t got = read(0, &c, 1);
+    if (got < 0 && errno == EINTR) {               /* small-slow: a busy seat, slow to redraw */
+      if (winch) { winch = 0; if (!strcmp(mode, "small-slow")) usleep(1500000); if (!paste) draw(); }
+      continue;
+    }
+    if (got != 1) break;
     unsigned char b = (unsigned char)c;
     if (kl) { fputc(b, kl); fflush(kl); }
     if (esc) {                                   /* ESC [ 2 0 0 ~ and ESC [ 2 0 1 ~ mark a paste */

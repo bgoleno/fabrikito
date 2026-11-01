@@ -82,6 +82,13 @@ printf '#!/bin/sh\necho "$TEAM_ROLE $(pwd -P) env=$(test -f .env.local && echo y
 #           mentionsel (text "sel @sr" with the list's first row highlighted: Enter completes it)
 #           cut (the screen ends at the input row: no bottom rule and no footer, as a pane too
 #           short for what is drawn above the box)
+#           small (the tall box, with the seat's output file, the diff panel notice, drawn only
+#           while the pane is under 110 columns; under it, at 13 rows or fewer, the screen ends at
+#           the input row, as #95 measured), small-clean (the tall box with no notice; under 12
+#           rows a paste grows the box past the bottom, so its rule and footer are gone, as qa2
+#           measured on #73), small-slow (small-clean that waits 1.5s before redrawing after a
+#           resize, as a busy seat might: until then the old, smaller frame stays on the screen)
+# On SIGWINCH it redraws at the new size, as Claude Code does, with its rules as wide as the pane.
 # A submitted line that starts with ! is run by /bin/sh the way Claude Code's Bash tool runs a
 # command: in a child that leaves the pane's terminal (setsid), so the child has no tty of its own
 # and only the stand-in, its parent, holds the pane's tty.
