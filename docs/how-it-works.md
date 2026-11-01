@@ -40,7 +40,9 @@ session names, unknown placeholders and invalid UTF-8 stop the command before an
 3. **Makes the team's own copy of claude.** It finds `claude` on the `PATH`, reads its version and,
    if `.state/<team>/bin/claude-<version>/claude` is missing, clones or copies the executable there
    and checks the copy. Seats run this copy, so a Claude Code update in another session does not
-   replace the file under them. See [Updating Claude Code](../README.md#updating-claude-code).
+   replace the file under them. A symlink at the copy's path is refused, naming it: the seats would
+   run whatever it points at ([#194](../../../issues/194)). See
+   [Updating Claude Code](../README.md#updating-claude-code).
 4. **Starts each role in turn,** in file order or in the order given on the command line, and stops
    at the first role it cannot start. A role whose tmux session already exists is skipped and left
    alone; if the claude file it runs was replaced under it, `up` prints an `ATTENTION` line saying
@@ -63,6 +65,10 @@ session names, unknown placeholders and invalid UTF-8 stop the command before an
      auto-memory switch), and runs the team's copy of claude, through the `wrapper` if one is set
      and present, with the role's flags, `--settings <file>`, `-n <session>`, the prompt as
      `--append-system-prompt` and the kickoff as the first message.
+
+     The settings, the prompt, the kickoff and the launch script are each removed by their exact
+     path before they are written, so a symlink a seat put at one is replaced, never written
+     through ([#194](../../../issues/194)).
    - **Starts a tmux session** named for the seat, in the seat's folder, with `TEAM_ROLE`,
      `TEAM_CONFIG` and `TEAM_SCRIPT` set, gives it its title, and types the launch script's path
      into its shell.

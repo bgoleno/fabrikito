@@ -473,6 +473,10 @@ cmd_up() {
     cfg settings "$r" >"$settings" || die "could not write $settings"
     chmod 0444 "$settings"
 
+    # The prompt, the kickoff and the launch script are removed by their exact paths too, before
+    # each is written: > follows a link at the file, so up would write wherever a link a seat put
+    # there points (#194, sec on #174). rm -f removes the link itself, never what it points at.
+    rm -f "$STATE/prompts/$r.md" "$STATE/prompts/$r.kickoff" "$STATE/launch/$r.sh"
     TEAM_SCRIPT=$SELF TEAM_LOG=$LOG cfg render "$r" >"$STATE/prompts/$r.md"
     TEAM_SCRIPT=$SELF TEAM_LOG=$LOG cfg kickoff "$r" >"$STATE/prompts/$r.kickoff"
     launch="$STATE/launch/$r.sh"
@@ -743,12 +747,21 @@ resolve_claude() {
 # original's blocks) where the state folder is on the same file system, else a plain copy. It is
 # checked before it is moved into place, so a seat never runs a partial copy. Any failure stops up:
 # falling back to the shared file would bring the problem back without a sign.
+copy_link() {
+  [ ! -L "$CLAUDE_COPY" ] || die "$CLAUDE_COPY is a symlink, not the team's copy of claude: remove that exact link, then run up again"
+}
 ensure_claude_copy() {
   local dir tmp how
+  # A link at the copy would have every seat run whatever it points at, and [ -x ] follows it, so a
+  # link is refused, before and after the move below (#194, sec on #174). Only a seat could put one
+  # there. The copy's folder is checked to be a real one by cmd_up (#174).
+  copy_link
   [ -x "$CLAUDE_COPY" ] && return 0
   dir=$(dirname "$CLAUDE_COPY")
   tmp="$dir/.claude.partial.$$"
   mkdir -p "$dir" 2>/dev/null || die "could not copy claude to $dir (cannot create the folder)"
+  # cp writes through a link at the temp name (it is predictable: the pid), so it goes first.
+  rm -f "$tmp"
   how=clone
   if ! cp -c "$CLAUDE_SRC" "$tmp" 2>/dev/null; then
     rm -f "$tmp"
@@ -766,9 +779,11 @@ ensure_claude_copy() {
   mv -n "$tmp" "$CLAUDE_COPY" || { rm -f "$tmp"; die "could not copy claude to $CLAUDE_COPY"; }
   if [ -e "$tmp" ]; then
     rm -f "$tmp"
+    copy_link
     [ -x "$CLAUDE_COPY" ] || die "$CLAUDE_COPY exists but is not a runnable copy of claude; remove that exact file, then retry up"
     return 0
   fi
+  rm -f "$dir/.how"
   echo "$how" >"$dir/.how"
   echo "  copied claude $CLAUDE_VERSION to $CLAUDE_COPY ($how)"
 }
@@ -1340,6 +1355,15 @@ cmd_say() {
   # The label is pasted on its own, before the message (deliver_one, #150).
   label="[from $from] "
   mkdir -p "$STATE"
+  # The log is appended to with >>, which follows a link (#194, sec on #174): a seat could put one at
+  # messages.log after up, and every say's line would then be written wherever it points (and a FIFO
+  # there would hang say). So say refuses before it delivers anything (fail closed), writes no line,
+  # and the note at the end says so. The check is not atomic with the append, so it is made again
+  # just before it. Anything else that cannot be appended to (a folder, a file without write
+  # permission) fails the append itself, after the delivery, as before (#128).
+  if log_unsafe && [ -z "$why" ]; then
+    why="$LOG is a symlink or a FIFO, and say does not write through one: report it to the EM (only a seat could have put it there; it is removed by its exact path)"
+  fi
   # Record before report (#128): the messages.log line is written before any terminal message.
   # The log is the record the owner and the EM go by. A write to the terminal or a pipe can fail:
   # EINTR under heavy load (#101), a closed stderr, or a reader that has gone, which kills say with
@@ -1371,8 +1395,12 @@ cmd_say() {
   # per say (all included), in the format the README documents under "The message log". $to is a
   # role id or all; $from comes from TEAM_ROLE, which nothing validates, so it is escaped too.
   # A failed append must not lose the terminal message in turn, so it is noted, not fatal, here.
-  printf '%s\t%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%dT%H:%M:%S')" "$(log_field "$from")" "$to" \
-    "$([ "$rc" -eq 0 ] && echo delivered || echo NOT-DELIVERED)" "$(log_field "$*")" >>"$LOG" || lrc=$?
+  if log_unsafe; then
+    lrc=1
+  else
+    printf '%s\t%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%dT%H:%M:%S')" "$(log_field "$from")" "$to" \
+      "$([ "$rc" -eq 0 ] && echo delivered || echo NOT-DELIVERED)" "$(log_field "$*")" >>"$LOG" || lrc=$?
+  fi
   # Read in full before writing, so that nothing is written to the terminal when nothing was held.
   [ -z "$held" ] || { out=$(cat <&8); exec 7>&- 8<&-; }
   if [ -n "$why" ]; then echo "not delivered: $why" >&2; fi
@@ -1381,10 +1409,16 @@ cmd_say() {
   # delivered message again (sec on #137).
   if [ "$lrc" != 0 ]; then
     if [ "$rc" = 0 ]; then out=delivered; elif [ "$to" = all ]; then out="not delivered to every seat"; else out="not delivered"; fi
-    echo "say: this say's record could not be written to $LOG (the message was $out)" >&2
+    echo "say: this say's record could not be written to $LOG$(log_unsafe && echo ', a symlink or a FIFO') (the message was $out)" >&2
     return 1
   fi
   return "$rc"
+}
+
+# messages.log is something say must not append to (#194): a link (to anywhere, -L tests the link
+# itself), or a FIFO, which >> would block on.
+log_unsafe() {
+  [ -L "$LOG" ] || [ -p "$LOG" ]
 }
 
 # send_one, with what it prints held for cmd_say to show after the log line (#128).
