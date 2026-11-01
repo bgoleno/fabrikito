@@ -66,26 +66,42 @@ sl=$(TEAM_STATE_DIR=$T/state6 $S -c $T/v.yaml up --no-view w7 2>&1); rc=$?
 [ $rc -ne 0 ] && echo "$sl" | grep -qF "repo.copy: srclink/secret is outside the main checkout" && [ ! -e $VOL/$ROOT/team-w7 ] &&
   ok "repo.copy refuses a source reached through a symlink that leads out of the main checkout" || { bad "repo.copy through a checkout symlink (rc=$rc)"; echo "$sl" | tail -4; }
 # The bootstrap runs without the messaging and tmux variables of a seat that runs up (sec, PR #106):
-# a seat's messaging token must not reach an install script.
-printf '#!/bin/sh\necho "token=${CLAUDE_CODE_MESSAGING_TOKEN-unset} socket=${CLAUDE_CODE_MESSAGING_SOCKET-unset} claudecode=${CLAUDECODE-unset} role=$TEAM_ROLE" >> %s/boot-env.log\n' $T > $T/bin/boot-env; chmod +x $T/bin/boot-env
+# a seat's messaging token must not reach an install script. That is every CLAUDE_CODE_MESSAGING_*
+# name (#164), so it logs the names it sees (never the values) to the file named by its argument.
+cat > $T/bin/boot-env <<'B'
+#!/bin/sh
+echo "messaging=[$(env | sed -n 's/^\(CLAUDE_CODE_MESSAGING_[^=]*\)=.*/\1/p' | LC_ALL=C sort | tr '\n' ' ')] claudecode=${CLAUDECODE-unset} role=$TEAM_ROLE" >> "$1"
+B
+chmod +x $T/bin/boot-env
 ln -s $T/outside2/secret $T/repo/linked.env && printf 'linked.env\n' >> $T/repo/.git/info/exclude
 REPO_EXTRA="copy: [linked.env]" mk "wrapper: $T/bin/wrap"; echo "  w7: { title: L, workdir: { type: worktree }, prompt_text: \"p\" }" >> $T/v.yaml
 sl=$(TEAM_STATE_DIR=$T/state6 $S -c $T/v.yaml up --no-view w7 2>&1); rc=$?
 [ $rc -ne 0 ] && echo "$sl" | grep -qF "repo.copy: linked.env is or contains a symlink" && [ ! -e $VOL/$ROOT/team-w7 ] &&
   ok "repo.copy refuses a symlink as a source (it would be copied as a link to its target)" || { bad "repo.copy of a symlink (rc=$rc)"; echo "$sl" | tail -4; }
-REPO_EXTRA="bootstrap: \"$T/bin/boot-env\"" mk "wrapper: $T/bin/wrap"; echo "  w6: { title: E, workdir: { type: worktree }, prompt_text: \"p\" }" >> $T/v.yaml
-CLAUDE_CODE_MESSAGING_TOKEN=e2e-token CLAUDE_CODE_MESSAGING_SOCKET=$T/none.sock CLAUDECODE=1 TEAM_STATE_DIR=$T/state7 $S -c $T/v.yaml up --no-view w6 >/dev/null 2>&1
-[ "$(cat $T/boot-env.log 2>/dev/null)" = "token=unset socket=unset claudecode=unset role=w6" ] && ok "repo.bootstrap runs without the seat's messaging token, socket and CLAUDECODE" || { bad "bootstrap environment"; cat $T/boot-env.log 2>&1; }
+REPO_EXTRA="bootstrap: \"$T/bin/boot-env $T/boot-env.log\"" mk "wrapper: $T/bin/wrap"; echo "  w6: { title: E, workdir: { type: worktree }, prompt_text: \"p\" }" >> $T/v.yaml
+# Besides the two known names: one a later Claude Code might add, and one that is not a shell
+# identifier (bash passes it on to its children, but cannot unset it), set through env.
+env CLAUDE_CODE_MESSAGING_TOKEN=e2e-token CLAUDE_CODE_MESSAGING_SOCKET=$T/none.sock CLAUDE_CODE_MESSAGING_X=e2e-x 'CLAUDE_CODE_MESSAGING_A-B=e2e-ab' CLAUDECODE=1 \
+  TEAM_STATE_DIR=$T/state7 $S -c $T/v.yaml up --no-view w6 >/dev/null 2>&1
+[ "$(cat $T/boot-env.log 2>/dev/null)" = "messaging=[] claudecode=unset role=w6" ] && ok "repo.bootstrap sees no CLAUDE_CODE_MESSAGING_* variable (token, socket, an unknown _X, a name bash cannot unset) and no CLAUDECODE" || { bad "bootstrap environment"; cat $T/boot-env.log 2>&1; }
 TEAM_STATE_DIR=$T/state7 $S -c $T/v.yaml down --yes w6 >/dev/null 2>&1; git -C $T/repo worktree remove --force $VOL/$ROOT/team-w6 2>/dev/null
 # An up interrupted during a hung bootstrap (tl, PR #106) stops the bootstrap and everything it
 # started, removes the new worktree and starts no seat, so the next up sets it up again.
 printf '#!/bin/sh\necho hanging-out\ntouch %s/boot-started\nsleep 60\n' $T > $T/bin/boot-hang; chmod +x $T/bin/boot-hang
+# The signal must land once the bootstrap runs. On a loaded machine up took over 10 s to get there,
+# and a TERM sent before then killed it before its trap was set (#196). So wait up to 60 s, and stop
+# waiting if up exits first.
+boot_started() { local i; for i in $(seq 1 600); do [ -e $T/boot-started ] && return 0; kill -0 $1 2>/dev/null || break; sleep 0.1; done; [ -e $T/boot-started ]; }
 REPO_EXTRA="bootstrap: \"$T/bin/boot-hang\"" mk "wrapper: $T/bin/wrap"; echo "  w5: { title: H, workdir: { type: worktree }, prompt_text: \"p\" }" >> $T/v.yaml
 TEAM_STATE_DIR=$T/state8 $S -c $T/v.yaml up --no-view w5 > $T/hang.out 2>&1 & upid=$!
-for i in $(seq 1 100); do [ -e $T/boot-started ] && break; sleep 0.1; done
-kill -TERM $upid 2>/dev/null; wait $upid; rc=$?; sleep 1
-[ -e $T/boot-started ] && [ $rc -ne 0 ] && grep -qF "    | hanging-out" $T/hang.out && grep -qF "up was interrupted while setting up" $T/hang.out && [ ! -e $VOL/$ROOT/team-w5 ] && ! git -C $T/repo worktree list | grep -q "team-w5" && ! tmux has-session -t '=tv-w5' 2>/dev/null && ! pgrep -f "$T/bin/boot-hang" >/dev/null &&
-  ok "TERM during a hung bootstrap: output shown as it ran, bootstrap stopped, new worktree removed, no seat" || { bad "TERM during bootstrap (rc=$rc)"; cat $T/hang.out; pgrep -fl "$T/bin/boot-hang"; pkill -f "$T/bin/boot-hang"; }
+if boot_started $upid; then
+  kill -TERM $upid 2>/dev/null; wait $upid; rc=$?; sleep 1
+  [ -e $T/boot-started ] && [ $rc -ne 0 ] && grep -qF "    | hanging-out" $T/hang.out && grep -qF "up was interrupted while setting up" $T/hang.out && [ ! -e $VOL/$ROOT/team-w5 ] && ! git -C $T/repo worktree list | grep -q "team-w5" && ! tmux has-session -t '=tv-w5' 2>/dev/null && ! pgrep -f "$T/bin/boot-hang" >/dev/null &&
+    ok "TERM during a hung bootstrap: output shown as it ran, bootstrap stopped, new worktree removed, no seat" || { bad "TERM during bootstrap (rc=$rc)"; cat $T/hang.out; pgrep -fl "$T/bin/boot-hang"; pkill -f "$T/bin/boot-hang"; }
+else
+  bad "TERM during a hung bootstrap: the bootstrap never started (up exited, or 60 s passed), so no TERM was sent during it"; cat $T/hang.out
+  kill -TERM $upid 2>/dev/null; wait $upid 2>/dev/null; pkill -f "$T/bin/boot-hang"
+fi
 # Whatever stopped a start, the next up must not start the seat in a half set-up worktree (tl and
 # qa2, PR #106). After the TERM above, up runs the bootstrap again (now one that finishes).
 sed -i '' "s#bootstrap: \"$T/bin/boot-hang\"#bootstrap: \"$T/bin/boot\"#" $T/v.yaml
@@ -95,7 +111,7 @@ TEAM_STATE_DIR=$T/state8 $S -c $T/v.yaml down --yes w5 >/dev/null 2>&1; git -C $
 # A KILL cannot be trapped: the worktree stays, unmarked, and the next up sets it up before the seat.
 rm -f $T/boot-started; sed -i '' "s#bootstrap: \"$T/bin/boot\"#bootstrap: \"$T/bin/boot-hang\"#" $T/v.yaml
 TEAM_STATE_DIR=$T/state8 $S -c $T/v.yaml up --no-view w5 > $T/hang2.out 2>&1 & upid=$!
-for i in $(seq 1 100); do [ -e $T/boot-started ] && break; sleep 0.1; done
+boot_started $upid || { bad "KILL mid-bootstrap: the bootstrap never started (up exited, or 60 s passed), so the KILL below is not during it"; cat $T/hang2.out; }
 kill -KILL $upid 2>/dev/null; wait $upid 2>/dev/null; pkill -f "$T/bin/boot-hang" 2>/dev/null; sleep 1
 sed -i '' "s#bootstrap: \"$T/bin/boot-hang\"#bootstrap: \"$T/bin/boot\"#" $T/v.yaml
 nx=$(TEAM_STATE_DIR=$T/state8 $S -c $T/v.yaml up --no-view w5 2>&1); rc=$?

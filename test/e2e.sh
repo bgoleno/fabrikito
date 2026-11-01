@@ -44,9 +44,15 @@ trap on_exit EXIT
 trap 'exit 143' TERM INT
 # Every name is kept, so the run can check, after the last assertion, that no two assertions print the
 # same name (#163): a diff of the PASS lines of two runs could not tell them apart.
+# An empty or whitespace-only name is a failure of its own (#169), reported at the file and line of the
+# ok or bad call (BASH_SOURCE and BASH_LINENO, one level up). It is not kept: the check after the last
+# assertion would miss an empty one anyway, as $(...) drops the empty line uniq -d prints.
+# ok and bad still return 0, so "cond && ok x || bad x" never runs both.
 pass=0; fail=0; e2e_names=
-ok(){ echo "PASS $1"; pass=$((pass+1)); e2e_names="$e2e_names$1"$'\n'; }
-bad(){ echo "FAIL $1"; fail=$((fail+1)); e2e_names="$e2e_names$1"$'\n'; }
+e2e_blank(){ case $1 in *[![:space:]]*) return 1 ;; esac
+  echo "FAIL an assertion at ${BASH_SOURCE[2]#"$SRC"/}:${BASH_LINENO[1]} has an empty name: give it one"; fail=$((fail+1)); }
+ok(){ echo "PASS $1"; pass=$((pass+1)); e2e_blank "$1" || e2e_names="$e2e_names$1"$'\n'; }
+bad(){ echo "FAIL $1"; fail=$((fail+1)); e2e_blank "$1" || e2e_names="$e2e_names$1"$'\n'; }
 # The area files (#70) are sourced in the order of AREAS, in this shell, so they share the setup above,
 # the count and the exit trap. Each holds a run of sections and relies on the state the areas before it
 # leave. A file not listed here would never run, and sourcing a file with a syntax error runs part of it
