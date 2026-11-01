@@ -80,12 +80,20 @@ TEAM_STATE_DIR=$T/state7 $S -c $T/v.yaml down --yes w6 >/dev/null 2>&1; git -C $
 # An up interrupted during a hung bootstrap (tl, PR #106) stops the bootstrap and everything it
 # started, removes the new worktree and starts no seat, so the next up sets it up again.
 printf '#!/bin/sh\necho hanging-out\ntouch %s/boot-started\nsleep 60\n' $T > $T/bin/boot-hang; chmod +x $T/bin/boot-hang
+# The signal must land once the bootstrap runs. On a loaded machine up took over 10 s to get there,
+# and a TERM sent before then killed it before its trap was set (#196). So wait up to 60 s, and stop
+# waiting if up exits first.
+boot_started() { local i; for i in $(seq 1 600); do [ -e $T/boot-started ] && return 0; kill -0 $1 2>/dev/null || break; sleep 0.1; done; [ -e $T/boot-started ]; }
 REPO_EXTRA="bootstrap: \"$T/bin/boot-hang\"" mk "wrapper: $T/bin/wrap"; echo "  w5: { title: H, workdir: { type: worktree }, prompt_text: \"p\" }" >> $T/v.yaml
 TEAM_STATE_DIR=$T/state8 $S -c $T/v.yaml up --no-view w5 > $T/hang.out 2>&1 & upid=$!
-for i in $(seq 1 100); do [ -e $T/boot-started ] && break; sleep 0.1; done
-kill -TERM $upid 2>/dev/null; wait $upid; rc=$?; sleep 1
-[ -e $T/boot-started ] && [ $rc -ne 0 ] && grep -qF "    | hanging-out" $T/hang.out && grep -qF "up was interrupted while setting up" $T/hang.out && [ ! -e $VOL/$ROOT/team-w5 ] && ! git -C $T/repo worktree list | grep -q "team-w5" && ! tmux has-session -t '=tv-w5' 2>/dev/null && ! pgrep -f "$T/bin/boot-hang" >/dev/null &&
-  ok "TERM during a hung bootstrap: output shown as it ran, bootstrap stopped, new worktree removed, no seat" || { bad "TERM during bootstrap (rc=$rc)"; cat $T/hang.out; pgrep -fl "$T/bin/boot-hang"; pkill -f "$T/bin/boot-hang"; }
+if boot_started $upid; then
+  kill -TERM $upid 2>/dev/null; wait $upid; rc=$?; sleep 1
+  [ -e $T/boot-started ] && [ $rc -ne 0 ] && grep -qF "    | hanging-out" $T/hang.out && grep -qF "up was interrupted while setting up" $T/hang.out && [ ! -e $VOL/$ROOT/team-w5 ] && ! git -C $T/repo worktree list | grep -q "team-w5" && ! tmux has-session -t '=tv-w5' 2>/dev/null && ! pgrep -f "$T/bin/boot-hang" >/dev/null &&
+    ok "TERM during a hung bootstrap: output shown as it ran, bootstrap stopped, new worktree removed, no seat" || { bad "TERM during bootstrap (rc=$rc)"; cat $T/hang.out; pgrep -fl "$T/bin/boot-hang"; pkill -f "$T/bin/boot-hang"; }
+else
+  bad "TERM during a hung bootstrap: the bootstrap never started (up exited, or 60 s passed), so no TERM was sent during it"; cat $T/hang.out
+  kill -TERM $upid 2>/dev/null; wait $upid 2>/dev/null; pkill -f "$T/bin/boot-hang"
+fi
 # Whatever stopped a start, the next up must not start the seat in a half set-up worktree (tl and
 # qa2, PR #106). After the TERM above, up runs the bootstrap again (now one that finishes).
 sed -i '' "s#bootstrap: \"$T/bin/boot-hang\"#bootstrap: \"$T/bin/boot\"#" $T/v.yaml
@@ -95,7 +103,7 @@ TEAM_STATE_DIR=$T/state8 $S -c $T/v.yaml down --yes w5 >/dev/null 2>&1; git -C $
 # A KILL cannot be trapped: the worktree stays, unmarked, and the next up sets it up before the seat.
 rm -f $T/boot-started; sed -i '' "s#bootstrap: \"$T/bin/boot\"#bootstrap: \"$T/bin/boot-hang\"#" $T/v.yaml
 TEAM_STATE_DIR=$T/state8 $S -c $T/v.yaml up --no-view w5 > $T/hang2.out 2>&1 & upid=$!
-for i in $(seq 1 100); do [ -e $T/boot-started ] && break; sleep 0.1; done
+boot_started $upid || { bad "KILL mid-bootstrap: the bootstrap never started (up exited, or 60 s passed), so the KILL below is not during it"; cat $T/hang2.out; }
 kill -KILL $upid 2>/dev/null; wait $upid 2>/dev/null; pkill -f "$T/bin/boot-hang" 2>/dev/null; sleep 1
 sed -i '' "s#bootstrap: \"$T/bin/boot-hang\"#bootstrap: \"$T/bin/boot\"#" $T/v.yaml
 nx=$(TEAM_STATE_DIR=$T/state8 $S -c $T/v.yaml up --no-view w5 2>&1); rc=$?
