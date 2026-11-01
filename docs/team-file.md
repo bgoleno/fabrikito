@@ -54,7 +54,9 @@ command ([docs](https://code.claude.com/docs/en/worktrees)):
   `npm ci` or `uv sync`. Its output is shown, indented, as it runs. It runs without the messaging and
   tmux variables of a seat that runs `up` (`CLAUDE_CODE_MESSAGING_SOCKET`,
   `CLAUDE_CODE_MESSAGING_TOKEN`, `CLAUDECODE`, `TMUX`, `TMUX_PANE`), so a seat's messaging token does
-  not reach an install script. There is no time limit. If it fails, or `up` is interrupted meanwhile
+  not reach an install script. Every other variable of the shell that runs `up` does reach it, and an
+  install command runs third-party scripts (package install hooks, for example) with them. There is no
+  time limit. If it fails, or `up` is interrupted meanwhile
   (Ctrl-C, TERM, HUP), `up` stops the bootstrap and stops before starting the seat; a worktree it has
   just made is removed (by that exact path), so the next `up` starts over.
 
