@@ -95,11 +95,24 @@ static void draw(void) {
   printf("  SL line one\r\n  \xe2\x8f\xb5\xe2\x8f\xb5 bypass permissions on (shift+tab to cycle)\r\n");
   fflush(stdout);
 }
+/* Whether the paste that just ended is a message's label alone, "[from <x>] ", which say pastes on
+   its own before the message (#150). */
+static int labelpaste(void) {
+  size_t len = blen - pstart;
+  if (len < 9 || strncmp(buf + pstart, "[from ", 6) || buf[blen - 2] != ']' || buf[blen - 1] != ' ') return 0;
+  return memchr(buf + pstart + 6, ']', len - 8) == 0;
+}
 /* At the end of a paste, Claude Code 2.1.316 shows a paste of more than 800 characters, or of 4 or
    more lines, as a placeholder (measured 2026-10-30). tall-typed and small-typed: text typed right
-   after the paste. */
+   after the message (after its body, not between its label and its body). tall-nolabel: a label
+   paste never reaches the box. tall-otherlabel: it reaches it as another role's label. */
 static void endpaste(void) {
   if (strncmp(mode, "tall", 4) && strncmp(mode, "small", 5)) return;
+  if (labelpaste()) {
+    if (!strcmp(mode, "tall-nolabel")) blen = pstart;
+    if (!strcmp(mode, "tall-otherlabel")) blen = pstart + (size_t)snprintf(buf + pstart, sizeof buf - pstart, "[from xx] ");
+    return;
+  }
   size_t len = blen - pstart; int nl = 0;
   for (size_t i = pstart; i < blen; i++) if (buf[i] == '\n') nl++;
   if (len > 800 || nl >= 3) {
