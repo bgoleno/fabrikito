@@ -869,31 +869,148 @@ box_full_rows() {
 }
 
 # Whether box state $2 of seat $1 shows just message $3, after its paste: text with nothing drawn
-# dim, such as a suggestion left next to it, that starts with the message's "[from <role>]" (or is
-# the placeholder Claude Code shows for a long paste), or else shows the message's end in a full,
-# scrolled box. For the end: the visible text, all whitespace removed, is a suffix of the message,
-# likewise, of at least 40 characters (whitespace is where they may differ: the box wraps at spaces
-# and box_state joins rows with one), and the box shows as many rows as it can. A box only scrolls
-# once full, so a shorter box that does not start with the label holds something else. Text before
-# the message would show at the top and text after it at the end, so neither passes, except one gap:
+# dim, such as a suggestion left next to it, that is the whole message, or the placeholder Claude
+# Code shows for a long paste and nothing else, or else shows the message's end in a full, scrolled
+# box. Whitespace is where the box and the message may differ (the box wraps at spaces and
+# box_state joins rows with one), so both are compared with all of it removed. Whole: the visible
+# text is the message. It is not enough that it starts with the message's "[from <role>]": text
+# typed after the message would go out with it, and a box that scrolled in a small pane is whole
+# again once grown (tl on #132).
+# Placeholder: "[Pasted text #N]" or "[Pasted text #N +K lines]" as the whole box, so text typed
+# after it, or a second paste, does not pass either (tl on #132).
+# End: the visible text is a suffix of the message of at least 40 characters, and the box shows as
+# many rows as it can. A box only scrolls once full, so a shorter box that is not the whole message
+# holds something else. Text before the message would show at the top and text after it at the end,
+# so neither passes, except one gap:
 # a draft typed in the moment between the empty-box check and the paste, scrolled out of view by a
-# tall message, would go out with it (the README says so).
+# tall message, would go out with it (the README says so). When the box does not show just the
+# message, it prints why, so the refusal names the real cause (#84).
 box_has_message() {
-  local state dim rows vis full m v
+  local state dim rows vis full m v ph
   IFS='	' read -r state dim rows vis <<EOF
 $2
 EOF
-  [ "$state" = text ] && [ "$dim" = 0 ] || return 1
-  case $vis in "${3%%]*}]"* | "[Pasted text #"*) return 0 ;; esac
-  full=$(box_full_rows "$1") && [ "$rows" = "$full" ] || return 1
+  case $state in
+    text) ;;
+    empty) echo "the box is empty after the paste (the paste did not reach it)"; return 1 ;;
+    unknown) echo "the screen no longer ends with the input box (a dialog came up, or the message grew the box past the bottom of the pane)"; return 1 ;;
+    *) box_refusal "$1" "$2"; return 1 ;;
+  esac
+  [ "$dim" = 0 ] || { echo "dim text was drawn next to the message (a hint or suggestion from Claude Code)"; return 1; }
   m=$(printf '%s' "$3" | LC_ALL=C tr -d '[:space:]'); v=$(printf '%s' "$vis" | LC_ALL=C tr -d '[:space:]')
-  [ "${#v}" -ge 40 ] && [ "${m%"$v"}" != "$m" ]
+  [ "$v" != "$m" ] || return 0
+  ph='^\[Pastedtext#[0-9]+(\+[0-9]+lines?)?\]$'
+  if [[ $v =~ $ph ]]; then return 0; fi
+  full=$(box_full_rows "$1") || { echo "could not read the height of $1's pane"; return 1; }
+  [ "$rows" = "$full" ] || { echo "the box shows $rows of its $full rows and not just the message, so it holds something else"; return 1; }
+  [ "${#v}" -ge 40 ] || { echo "only ${#v} characters of the message's end are visible (short last lines in a narrow pane), under the 40 say needs to recognise it"; return 1; }
+  [ "${m%"$v"}" != "$m" ] || { echo "the box does not end with the message: other text is in it"; return 1; }
 }
+
+# Short panes (#84). The team view gives seats panes as small as 89x13 (10 seats) or 10 to 11 rows
+# (12 seats). Under 110 columns, a seat whose diff panel is open draws a notice above its input
+# box, and at 13 rows or fewer that pushes the box off the screen; under 12 rows a paste grows the
+# box past the bottom (both measured on 2.1.316, #95 and #73). Most messages still fit (qa on #132),
+# so say runs its checks at the pane's own size first. Only when one refuses in a window under
+# 110x12 does it grow the window to at least 220x50, the size seats run at detached, where every
+# check here was measured and verified live (the diff panel docks beside the transcript, no notice),
+# run that same check again, and at the end put back exactly the size and window-size option it
+# found (tl on #132). While grown, the owner's view of that seat shows a clipped part of the bigger
+# window, for about a second, so a seat whose checks pass is never grown. A window at 110x12 or
+# more is never touched.
+SAY_MIN_COLS=110 SAY_MIN_ROWS=12 SAY_COLS=220 SAY_ROWS=50
+GROWN_WIN="" GROWN_W="" GROWN_H="" GROWN_OPT="" LOCK_WHY=""
+
+# Grows seat $1's window if it is under SAY_MIN_COLS x SAY_MIN_ROWS and not grown yet, recording
+# what to put back, and waits for Claude Code to redraw at the new size. True only when it grew the
+# window now, so the caller knows a check is worth running again. The traps put it back on every
+# exit but SIGKILL; the README names the recovery for that. Bash runs a trap once the command it is
+# waiting for returns, and every tmux call here returns at once.
+grow_window() {
+  local win w h opt i
+  [ -z "$GROWN_WIN" ] || return 1
+  # The window by its id, not =<session>:, which is whichever window is current when it is put
+  # back (tl on #132).
+  IFS=' x' read -r win w h <<EOF
+$(tmux display-message -p -t "=$(session "$1"):" '#{window_id} #{window_width}x#{window_height}' 2>/dev/null)
+EOF
+  case "$w$h" in '' | *[!0-9]*) return 1 ;; esac
+  case $win in @*) ;; *) return 1 ;; esac
+  [ "$w" -lt "$SAY_MIN_COLS" ] || [ "$h" -lt "$SAY_MIN_ROWS" ] || return 1
+  # The window's own window-size (empty: unset, so the global one applies). resize-window sets it
+  # to manual, so it is put back as found, not unset.
+  opt=$(tmux show-options -w -v -t "$win" window-size 2>/dev/null) || opt=""
+  GROWN_WIN=$win GROWN_W=$w GROWN_H=$h GROWN_OPT=$opt
+  trap 'shrink_window' EXIT
+  trap 'shrink_window; exit 129' HUP
+  trap 'shrink_window; exit 130' INT
+  trap 'shrink_window; exit 143' TERM
+  [ "$w" -ge "$SAY_COLS" ] || w=$SAY_COLS
+  [ "$h" -ge "$SAY_ROWS" ] || h=$SAY_ROWS
+  tmux resize-window -t "$win" -x "$w" -y "$h" 2>/dev/null || return 1
+  # Claude Code redraws on SIGWINCH. Until it has, the screen is the old frame, drawn small, which
+  # can read as an empty box (tl on #132), so the wait ends only when the box's bottom rule, the
+  # last plain rule on the screen, is as wide as the grown window (Claude Code draws it across the
+  # pane), or after about 3 seconds. The last one, because growing a pane can bring older, wider
+  # lines back into view above the current frame. The check run again decides either way.
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+    sleep 0.2 9>&-
+    tmux capture-pane -p -t "$win" 2>/dev/null | LC_ALL=C awk -v w="$w" '
+      { sub(/[ \t]+$/, "") } /^(\342\224\200)+$/ { last = length($0) } END { exit last != 3 * w }' && break
+  done
+  return 0
+}
+
+# Puts back what grow_window changed, if anything: the size first (resize-window sets the window's
+# window-size to manual), then window-size as it was, set or unset.
+# Each tmux call may fail (the window may be gone) without stopping the rest: set -e applies inside
+# trap actions too (tl on #132).
+shrink_window() {
+  [ -n "$GROWN_WIN" ] || return 0
+  tmux resize-window -t "$GROWN_WIN" -x "$GROWN_W" -y "$GROWN_H" 2>/dev/null || true
+  if [ -n "$GROWN_OPT" ]; then
+    tmux set-option -w -t "$GROWN_WIN" window-size "$GROWN_OPT" 2>/dev/null || true
+  else
+    tmux set-option -w -u -t "$GROWN_WIN" window-size 2>/dev/null || true
+  fi
+  GROWN_WIN=""
+  trap - EXIT HUP INT TERM
+}
+
+# One say at a time types into a seat (#84): two pastes would mix in one box, and one say's
+# shrink_window could land in the middle of another's delivery. The lock is an flock on
+# <state>/say/<role>.lock, held through file descriptor 9 of this shell (macOS has no flock(1), so
+# perl takes it on the inherited descriptor). The kernel releases it when this shell exits, however
+# it ends, SIGKILL included, so a dead holder leaves no lock behind; the children here close 9 or
+# end at once. Waits up to 8 seconds, then refuses: sets LOCK_WHY and returns 1. It must run in
+# the calling shell, never in $(...), or the descriptor and the lock would go with the subshell.
+# The path must be a plain file or not there yet (sec on #132): something else could be put there,
+# and opening a FIFO to append blocks with no limit. It is opened read-write, which does not block
+# even on a FIFO swapped in after the check; flock then fails there, and the wait runs out.
+seat_lock() {
+  local f="$STATE/say/$1.lock" rc
+  if [ -L "$f" ] || { [ -e "$f" ] && [ ! -f "$f" ]; }; then
+    LOCK_WHY="$f is not a regular file: remove it"
+    return 1
+  fi
+  mkdir -p "$STATE/say" 2>/dev/null && exec 9<>"$f" || { LOCK_WHY="could not open $f"; return 1; }
+  rc=0
+  perl -MFcntl=:flock -e 'open(my $f, "+<&=", 9) or exit 70; for (1 .. 80) { exit 0 if flock($f, LOCK_EX | LOCK_NB); select(undef, undef, undef, 0.1) } exit 75' || rc=$?
+  [ "$rc" = 0 ] && return 0
+  exec 9>&-
+  if [ "$rc" = 75 ]; then
+    LOCK_WHY="another say is typing into $1 and did not finish within 8 seconds; try again"
+  else
+    LOCK_WHY="could not take the lock on $f (perl exited $rc)"
+  fi
+  return 1
+}
+seat_unlock() { exec 9>&-; }
 
 # Deliver one message by bracketed paste (safe for multi-line text), then Enter. If the seat is
 # mid-turn the text queues in its input box and is submitted by the Enter all the same.
 send_one() {
-  local to=$1 text=$2 sess buf st why
+  local to=$1 text=$2 sess rc
   sess=$(session "$to")
   if ! alive "$to"; then
     echo "not delivered: $to is down ($sess)" >&2
@@ -905,7 +1022,32 @@ send_one() {
     echo "not delivered: $to has no claude process running (its pane is at a shell)" >&2
     return 1
   fi
-  why=$(box_refusal "$to" "$(box_state "$to")")
+  if ! seat_lock "$to"; then
+    echo "not delivered: $LOCK_WHY" >&2
+    return 1
+  fi
+  deliver_one "$to" "$text" "$sess"; rc=$?
+  shrink_window
+  seat_unlock
+  return "$rc"
+}
+
+# Whether a check that refused on box state $1 may pass in a bigger window: not when someone is
+# scrolling the pane or tmux cannot read it, where growing would only flash the owner's view.
+size_may_matter() {
+  case ${1%%	*} in copy-mode | unreadable) return 1 ;; esac
+}
+
+# The checks, the paste and the Enter, for send_one, which holds the seat's lock. A check that
+# refuses in a small window grows it (grow_window, at most once per say) and runs again; only its
+# second answer counts, and send_one puts the window back (#84, tl on #132). In #84's own case the
+# box is whole before the paste and it is the check after the paste that refuses.
+deliver_one() {
+  local to=$1 text=$2 sess=$3 buf st why ok
+  st=$(box_state "$to"); why=$(box_refusal "$to" "$st")
+  if [ -n "$why" ] && size_may_matter "$st" && grow_window "$to"; then
+    st=$(box_state "$to"); why=$(box_refusal "$to" "$st")
+  fi
   if [ -n "$why" ]; then
     echo "not delivered: $why" >&2
     return 1
@@ -913,14 +1055,18 @@ send_one() {
   buf="team-$$-$to"
   printf '%s' "$text" | tmux load-buffer -b "$buf" -
   tmux paste-buffer -p -d -b "$buf" -t "=$sess:"
-  sleep 0.5
+  sleep 0.5 9>&-
   # Enter only when the box now holds just this message (box_has_message), so the Enter can only
-  # submit the message. Otherwise a dialog came up, or the paste went nowhere. Still open: a dialog that appears between the first check and
-  # the paste (the paste then lands in it; this check sees no box and sends no Enter), and one
-  # that appears after this check, before the Enter.
-  st=$(box_state "$to")
-  if ! box_has_message "$to" "$st" "$text"; then
-    why=$(box_refusal "$to" "$st")
+  # submit the message. Otherwise a dialog came up, or the paste went nowhere. Still open: a dialog
+  # that appears between the first check and the paste (the paste then lands in it; this check sees
+  # no box and sends no Enter), and one that appears after this check, before the Enter. When this
+  # check refuses in a small window, the text is already in the box: the window is grown and the
+  # check runs again on the screen as redrawn, and only a pass there sends the Enter.
+  st=$(box_state "$to"); ok=1; why=$(box_has_message "$to" "$st" "$text") || ok=0
+  if [ "$ok" = 0 ] && size_may_matter "$st" && grow_window "$to"; then
+    st=$(box_state "$to"); ok=1; why=$(box_has_message "$to" "$st" "$text") || ok=0
+  fi
+  if [ "$ok" = 0 ]; then
     echo "not delivered: the input box of $to does not show the message after the paste${why:+ ($why)}; text left in input box: it goes out with the next Enter" >&2
     return 1
   fi
