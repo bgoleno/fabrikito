@@ -575,10 +575,11 @@ class TeamConfig
   # Neither may be, hold or sit inside this team's own state folder (real paths), nor this team's own
   # work: an Edit deny there would stop the seats working. A listed folder that does not exist yet
   # passes the state-folder test below, so this one must also catch a future worktree (qa on #200).
-  # macOS disks are normally case-insensitive and File.realpath keeps the case as typed, so paths
-  # compare in lower case there (tl on #200); erring this way refuses more.
+  # macOS disks are normally case-insensitive and normalization-insensitive, and File.realpath keeps
+  # the path as typed, so paths compare in NFC lower case there (tl and sec on #200); erring this way
+  # refuses more.
   def path_overlap?(a, b)
-    fold = RUBY_PLATFORM.include?('darwin') ? ->(x) { x.downcase } : ->(x) { x }
+    fold = RUBY_PLATFORM.include?('darwin') ? ->(x) { x.unicode_normalize(:nfc).downcase } : ->(x) { x }
     x = fold.call(real_path(a))
     y = fold.call(real_path(b))
     within = ->(i, o) { i == o || i.start_with?(o.end_with?('/') ? o : "#{o}/") }

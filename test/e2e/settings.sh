@@ -266,6 +266,10 @@ reject "other_teams: a folder inside this team's state" "other_teams: $T/state/s
 reject "other_teams: an observer that is not a role" "other_teams: observer nope of $T/far/xc is not a role of this team" "" "other_teams: [{ state: $T/far/xc, observers: [nope] }]"
 reject "other_teams: an unknown key" "unknown key(s) under 'other_teams' entry 1: bogus (allowed: state, observers)" "" "other_teams: [{ state: $T/far/xc, bogus: 1 }]"
 reject "other_teams: not a list" "other_teams must be a list of { state, observers } entries" "" "other_teams: $T/far/xc"
+# A miscased spelling of this team's own state folder is refused on a case-insensitive disk (sec on #200).
+if [ -d "$(dirname $T/state)/STATE" ]; then
+  reject "other_teams: this team's own state folder, miscased" "other_teams: $T/STATE is this team's own state folder, holds it or sits inside it" "" "other_teams: [{ state: $T/STATE }]"
+else ok "other_teams: miscased own state folder (case-sensitive disk: the spellings are different folders)"; fi
 # A listed folder that exists must be a team's state folder (tl on #200): home, the repo or a state
 # root one level too high would deny this team's own work or protect nothing. A missing one is noted.
 reject "other_teams: the home folder" "other_teams: $HOME is or holds the home folder" "" "other_teams: [{ state: \"~\" }]"
