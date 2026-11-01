@@ -8,7 +8,7 @@ the mechanism and has the exact rules.
 ### `up` stops: "storage volume ... is not mounted"
 
 The launcher never puts a worktree on another disk. Mount the volume named in `storage.volume`, then
-run `up` again. See [The team file](../README.md#the-team-file).
+run `up` again. See [The team file](team-file.md).
 
 ### `up` stops: "refusing to start seats for ... on the default tmux server"
 
@@ -60,13 +60,13 @@ either way. See [The iTerm view](../README.md#the-iterm-view).
 A seat started from tmux has no responsible app, so macOS does not give it the privacy grants your
 terminal has. Set `sessions.claude.wrapper` to a program that holds the grants and runs claude. A
 shell function in `~/.zshrc` does not help: the seat's launch script runs under bash. See
-[The team file](../README.md#the-team-file).
+[The team file](team-file.md).
 
 ### Every worktree gets a full copy of its packages
 
 Tools that hard-link from a shared store (pnpm, uv) can link only within one volume. With the store on
 the internal disk and the worktrees on another volume, each worktree gets full copies. Point the store
-at the worktree volume from `repo.bootstrap`. See [New worktrees](../README.md#new-worktrees).
+at the worktree volume from `repo.bootstrap`. See [Package stores](team-file.md#package-stores).
 
 ## Running seats
 
