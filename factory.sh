@@ -277,10 +277,17 @@ bootstrap_worktree() {
     # bootstrap never ends), and so a Ctrl-C reaches up, not the install. sed -l passes each line
     # on as it comes. It runs without the messaging and tmux variables of a seat that runs up: a
     # seat's messaging token must not reach an install script (sec, PR #106).
+    # The messaging ones are every name that starts with CLAUDE_CODE_MESSAGING_ (#164, agreed with tl),
+    # so one a later Claude Code adds is dropped too. They are dropped with env -u, not unset: bash
+    # lists an inherited name that is not a shell identifier in ${!prefix@} and passes it on to its
+    # children, but cannot unset it. Not an env -i allowlist: docs/team-file.md promises the bootstrap
+    # every other variable, and installs rely on the user's (proxies, SSH_AUTH_SOCK, tool paths).
+    local v; local -a drop=()
+    for v in "${!CLAUDE_CODE_MESSAGING_@}"; do drop+=(-u "$v"); done # quoted: a name may hold a space or *
     set -m
     (
       set +e
-      (cd "$dir" && exec env -u CLAUDE_CODE_MESSAGING_SOCKET -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDECODE \
+      (cd "$dir" && exec env ${drop[@]+"${drop[@]}"} -u CLAUDECODE \
         -u TMUX -u TMUX_PANE TEAM_ROLE="$id" TEAM_REPO="$REPO" bash -c "$BOOTSTRAP") </dev/null 2>&1 | sed -l 's/^/    | /'
       exit "${PIPESTATUS[0]}"
     ) &
