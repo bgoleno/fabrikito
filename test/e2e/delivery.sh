@@ -219,11 +219,19 @@ k=$(wc -c < $T/keys-ta.log)
 tall ta ok "$(msg 900)" "a 900-character line (a placeholder with no line count) with its label"
 label_first ta "$k" "[from em] " "the label of the 900-character line is pasted on its own"
 lastsub ta | grep -qE '^❯ \[from em\] \[Pasted text #[0-9]+\]$' && ok "the seat receives the label, then the one-line placeholder" || { bad "label before the one-line placeholder"; lastsub ta; }
-# [from owner] (TEAM_ROLE unset, outside every seat) and [from live-test] go in the same way.
+# [from owner] (TEAM_ROLE unset, outside every seat) and [from live-test] go in the same way. The
+# owner's say runs in a pane of the test's own server that is not a seat (say-sender.sh says why: this
+# test may itself run inside a seat, where TEAM_ROLE unset is refused).
+printf '%s' "$m4" > $T/m4.txt
 for who in owner live-test; do
   k=$(wc -c < $T/keys-ta.log)
-  if [ $who = owner ]; then env -u TEAM_ROLE $S -c $T/tp.yaml say ta "$m4" >$T/tall.out 2>&1; else TEAM_ROLE=live-test $S -c $T/tp.yaml say ta "$m4" >$T/tall.out 2>&1; fi
-  rc=$?; sleep 1
+  if [ $who = owner ]; then
+    rm -f $T/owner.rc
+    tmux new-session -d -s ownerpane "env -u TEAM_ROLE $S -c $T/tp.yaml say ta \"\$(cat $T/m4.txt)\" >$T/tall.out 2>&1; echo \$? > $T/owner.rc; sleep 30"
+    for i in $(seq 1 80); do [ -s $T/owner.rc ] && break; sleep 0.25; done; tmux kill-session -t '=ownerpane' 2>/dev/null
+    rc=$(cat $T/owner.rc 2>/dev/null || echo none)
+  else TEAM_ROLE=live-test $S -c $T/tp.yaml say ta "$m4" >$T/tall.out 2>&1; rc=$?; fi
+  sleep 1
   [ $rc = 0 ] && lastsub ta | grep -qE "^❯ \[from $who\] \[Pasted text #[0-9]+ \+3 lines\]$" && ok "say delivers a 4-line message as [from $who]" || { bad "say as $who (rc=$rc)"; cat $T/tall.out; lastsub ta; }
   label_first ta "$k" "[from $who] " "the [from $who] label is pasted on its own too"
 done
