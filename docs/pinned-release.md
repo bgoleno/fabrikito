@@ -70,11 +70,13 @@ From then on, run every command for this team with that checkout's `factory.sh` 
 
 A seat protects only the checkout it runs from. A release checkout is a worktree of your main checkout,
 so another team on this machine, one working on software-factory above all, could edit it, or remove
-or prune it with git, and change the code the pinned team runs at its next start. Add a deny for the
-releases folder to every other team file's `permissions`. For a releases folder at `/path/to/releases`,
-that is `deny: ["Edit(//path/to/releases/**)"]` (an absolute path takes `//` in a rule). Like the other
-rules, it is an accident guard: a shell command that writes there another way is not stopped. Or keep
-`<releases>` where those teams never work.
+or prune it with git, and change the code the pinned team runs at its next start. The same goes for
+the shared `<state>` folder, which holds the pinned team's notes, log and records. Add a deny for both
+folders to every other team file's `permissions`. For a releases folder at `/path/to/releases` and a
+state folder at `/path/to/state`, that is
+`deny: ["Edit(//path/to/releases/**)", "Edit(//path/to/state/**)"]` (an absolute path takes `//` in a
+rule). Like the other rules, it is an accident guard: a shell command that writes there another way is
+not stopped. Or keep both folders where those teams never work.
 
 ## Move an existing team to a release (once)
 
