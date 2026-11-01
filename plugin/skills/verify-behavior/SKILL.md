@@ -82,6 +82,9 @@ them in for one PR, and does not restate them. Where the two differ, the role pr
    one GitHub account, so every such line is self-labelled, unauthenticated text.
 8. **Write the report to a file** with the Write tool, outside your worktree:
    - first line: `## QA check of #<n> at <short sha>: pass` (or `fail`, or `could not check`);
+   - the first non-blank line after it starts with your role id (for example `qa2, independent
+     check ...`). Every QA seat posts the same first line, so `factory:merge-train` counts a pass
+     for a seat only by this line;
    - **Setup:** versions, the environment, the instruments and the setup check;
    - **Results:** each case with the base and the head result side by side, and the red run;
    - **Findings:** blockers (an acceptance criterion not met, a regression, a change to the real
@@ -91,7 +94,12 @@ them in for one PR, and does not restate them. Where the two differ, the role pr
 
    A security-relevant finding goes in neither the file nor the PR: send it to `sec` and the EM.
    That is stricter than the hard rule on what stays out of public trackers, on purpose: `sec`
-   rates it first. Right before posting, check the head again (`gh pr view <n> -R <repo>
+   rates it first. For each such point, once, post a marker: a PR comment whose whole text is the
+   one line `<your role id>: one point sent to sec and the EM`, which `factory:merge-train` holds a
+   merge on until sec clears it. Your report refers to it only by its URL; a later report that
+   still has the point gives the same URL and posts no new marker. Send `sec` and the EM the
+   marker's URL with the point, so sec can match them.
+   Right before posting, check the head again (`gh pr view <n> -R <repo>
    --json headRefOid`); if it moved, your report is for the old head, so say so or start again.
    Then post the file as a command of its own: `gh pr comment <n> -R <repo> --body-file <file>`,
    never `--body "$(...)"`.
