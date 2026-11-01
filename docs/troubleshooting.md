@@ -94,7 +94,7 @@ the volume. A worktree seat should stop and tell the EM rather than work elsewhe
 
 With `disableAllHooks: true` in `~/.claude/settings.json`, seats without a gate get no session-start
 hook, so no note and no message logging. `check` prints a `hooks` line naming them. See
-[Progress notes](../README.md#progress-notes).
+[Progress notes](workflow.md#progress-notes).
 
 ### A seat keeps being sent back by the gate
 
