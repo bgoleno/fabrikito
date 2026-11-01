@@ -1,6 +1,6 @@
 # Sourced by test/e2e.sh, in its shell and in the order of AREAS there (#70); not run alone.
 # The generated settings files: merged rules, protected paths, auto memory, the seats' claude copy, notes;
-# the security-triage record folder (#138).
+# the security-triage record folder (#138); the auto-updater off in every seat and nowhere else.
 # Uses the running seats. Restarts em.
 echo "--- generated settings"
 # The user's rules, in team-then-role order, without duplicates. Rules the launcher adds itself
