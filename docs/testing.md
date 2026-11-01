@@ -42,10 +42,11 @@ in silence.
 ### What it covers
 
 Each area file says what it covers in the comment at its top, under the line that says it is sourced
-by `test/e2e.sh`. Those comments are the list, kept next to the cases they describe. To read them all:
+by `test/e2e.sh`. Those comments are the list, kept next to the cases they describe. To read them all,
+each file's whole leading comment, however many lines it has:
 
 ```
-head -n 3 test/e2e/*.sh
+awk 'FNR == 1 { print "==> " FILENAME } /^#/ { print; next } { nextfile }' test/e2e/*.sh
 ```
 
 `test/e2e/lib.sh` holds the helpers more than one area uses, and `test/e2e/fake-claude.c` is the
