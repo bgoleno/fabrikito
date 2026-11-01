@@ -67,7 +67,7 @@ Bash(git push */main *)'
 chk=$($S -c $T/team.yaml check 2>&1)
 # check names the factory checkout the team runs from and its commit (#189): a team pinned to a
 # release runs from its own checkout. $SRC is a git checkout here; an install of links is not.
-idesc=$(git -C $SRC describe --always --dirty 2>/dev/null)
+idesc=$(git -C $SRC describe --tags --always --dirty 2>/dev/null)
 [ -n "$idesc" ] && echo "$chk" | grep -qxF "install   : $SRC at $idesc" && ok "check: the install line names the factory checkout and its git describe" || { bad "check: install line (describe '$idesc')"; echo "$chk" | grep -E "^install "; }
 mkdir -p $T/linst/teams; for p in factory.sh lib roles plugin; do ln -s $SRC/$p $T/linst/$p; done; cp $T/team.yaml $T/linst/teams/team.yaml
 $T/linst/factory.sh -c $T/linst/teams/team.yaml check 2>&1 | grep -qxF "install   : $T/linst (not a git checkout)" && ok "check: an install outside any git checkout says so" || { bad "check: install line outside git"; $T/linst/factory.sh -c $T/linst/teams/team.yaml check 2>&1 | grep -E "^(install|error)"; }

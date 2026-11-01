@@ -324,13 +324,14 @@ setup_failed() {
 # from a checkout of its own (docs/pinned-release.md), and its seats' say, hooks and plugin come from
 # the checkout that started them, so check says which one before a seat is restarted. Only a checkout
 # whose top folder is this one counts: an install copied into some other repository is not described
-# as that repository. GIT_OPTIONAL_LOCKS=0 keeps describe --dirty from writing the checkout's index.
+# as that repository. --tags names a lightweight tag too (git tag <name>), which plain describe skips,
+# showing only a commit. GIT_OPTIONAL_LOCKS=0 keeps describe --dirty from writing the checkout's index.
 install_line() {
   local top real d
   real=$(cd -P "$HERE" && pwd -P)
   top=$(git -C "$HERE" rev-parse --show-toplevel 2>/dev/null) || top=""
   if [ -n "$top" ] && [ "$(cd -P "$top" && pwd -P)" = "$real" ] &&
-    d=$(GIT_OPTIONAL_LOCKS=0 git -C "$HERE" describe --always --dirty 2>/dev/null); then
+    d=$(GIT_OPTIONAL_LOCKS=0 git -C "$HERE" describe --tags --always --dirty 2>/dev/null); then
     echo "install   : $HERE at $d"
   else
     echo "install   : $HERE (not a git checkout)"
