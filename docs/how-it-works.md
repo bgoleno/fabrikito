@@ -23,7 +23,8 @@ This page shows how the parts fit together. Each section links to the page with 
 | `plugin/` | The factory plugin: skills that every seat loads. |
 | `teams/example.yaml` | The documented example team file. Your own team files sit beside it and are git-ignored. |
 | `.state/<team>/` | Everything generated for a team (settings, launch scripts, prompts, the team's copy of claude), plus the message log, progress notes and the gate's state. Git-ignored. `TEAM_STATE_DIR` moves it. |
-| `test/e2e.sh`, `test/live-env.sh` | The end-to-end test, and the helper that runs a live test on a private tmux server. |
+| `test/e2e.sh`, `test/live-env.sh` | The end-to-end test's entry point (the shared setup, the count and the cleanup), and the helper that runs a live test on a private tmux server. |
+| `test/e2e/` | The end-to-end cases, one file per area, which `test/e2e.sh` sources in the order of its `AREAS` list; `lib.sh` holds the helpers more than one area uses, and `fake-claude.c` is the stand-in for `claude`. |
 
 ## What `up` does
 
@@ -33,7 +34,7 @@ session names, unknown placeholders and invalid UTF-8 stop the command before an
 
 1. **Refuses a throwaway team on the default tmux server.** A team file outside `teams/` looks like a
    test copy, and a copy shares the real team's session names. Unless `--default-socket` is given,
-   `up` stops before any tmux call. See [Use](../README.md#use).
+   `up` stops before any tmux call. See [Throwaway teams](commands.md#throwaway-teams).
 2. **Makes the state folders**, the progress-note folder and, when the team has a `sec` role, the
    security-triage record folder.
 3. **Makes the team's own copy of claude.** It finds `claude` on the `PATH`, reads its version and,
@@ -70,7 +71,7 @@ session names, unknown placeholders and invalid UTF-8 stop the command before an
    screen is not its input box.
 6. **Opens the iTerm view,** a tab with every running seat in a pane, when it started at least one
    seat, unless `--no-view` is given, `display.iterm` is `false` or `TEAM_VIEW=0` is set
-   (the tests use it). See [The iTerm view](../README.md#the-iterm-view).
+   (the tests use it). See [The iTerm view](commands.md#the-iterm-view).
 
 A seat's tmux session is a shell that runs claude. Quitting claude leaves the shell and the session
 alive, and `up` then skips that seat; run `down --yes <role>` first to start it fresh. `down` kills the
