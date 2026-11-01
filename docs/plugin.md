@@ -20,14 +20,19 @@ template, the review bar) stay in the role prompt, which the skill points to rat
 skill stops if the prompt lacks them. `test/e2e/launch.sh` checks every skill's frontmatter, so adding
 one needs no new test code.
 
-### Skills a person starts
+### Skills started by typing them
 
-Two skills set `disable-model-invocation`, so a seat cannot start them itself; a person types them:
-`/factory:ping` and `/factory:merge-train`. For `merge-train` the e2e fails if the flag is missing. The
-owner types `/factory:merge-train <PR> [<PR>...] [--dry-run]` in the engineering manager's pane, and the
-EM merges those PRs in order, each at one pinned head, after gating it stacked on the ones before it, and
-stops at the first failure. When the EM may merge at all, and what a typed `/factory:merge-train`
-covers, are rules in the EM's prompt, [`roles/em.md`](../roles/em.md); the skill is the procedure.
+Two skills set `disable-model-invocation`: `/factory:ping` and `/factory:merge-train`. A seat cannot
+start them with its Skill tool; they run when typed as the session's own input. That is not a boundary:
+any process running as you can type into a seat's pane (see [Safety](../README.md#safety)). For
+`merge-train` the e2e fails if the flag is missing, and the skill's step 1 checks for itself that the
+command arrived as the session's own input, with no `[from ...]` label.
+
+The owner types `/factory:merge-train <PR> [<PR>...] [--dry-run]` in the engineering manager's pane, and
+the EM merges those PRs in order, each at one pinned head, after gating it stacked on the ones before it,
+and stops at the first failure. The EM's prompt, [`roles/em.md`](../roles/em.md), also lets the EM follow
+the skill's steps under a standing instruction from the owner. When the EM may merge at all, and what a
+typed `/factory:merge-train` covers, are rules in that prompt; the skill is the procedure.
 
 ## Loading it
 
