@@ -105,8 +105,9 @@ nothing outside its scratch clone. Use it to see what a real run would do.
      - merge or push steps (this skill, and the merge rules in a role prompt);
      - credential or secret handling;
      - code that deletes files;
-     - the team's own safety rules: the hard rules in role prompts, the security role's prompt,
-       and the review and security-triage skills.
+     - the team's own safety rules (the owner's decision): the prompt every seat shares, with its
+       hard rules (`roles/common.md` in the factory), the security role's prompt (`roles/sec.md`),
+       and the `review-pr` and `security-triage` skills.
 
      If you cannot tell whether a file is one of these, stop and ask.
    - **What counts:** only verdicts posted on the PR, in each role's documented form:
@@ -130,8 +131,10 @@ nothing outside its scratch clone. Use it to see what a real run would do.
      or still owes joins the required set; repeat until no role joins. Read it from the rest of
      the verdict line and from lines that start "It still waits for", "It also waits for", "Still
      owed", "After that" or "Then" ("It still waits for sec's review", "After that: qa's live
-     check"). `em` and the owner add nobody: the EM is the one merging, and the owner's merge is
-     the instruction. A joined role still needs its own verdict at `H`.
+     check"). Only a role id from your roster, written as a whole word (`sec`, `tl2`, `qa`, with or
+     without `'s`), names a role; any other words ("the second opinion", "a rebase") name none
+     and add nobody. `em` and the owner add nobody: the EM is the one merging, and the owner's
+     merge is the instruction. A joined role still needs its own verdict at `H`.
    - **Waits-for with no role:** in a required reviewer's latest verdict at `H` only, a waits-for
      that names no role and is not a merge with the base or the owner's merge (another PR to land
      first, a rebase, a landing order) stops the train, as does one you cannot read plainly. The
