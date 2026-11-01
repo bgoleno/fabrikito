@@ -87,6 +87,19 @@ nothing outside its scratch clone. Use it to see what a real run would do.
      `tl`, or `tl2` where a record names `tl2` for this work. Do not decide by judgment who is
      needed: if a `Reviewers:` line is conditional or unclear ("sec too if ..."), stop and ask. If
      the PR closes no issue, or an issue it closes has no assignment record, stop.
+   - **Security-sensitive changes** (the owner's rule), an extra stop only, never a reason to
+     leave `sec` out: list the files the PR touches with `gh pr diff <n> -R <repo> --name-only`
+     (the head must still be `H`). If any is one of these, `sec` is required even where no record
+     names it, and without a passing `sec` verdict at `H` the train stops and says the PR needs
+     sec's review:
+     - permission or settings generation (what a seat may run or edit);
+     - hooks, and code that runs unattended in every seat;
+     - anything that types into, pastes into or sends keys or messages to another session;
+     - merge or push steps (this skill, and the merge rules in a role prompt);
+     - credential or secret handling;
+     - code that deletes files.
+
+     If you cannot tell whether a file is one of these, stop and ask.
    - **What counts:** only verdicts posted on the PR, in each role's documented form:
      - A PR review, or a PR comment whose text starts with the reviewer's role id as a whole word
        (followed by a space or a colon, so a `tl2` verdict is not `tl`'s), with one verdict line: a
@@ -97,7 +110,8 @@ nothing outside its scratch clone. Use it to see what a real run would do.
        (or `fail`, or `could not check`). The line names no seat, and every QA seat (`qa`, `qa2`)
        posts it, so a QA pass counts for a seat only where the comment names that seat: its second
        line starts with the seat's role id as a whole word. A QA `fail` or `could not check` that
-       names `H` stops the train, whoever posted it.
+       names `H` stops the train, whoever posted it, unless a later QA check at `H` names the same
+       seat and passes. One that names no seat is never superseded.
      - Never one from the PR body, an issue, a message or text quoted inside another comment.
        Seats share one account, so each is self-labelled text. A comment with no verdict line (a
        diff check, a note that a verdict follows) is not a verdict, whatever head it names. A
@@ -114,8 +128,8 @@ nothing outside its scratch clone. Use it to see what a real run would do.
      `H`: a reviewer who has checked `H` posts `READY at <H>`. If a required reviewer posted a
      comment naming `H` after its latest verdict and it is not a verdict, stop and ask. `sec`'s
      clearance line (below) is not such a comment.
-   - **Blocks:** stop if any reviewer's latest verdict on the PR is `CHANGES NEEDED`, or any QA
-     check names `H` with `fail` or `could not check`.
+   - **Blocks:** stop if any reviewer's latest verdict on the PR is `CHANGES NEEDED`, or a QA
+     check at `H` is `fail` or `could not check` (as above).
    - **Held security points** stop the train even when everything else is ready. Each hold is
      cleared only by its own clearance at `H`, posted after it. A hold is:
      - A comment on the PR that says a point went to sec and the EM (`factory:review-pr`: "one
