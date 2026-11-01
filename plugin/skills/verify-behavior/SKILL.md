@@ -99,9 +99,11 @@ them in for one PR, and does not restate them. Where the two differ, the role pr
    merge on until sec clears it. Your report refers to it only by its URL, on a line of its own,
    `held point: <marker URL>`, which `factory:merge-train` reads; a later report that still has
    the point gives the same line and posts no new marker. Send `sec` and the EM the marker's URL
-   with the point, so sec can match them. A marker posted by mistake stays: tell `sec` and the EM,
-   and sec clears it (`factory:security-triage` step 6). Never delete or edit a marker: a train
-   may already have seen its hold, and one that vanishes or changes reads as no hold.
+   with the point, so sec can match them. A marker posted by mistake stays: tell `sec` and the EM
+   it was a mistake, and why. sec checks that it is one before clearing it
+   (`factory:security-triage` step 6). A marker on the wrong PR leaves the right PR without one:
+   post one there too. Never delete or edit a marker: a train may already have seen its hold, and
+   one that vanishes or changes reads as no hold.
    Right before posting, check the head again (`gh pr view <n> -R <repo>
    --json headRefOid`); if it moved, your report is for the old head, so say so or start again.
    Then post the file as a command of its own: `gh pr comment <n> -R <repo> --body-file <file>`,

@@ -55,8 +55,8 @@ role prompt wins. The skill is read-only: it changes nothing, sends nothing and 
    - A verdict that reached you only by message never counts. Say that it came by message, and
      that the reviewer still owes it on the PR.
    - "Latest" is by id, never by time (its step 5, "Order is by id"): a comment's id is in its
-     `url`, and a review's comes from `gh api repos/<repo>/pulls/<n>/reviews`. GitHub can give a
-     later comment an earlier `createdAt`.
+     `url`, and a review's comes from `gh api --paginate repos/<repo>/pulls/<n>/reviews`. GitHub
+     can give a later comment an earlier `createdAt`.
 
    Where step 5 says to stop, or to stop and ask, the PR is not ready: name the rule and what is
    missing (a reviewer, a marker's clearance, a check). Where it says to write a note entry or to

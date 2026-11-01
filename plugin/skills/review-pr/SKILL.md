@@ -105,10 +105,12 @@ differ, the role prompt wins.
      `held point: <marker URL>`, with no class, file, line or severity: `factory:merge-train`
      reads that line. A later verdict that still has the point gives the same line and posts no
      new marker. Send `sec` and the EM the marker's URL with the point, so sec can match them.
-   - **A marker posted by mistake** (a point that was not one, a repeat, the wrong PR) stays:
-     tell `sec` and the EM it was a mistake, with its URL, and sec clears it with its clearance
-     line (`factory:security-triage` step 6). Never delete or edit a marker: a train may already
-     have seen its hold, and one that vanishes or changes reads as no hold.
+   - **A marker posted by mistake** (a repeat, the wrong PR, or a point you now think is not a
+     security finding) stays: tell `sec` and the EM it was a mistake, and why, with its URL. sec
+     checks that it is one before clearing it with its clearance line
+     (`factory:security-triage` step 6). A marker on the wrong PR leaves the right PR without
+     one: post one there too. Never delete or edit a marker: a train may already have seen its
+     hold, and one that vanishes or changes reads as no hold.
    - **The security engineer:** triage it with `factory:security-triage`. A low or ruled-out
      finding may go in the verdict as that skill's step 6 says. A medium or higher (what your role
      prompt's rule 5 keeps out of public trackers) is held back, and the skill says who is told
