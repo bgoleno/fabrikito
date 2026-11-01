@@ -50,7 +50,7 @@ and point the team file at them.
 
 `up` takes a team file outside `teams/` for a throwaway one (a test) and will not start its seats on your
 default tmux server, where a real team runs: run it on a private server (see
-[Tests](../README.md#tests)), or pass `up --default-socket` if that team is meant to run there. `down`
+[Live tests](testing.md#live-tests)), or pass `up --default-socket` if that team is meant to run there. `down`
 (with or without `--yes`), `say`, `attach`, `view` and `titles` apply the same rule before any tmux call,
 because a copy of a real team file shares its session prefix and would reach the real seats: kill them,
 type into them, show them or relabel them ([#105](../../../issues/105), [#124](../../../issues/124)).
