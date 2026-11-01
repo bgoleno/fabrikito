@@ -375,7 +375,7 @@ cmd_check() {
 }
 
 cmd_up() {
-  local want_view=1 started=0 args="" roles r sess dir launch a args_q settings default_ok=0 tdir
+  local want_view=1 started=0 args="" roles r sess dir launch a args_q settings default_ok=0 tdir ndir d
   for a in "$@"; do
     case $a in
       --no-view) want_view=0 ;;
@@ -389,13 +389,25 @@ cmd_up() {
   command -v tmux >/dev/null || die "tmux not found"
   resolve_claude || die "$CLAUDE_ERR"
   for r in $roles; do check_role "$r"; done
+  ndir=$(cfg get state.notes_dir)
+  tdir=$(cfg get state.triage_dir)
+  # The notes and triage folders must be real folders or not there yet (#148, sec on #141), checked
+  # before up makes anything: mkdir -p and chmod follow a symlink, so up would make or chmod the
+  # folder it points at, and seats would write notes and records there. A plain file at the name
+  # is refused too. Only a seat could put one there, so this is hardening; as in seat_lock (#132),
+  # the check is not atomic with the mkdir below.
+  for d in "$ndir" "$tdir"; do
+    [ -n "$d" ] || continue
+    if [ -L "$d" ] || { [ -e "$d" ] && [ ! -d "$d" ]; }; then
+      die "$d is not a real folder (a symlink, or not a folder): remove it, then run up again"
+    fi
+  done
   for a in $(cfg get state.generated_dirs); do mkdir -p "$STATE/$a"; done
   # Progress notes (#5): seats write them, so up only makes the folder and never touches a note.
-  mkdir -p "$(cfg get state.notes_dir)"
+  mkdir -p "$ndir"
   # The security-triage record folder (#138), when the team has the role that writes it: up only
   # makes it, owner-only, and nothing deletes a record (disposing of one is the owner's call).
   # mkdir -m sets the mode only on a folder it creates, so chmod gives an existing one the mode too.
-  tdir=$(cfg get state.triage_dir)
   [ -z "$tdir" ] || { mkdir -p -m 700 "$tdir" && chmod 700 "$tdir"; }
   ensure_claude_copy
   # Roles start in the order given (file order by default).

@@ -226,6 +226,26 @@ chmod 755 $T/secstate/triage; echo record > $T/secstate/triage/pr-1.md
 TEAM_STATE_DIR=$T/secstate $S -c $T/sec2.yaml up --no-view sec >/dev/null 2>&1
 [ "$(stat -f %Lp $T/secstate/triage)" = 700 ] && [ "$(cat $T/secstate/triage/pr-1.md 2>/dev/null)" = record ] \
   && ok "up gives an existing triage folder mode 700 and leaves its records" || { bad "up: existing triage folder"; ls -la $T/secstate/triage; }
+# up refuses a symlink, or anything else that is not a real folder, at <state>/triage and
+# <state>/notes, naming it, and makes or chmods nothing through it (#148). Each link points at a
+# sentinel folder (mode 755, one file) whose mode, size, mtime and contents must come out unchanged.
+# snap <dir>: each entry's path, mode, size and mtime, then each file's checksum.
+snap() { (cd "$1" && find . -exec stat -f '%N %Lp %z %m' {} + | sort && find . -type f -exec shasum {} + | sort); }
+for sd in triage notes; do
+  sn=$T/sentinel-$sd; mkdir -p $sn && echo keep > $sn/kept.md && chmod 755 $sn; before=$(snap $sn)
+  mv $T/secstate/$sd $T/secstate/$sd.real && ln -s $sn $T/secstate/$sd
+  sout=$(TEAM_STATE_DIR=$T/secstate $S -c $T/sec2.yaml up --no-view sec 2>&1); src=$?
+  [ $src != 0 ] && echo "$sout" | grep -qxF "error: $T/secstate/$sd is not a real folder (a symlink, or not a folder): remove it, then run up again" \
+    && [ "$(snap $sn)" = "$before" ] && [ -L $T/secstate/$sd ] \
+    && ok "up refuses a symlink at <state>/$sd, naming it, and leaves the folder it points at unchanged" || { bad "up: symlink at <state>/$sd (rc=$src)"; echo "$sout" | tail -3; diff <(echo "$before") <(snap $sn); }
+  rm $T/secstate/$sd && mv $T/secstate/$sd.real $T/secstate/$sd
+done
+# A plain file at the name is refused the same way, and left as it was.
+mv $T/secstate/notes $T/secstate/notes.real && echo plain > $T/secstate/notes
+sout=$(TEAM_STATE_DIR=$T/secstate $S -c $T/sec2.yaml up --no-view sec 2>&1); src=$?
+[ $src != 0 ] && echo "$sout" | grep -qxF "error: $T/secstate/notes is not a real folder (a symlink, or not a folder): remove it, then run up again" && [ "$(cat $T/secstate/notes)" = plain ] \
+  && ok "up refuses a plain file at <state>/notes, naming it" || { bad "up: plain file at <state>/notes (rc=$src)"; echo "$sout" | tail -3; }
+rm $T/secstate/notes && mv $T/secstate/notes.real $T/secstate/notes
 tmux kill-session -t '=ts-sec' 2>/dev/null; git -C $T/repo worktree remove --force $VOL/$ROOT/team-sec 2>/dev/null
 # A user who switched every hook off keeps that choice in seats without a gate, which then get no
 # note: check says which. Throwaway config folders, so the owner's own settings play no part.
