@@ -176,12 +176,16 @@ nothing outside its scratch clone. Use it to see what a real run would do.
        you, then stop.
      - **A reference to a marker that is gone or changed** stops the train. A reference is every id
        in a clearance line, and every link to a comment on this PR
-       (`.../pull/<n>#issuecomment-<id>`) that a verdict or QA report gives as a held point; if you
-       cannot tell whether a link is given as a held point, count it as one. Each must still be a
-       comment on this PR (in `gh pr view <n> --json comments` now) whose whole text is exactly a
-       marker line. If one is missing (deleted, or on another PR) or its text is no longer exactly
-       that line (edited), stop, and name the comment that refers to it and the id. Never read a
-       missing or edited marker as no hold.
+       (`.../pull/<n>#issuecomment-<id>`) in a verdict or QA report whose line says it is a held
+       point (it says "held point", "sent to sec" or "marker"). Each must still be a comment on
+       this PR (in `gh pr view <n> --json comments` now) whose whole text is exactly a marker line.
+       If one is missing (deleted) or its text is no longer exactly that line (edited), stop, and
+       name the comment that refers to it and the id. Never read a missing or edited marker as no
+       hold.
+     - **Any link to a comment on this PR that is gone** stops the train too, wherever it sits in a
+       verdict, QA report or clearance: what it pointed at cannot be checked. A link to a live
+       comment that is not a marker, on a line that does not say it is a held point (an earlier
+       verdict, a live record), is not a reference and stops nothing.
      - Report a held point only as "a held point", never its content.
 6. **Gate the PR on the stack:**
    - `git fetch origin pull/<n>/head`; `git rev-parse FETCH_HEAD` must equal `H`.
