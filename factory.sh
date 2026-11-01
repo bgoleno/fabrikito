@@ -1324,16 +1324,22 @@ sender_refusal() {
 cmd_say() {
   # Before anything else, tmux, caller_seat and the log included (#105).
   if [ "${1:-}" = --default-socket ]; then shift; else refuse_default_tmux say "type into seats"; fi
-  local to=${1:-} from=${TEAM_ROLE:-} why="" label r rc=0 lrc=0 held out="" msg
+  local to=${1:-} from=${TEAM_ROLE:-} why="" label r rc=0 lrc=0 held out=""
   [ -n "$to" ] && [ $# -ge 2 ] || die "usage: say <role|all> <message...>"
   [ "$to" = all ] || check_role "$to"
-  msg="${*:2}"
+  shift
   # An empty or whitespace-only message (a script bug, an unset variable) would go out as a bare label,
   # a turn of its own in the seat (#157). It is refused here, before caller_seat's tmux calls, and
   # logged like any refusal. With TEAM_ROLE unset the sender is logged as '?', since telling a seat
-  # from the owner takes those tmux calls.
-  if [ -z "${msg//[[:space:]]/}" ]; then
-    why="the message is empty or only whitespace; give say the text to send"; from=${from:-?}
+  # from the owner takes those tmux calls. The check reads "$*", what is sent and logged: on bash 3.2
+  # "${*:2}" holds \177 for each empty argument. A case pattern, because ${m//[[:space:]]/} takes
+  # seconds on a long message (tl on #202).
+  case "$*" in
+    *[![:space:]]*) ;;
+    *) why="the message is empty or only whitespace; give say the text to send"; from=${from:-?} ;;
+  esac
+  if [ -n "$why" ]; then
+    :
   # Inside a seat, a message without TEAM_ROLE goes out under that seat's role, never as the owner's.
   elif [ -z "$from" ]; then
     # A refusal goes through the logged path below like any other (#97), under the sender '?'. The
@@ -1343,7 +1349,6 @@ cmd_say() {
     why=$(sender_refusal "$from")
   fi
   [ -z "$why" ] && [ "$to" = "$from" ] && why="a seat cannot message itself"
-  shift
   # The label is pasted on its own, before the message (deliver_one, #150).
   label="[from $from] "
   mkdir -p "$STATE"
