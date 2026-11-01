@@ -5,9 +5,9 @@
 echo "--- generated settings"
 # The user's rules, in team-then-role order, without duplicates. Rules the launcher adds itself
 # (Edit denies on its own files, the Read rules on the log and the triage folder, and the Read denies
-# on other teams' log, triage records and notes, #197) are checked separately, so they are left out
-# of these lists.
-perms() { ruby -rjson -e 'p = JSON.parse(File.read(ARGV[0]))["permissions"] || {}; %w[deny ask allow].each { |k| l = (p[k] || []).reject { |r| r.start_with?("Edit(//", "Bash(git push ") || r =~ %r{\ARead\(//.*/state/(messages\.log|triage/\*\*)\)\z} || r =~ %r{\ARead\(//.*/(messages\.log|triage/\*\*|notes/\*\*)\)\z} }; puts "#{k}=#{l.join(" | ")}" }; puts "disable=#{p["disableBypassPermissionsMode"]}"' "$1" 2>&1; }
+# on the log, triage records and notes of secstate, the e2e's other team beside $T/state, #197) are
+# checked separately, so they are left out of these lists.
+perms() { ruby -rjson -e 'p = JSON.parse(File.read(ARGV[0]))["permissions"] || {}; %w[deny ask allow].each { |k| l = (p[k] || []).reject { |r| r.start_with?("Edit(//", "Bash(git push ") || r =~ %r{\ARead\(//.*/state/(messages\.log|triage/\*\*)\)\z} || r =~ %r{\ARead\(//.*/secstate/(messages\.log|triage/\*\*|notes/\*\*)\)\z} }; puts "#{k}=#{l.join(" | ")}" }; puts "disable=#{p["disableBypassPermissionsMode"]}"' "$1" 2>&1; }
 # rules <file> <deny|ask|allow>: one rule per line
 rules() { ruby -rjson -e 'puts((JSON.parse(File.read(ARGV[0]))["permissions"] || {})[ARGV[1]] || [])' "$1" "$2"; }
 want_em='deny=Read(//**/.env) | Bash(touch tt-deny*)
@@ -250,7 +250,7 @@ done
 [ -z "$xr" ] && [ "$T" != "$RT" ] && ok "other teams: each team's seats are denied the other's triage, log and notes (Read) and all of it (Edit), both spellings; an observer may read the listed team's log and notes; nothing for links, folders without state, or our own state" || bad "other teams' rules:$xr"
 xchk=$(TEAM_STATE_DIR=$X/xa $S -c $T/xa.yaml check 2>&1); xsect() { echo "$xchk" | sed -n "/^\[$1\]/,/^\[/p"; }
 echo "$xchk" | grep -qxF "other teams: $X/xb (found), $T/far/xc (listed; observers: w1)" \
-  && echo "$xchk" | grep -qxF "skipped   : $X/xlink (a symlink: list it under other_teams if it is another team's state folder)" \
+  && echo "$xchk" | grep -qxF "skipped   : $X/xlink (a symlink to this team's own state folder, or to a folder holding it)" \
   && echo "$xchk" | grep -qxF "skipped   : $X/xlink2 (a symlink: list it under other_teams if it is another team's state folder)" \
   && ! echo "$xchk" | grep -qF "$X/junk" \
   && xsect em | grep -F "added: " | grep -qF ", Read and Edit deny on 2 other teams' state folders" \
@@ -266,6 +266,18 @@ reject "other_teams: a folder inside this team's state" "other_teams: $T/state/s
 reject "other_teams: an observer that is not a role" "other_teams: observer nope of $T/far/xc is not a role of this team" "" "other_teams: [{ state: $T/far/xc, observers: [nope] }]"
 reject "other_teams: an unknown key" "unknown key(s) under 'other_teams' entry 1: bogus (allowed: state, observers)" "" "other_teams: [{ state: $T/far/xc, bogus: 1 }]"
 reject "other_teams: not a list" "other_teams must be a list of { state, observers } entries" "" "other_teams: $T/far/xc"
+# A listed folder that exists must be a team's state folder (tl on #200): home, the repo or a state
+# root one level too high would deny this team's own work or protect nothing. A missing one is noted.
+reject "other_teams: the home folder" "other_teams: $HOME is not a team's state folder (it holds no settings/, launch/ and prompts/)" "" "other_teams: [{ state: \"~\" }]"
+reject "other_teams: the repo" "other_teams: $T/repo is not a team's state folder" "" "other_teams: [{ state: $T/repo }]"
+reject "other_teams: a state root one level too high" "other_teams: $X is not a team's state folder" "" "other_teams: [{ state: $X }]"
+mk "" "other_teams: [{ state: $T/nowhere/st, observers: [em] }]"; nchk=$($S -c $T/v.yaml check 2>&1); rc=$?
+[ $rc = 0 ] && echo "$nchk" | grep -qF "other teams: $T/nowhere/st (listed; not found yet; observers: em)" && ok "other_teams: a folder that does not exist yet is accepted, and check says so" || { bad "other_teams: a missing folder (rc=$rc)"; echo "$nchk" | grep -E "^(other teams|error)"; }
+# A state root that cannot be listed finds no other teams, without a stack trace, and check says so.
+mkdir -p $T/uroot/u/settings $T/uroot/u/launch $T/uroot/u/prompts && chmod 300 $T/uroot
+uchk=$(TEAM_STATE_DIR=$T/uroot/u $S -c $T/sec.yaml check 2>&1); rc=$?; chmod 700 $T/uroot
+[ $rc = 0 ] && echo "$uchk" | grep -qxF "other teams: none" && echo "$uchk" | grep -qF "skipped   : $T/uroot (could not be listed (" && ! echo "$uchk" | grep -qF ".rb:" \
+  && ok "other teams: a state root that cannot be listed finds none, and check says so" || { bad "other teams: unreadable state root (rc=$rc)"; echo "$uchk" | grep -E "^(other teams|skipped|error)|\.rb:" | head -5; }
 # up makes the folder, owner-only, for a team with a sec role. up writes every seat's settings, so
 # this runs in a state folder and session prefix of its own, leaving the test team's alone. Only sec
 # is started; its session and worktree are removed afterwards.

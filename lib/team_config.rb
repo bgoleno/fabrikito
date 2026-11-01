@@ -574,8 +574,11 @@ class TeamConfig
   #   its log and notes, as the owner approves (an observer scope), never its triage records.
   # Neither may be, hold or sit inside this team's own state folder (real paths).
   def overlaps_own_state?(path)
-    own = real_path(state_dir)
-    other = real_path(path)
+    # macOS disks are normally case-insensitive and File.realpath keeps the case as typed, so a
+    # miscased path compares in lower case there (tl on #200); erring this way refuses more.
+    fold = RUBY_PLATFORM.include?('darwin') ? ->(x) { x.downcase } : ->(x) { x }
+    own = fold.call(real_path(state_dir))
+    other = fold.call(real_path(path))
     within = ->(a, b) { a == b || a.start_with?(b.end_with?('/') ? b : "#{b}/") }
     within.call(other, own) || within.call(own, other)
   end
@@ -591,12 +594,22 @@ class TeamConfig
       root = File.dirname(state_dir)
       found = []
       skipped = []
-      (File.directory?(root) ? Dir.children(root).sort : []).each do |name|
+      names = begin
+        File.directory?(root) ? Dir.children(root).sort : []
+      rescue SystemCallError => e
+        skipped << [root, "could not be listed (#{e.class.name.split('::').last}): no other teams found there"]
+        []
+      end
+      names.each do |name|
         p = File.join(root, name)
         next if p == state_dir
 
         if File.symlink?(p)
-          skipped << [p, "a symlink: list it under other_teams if it is another team's state folder"] if team_state?(p)
+          if overlaps_own_state?(p)
+            skipped << [p, "a symlink to this team's own state folder, or to a folder holding it"]
+          elsif team_state?(p)
+            skipped << [p, "a symlink: list it under other_teams if it is another team's state folder"]
+          end
         elsif File.directory?(p) && team_state?(p)
           if overlaps_own_state?(p)
             skipped << [p, "it is this team's own state folder, holds it or sits inside it"]
@@ -624,7 +637,16 @@ class TeamConfig
       die "other_teams: observers of #{p} must be a list of role ids" unless obs.is_a?(Array) && obs.all? { |o| o.is_a?(String) }
       obs.each { |o| die "other_teams: observer #{o} of #{p} is not a role of this team" unless roles.key?(o) }
       die "other_teams: #{p} is this team's own state folder, holds it or sits inside it" if overlaps_own_state?(p)
-      { 'path' => p, 'observers' => obs, 'how' => 'listed' }
+      # Only a team's state folder: a wrong entry such as ~, the volume or repo.path would deny this
+      # team's own work, and a .state root one level too high would protect nothing while check said
+      # it did (tl on #200). One that does not exist yet (that team has not started) is accepted, and
+      # its denies apply once it does.
+      exists = File.exist?(p)
+      if exists && !team_state?(p)
+        die "other_teams: #{p} is not a team's state folder (it holds no settings/, launch/ and prompts/): " \
+            'name the folder itself, such as <checkout>/.state/<team>'
+      end
+      { 'path' => p, 'observers' => obs, 'how' => exists ? 'listed' : 'listed; not found yet' }
     end
   end
 
