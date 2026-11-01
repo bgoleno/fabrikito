@@ -42,7 +42,11 @@ on_exit() {
 }
 trap on_exit EXIT
 trap 'exit 143' TERM INT
-pass=0; fail=0; ok(){ echo "PASS $1"; pass=$((pass+1)); }; bad(){ echo "FAIL $1"; fail=$((fail+1)); }
+# Every name is kept, so the run can check, after the last assertion, that no two assertions print the
+# same name (#163): a diff of the PASS lines of two runs could not tell them apart.
+pass=0; fail=0; e2e_names=
+ok(){ echo "PASS $1"; pass=$((pass+1)); e2e_names="$e2e_names$1"$'\n'; }
+bad(){ echo "FAIL $1"; fail=$((fail+1)); e2e_names="$e2e_names$1"$'\n'; }
 # The area files (#70) are sourced in the order of AREAS, in this shell, so they share the setup above,
 # the count and the exit trap. Each holds a run of sections and relies on the state the areas before it
 # leave. A file not listed here would never run, and sourcing a file with a syntax error runs part of it
@@ -124,7 +128,9 @@ e2e_done=
 for e2e_a in lib $AREAS; do
   e2e_end=
   . "$E2E_DIR/$e2e_a.sh"
-  [ "$e2e_end" = "$e2e_a" ] || { echo "test/e2e/$e2e_a.sh stopped before its last line (e2e_end=$e2e_a): a heredoc terminator that does not match, or a top-level return" >&2; exit 2; }
+  # An empty e2e_end means the file stopped short; any other value means its last line names another file.
+  [ -n "$e2e_end" ] || { echo "test/e2e/$e2e_a.sh stopped before its last line (e2e_end=$e2e_a): a heredoc terminator that does not match, or a top-level return" >&2; exit 2; }
+  [ "$e2e_end" = "$e2e_a" ] || { echo "test/e2e/$e2e_a.sh ends with the wrong marker: expected e2e_end=$e2e_a, found e2e_end=$e2e_end" >&2; exit 2; }
   e2e_done="$e2e_done $e2e_a"
 done
 [ "$e2e_done" = " lib $AREAS" ] || { for e2e_x in lib $AREAS; do case "$e2e_done " in *" $e2e_x "*) ;; *) break ;; esac; done
@@ -136,5 +142,12 @@ $S -c $T/team.yaml down --yes >/dev/null 2>&1; tmux kill-server 2>/dev/null
 for w in team-w1 team-w2; do git -C $T/repo worktree remove --force $VOL/$ROOT/$w 2>/dev/null; git -C $T/repo worktree remove --force $T/repo/.claude/worktrees/$w 2>/dev/null; done
 rmdir $VOL/$ROOT 2>/dev/null; [ ! -e $VOL/$ROOT ] && ok "test folder removed from the volume" || bad "test folder removed from the volume ($(ls -A $VOL/$ROOT 2>&1 | head -3))"
 rm -rf "$T"
+# No two assertions may print the same name (#163). This is not an assertion itself, so the count stays
+# the number of assertions; each name printed more than once is one more failure.
+e2e_dup=$(printf '%s' "$e2e_names" | LC_ALL=C sort | LC_ALL=C uniq -d)
+if [ -n "$e2e_dup" ]; then
+  printf '%s\n' "$e2e_dup" | sed 's/^/FAIL two or more assertions print this name (give each its own, or a PASS-line diff cannot tell them apart): /'
+  fail=$((fail + $(printf '%s\n' "$e2e_dup" | wc -l)))
+fi
 echo "RESULT pass=$pass fail=$fail"
 finished=1; [ "$fail" -eq 0 ] && [ "$pass" -gt 0 ]
