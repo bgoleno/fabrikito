@@ -893,8 +893,9 @@ box_full_rows() {
 # label do not pass (tl on #132 and #150).
 # End: the visible text is a suffix of the message of at least 40 characters, and the box shows as
 # many rows as it can. A box only scrolls once full, so a shorter box that is not the whole message
-# holds something else. Text before the message would show at the top and text after it at the end,
-# so neither passes, except one gap:
+# holds something else. The label has scrolled off by then, so this rule cannot see it: deliver_one
+# checks it alone (box_has_label) before the body goes in (tl on #175). Text before the message would
+# show at the top and text after it at the end, so neither passes, except one gap:
 # a draft typed in the moment between the empty-box check and the paste, scrolled out of view by a
 # tall message, would go out with it (the README says so). When the box does not show just the
 # message, it prints why, so the refusal names the real cause (#84).
@@ -920,6 +921,26 @@ EOF
   [ "$rows" = "$full" ] || { echo "the box shows $rows of its $full rows and not just the message, so it holds something else"; return 1; }
   [ "${#v}" -ge 40 ] || { echo "only ${#v} characters of the message's end are visible (short last lines in a narrow pane), under the 40 say needs to recognise it"; return 1; }
   [ "${m%"$v"}" != "$m" ] || { echo "the box does not end with the message: other text is in it"; return 1; }
+}
+
+# Whether box state $2 of seat $1 holds just label $3, after the label's paste and before the body's
+# (#150, tl on #175): text, nothing drawn dim, and with whitespace removed exactly the label. A body
+# that scrolls the box hides the label, so this is the only check that sees it: a label cleared from
+# the box (Ctrl-C, Esc) or swallowed would otherwise let the body go out unlabelled, as the owner's.
+box_has_label() {
+  local state dim rows vis
+  IFS='	' read -r state dim rows vis <<EOF
+$2
+EOF
+  case $state in
+    text) ;;
+    empty) echo "the box is empty after the label's paste (the paste did not reach it)"; return 1 ;;
+    unknown) echo "the screen no longer ends with the input box (a dialog came up?)"; return 1 ;;
+    *) box_refusal "$1" "$2"; return 1 ;;
+  esac
+  [ "$dim" = 0 ] || { echo "dim text was drawn next to the label (a hint or suggestion from Claude Code)"; return 1; }
+  [ "$(printf '%s' "$vis" | LC_ALL=C tr -d '[:space:]')" = "$(printf '%s' "$3" | LC_ALL=C tr -d '[:space:]')" ] ||
+    { echo "the box holds something other than the label"; return 1; }
 }
 
 # Short panes (#84). The team view gives seats panes as small as 89x13 (10 seats) or 10 to 11 rows
@@ -1080,6 +1101,18 @@ deliver_one() {
   if ! { printf '%s' "$label" | tmux load-buffer -b "$buf" - && tmux paste-buffer -p -d -b "$buf" -t "=$sess:"; }; then
     tmux delete-buffer -b "$buf" 2>/dev/null || true
     echo "not delivered: could not paste into the input box of $to (tmux failed)" >&2
+    return 1
+  fi
+  # The body goes in only once the box holds just the label (box_has_label, tl on #175), so it cannot
+  # go out without it. A small window is grown for this check as for the others. Still open: the label
+  # cleared in the moment between this check and the body's paste.
+  sleep 0.5 9>&-
+  st=$(box_state "$to"); ok=1; why=$(box_has_label "$to" "$st" "$label") || ok=0
+  if [ "$ok" = 0 ] && size_may_matter "$st" && grow_window "$to"; then
+    st=$(box_state "$to"); ok=1; why=$(box_has_label "$to" "$st" "$label") || ok=0
+  fi
+  if [ "$ok" = 0 ]; then
+    echo "not delivered: the input box of $to does not show just the message's label after its paste${why:+ ($why)}, so the message was not pasted; text left in input box, if any: it goes out with the next Enter" >&2
     return 1
   fi
   if [ -n "$body" ] && ! { printf '%s' "$body" | tmux load-buffer -b "$buf" - && tmux paste-buffer -p -d -b "$buf" -t "=$sess:"; }; then

@@ -150,7 +150,8 @@ dim line (a hint or a suggested prompt), and presses Enter only when the box the
 message. The `[from <role>]` label goes in as a paste of its own, before the message
 ([#150](../../issues/150)). Claude Code hands a long paste, one it shows as `[Pasted text #N]`, to the
 seat inside `<pasted_content>` tags, and seats doubted a label inside them. A paste as short as the
-label stays plain text, outside the tags. Anything else fails closed, with a reason:
+label stays plain text, outside the tags. `say` pastes the message only once the box holds just the
+label, so a message never goes in without it. Anything else fails closed, with a reason:
 
 - a seat that is not running claude (the text would run as a shell command);
 - any dialog, prompt or menu, known or not, the held-message approval dialog included ("screen not
@@ -170,8 +171,9 @@ label stays plain text, outside the tags. Anything else fails closed, with a rea
 
 Attach to the seat, deal with it, and send again. After the paste, `say` sends Enter only when the box
 holds the message and nothing else: the whole message (whitespace aside, since the box wraps it), its
-label and one placeholder, or the end of a message taller than the box (below). If it does not, or the
-message's paste fails after its label's, no Enter is sent and
+label and one placeholder, or the end of a message taller than the box (below). If it does not, if
+the box does not hold just the label after the label's paste (then the message is not pasted at all),
+or if the message's paste fails after its label's, no Enter is sent and
 the text stays in the box, where it goes out with the next Enter; `say` says so, and says why: the
 screen no longer ends with the box, dim text was drawn next to the message, the box shows fewer rows
 than it can and not just the message (as when someone typed after it), too little of the message's
@@ -196,9 +198,11 @@ a `say` killed that way can leave the window at 220x50 with `window-size` set to
 A message taller than the box (up to 800 characters and 3 lines, not counting its label; a longer
 paste shows as a `[Pasted text #N]` placeholder) scrolls it, so only the message's end is visible. `say` then sends it only when
 the box is full (floor((pane rows - 10) / 2) rows, at least 3) and its visible text is the message's
-last 40 or more characters. One gap remains: if someone starts typing in the moment between `say`'s
-empty-box check and the paste, and the message scrolls that text out of view, it goes out with the
-message.
+last 40 or more characters. Its label has scrolled out of view by then, which is why `say` checks the
+label alone, before it pastes the message. Two gaps remain: if someone starts typing in the moment
+between `say`'s empty-box check and the paste, and the message scrolls that text out of view, it goes
+out with the message; and if the label is cleared from the box (Ctrl-C, Esc) in the moment between
+`say`'s check of it and the message's paste, the message goes out without it.
 The input box is recognised as Claude Code 2.1.316 draws it, so a CLI update that changes it makes `say`
 refuse every seat until `factory.sh` is updated. A refused message is logged as NOT-DELIVERED. Messages
 are labelled `[from <role>]`, and the owner's are `[from owner]`. The label is set by the sender (from
@@ -574,8 +578,8 @@ receives it, in `check`, `say` refusing to send as `launcher`, a kickoff with a 
 named `launcher` or `owner`), the load-time checks on modes, rules and `args`,
 `say` delivering only to a seat whose input box is showing (dialogs captured from Claude Code
 2.1.316, an unknown dialog, text in the box, copy mode, an unreadable screen; the label pasted on its
-own before the message, and a placeholder with no label or another one, or a failed paste, refused
-with no Enter), and the gate: the
+own before the message, a missing or other label refused before the message is pasted, and a failed
+paste refused with no Enter), and the gate: the
 generated Stop hook, its load-time checks, and `lib/stop_gate.sh` itself (clean tree, failure, the
 limit, a new turn or session, a pass, a timeout that kills the gate's process group), progress notes
 (the `SessionStart` hook in every seat, `disableAllHooks` only where gated, the own-note allow and
