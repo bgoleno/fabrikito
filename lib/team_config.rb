@@ -60,7 +60,7 @@ def home_utf8
   utf8(Dir.home, 'the home folder (HOME)')
 end
 
-TOP_KEYS = %w[team owner repo project storage sessions display prompts kickoff permissions roles].freeze
+TOP_KEYS = %w[team owner repo project storage sessions display prompts kickoff permissions roles other_teams].freeze
 DISPLAY_KEYS = %w[iterm primary window].freeze
 PROJECT_KEYS = %w[name url].freeze
 EFFORTS = %w[low medium high xhigh max].freeze
@@ -160,6 +160,11 @@ TRIAGE_DIR = 'triage'.freeze
 # Where each seat keeps its progress note, <state>/notes/<role>.md (#5). Outside the worktree, so it
 # survives the worktree being recreated, and in neither list above, so a seat may write it.
 NOTES_DIR = 'notes'.freeze
+
+# other_teams entries (#197), and the folders up makes in every team's state folder, by which one is
+# recognised beside this team's own (see other_teams_found).
+OTHER_TEAM_KEYS = %w[state observers].freeze
+STATE_MARKERS = %w[settings launch prompts].freeze
 
 # The field a tool's own specifier already covers. Claude Code ignores a `Tool(field:...)` rule on
 # it, with only a startup warning.
@@ -555,6 +560,99 @@ class TeamConfig
     { 'allow' => [], 'deny' => edit + read }
   end
 
+  # Other teams' state folders (#197). The denies above name only this team's own state folder, so a
+  # seat could read another team's triage records (which can hold unfixed findings) and message log,
+  # and write any of it, when two teams share a machine. A glob over the state root cannot cover
+  # them: it would also deny this team's own folder (a deny wins over an allow; rules have no
+  # negation). So each other team's folder is named, from two sources:
+  # - found: every real folder beside this team's own in the state root (the folder holding
+  #   state_dir, normally <install>/.state/) that holds settings/, launch/ and prompts/, which up
+  #   makes. A link is never followed: one could lead to this team's own state, or to / and give
+  #   every seat Edit(//**) (sec on #197). check names the links it skips.
+  # - listed: other_teams in the team file, for folders elsewhere (a pinned team's shared state,
+  #   docs/pinned-release.md), with the roles of this team that observe that team: they may read
+  #   its log and notes, as the owner approves (an observer scope), never its triage records.
+  # Neither may be, hold or sit inside this team's own state folder (real paths).
+  def overlaps_own_state?(path)
+    own = real_path(state_dir)
+    other = real_path(path)
+    within = ->(a, b) { a == b || a.start_with?(b.end_with?('/') ? b : "#{b}/") }
+    within.call(other, own) || within.call(own, other)
+  end
+
+  def team_state?(path)
+    STATE_MARKERS.all? { |m| File.directory?(File.join(path, m)) }
+  end
+
+  # [found, skipped]: other teams' folders found in the state root, and [path, why] for each link
+  # passed over that leads to a team's state, or folder that overlaps this team's own.
+  def other_teams_found
+    @other_teams_found ||= begin
+      root = File.dirname(state_dir)
+      found = []
+      skipped = []
+      (File.directory?(root) ? Dir.children(root).sort : []).each do |name|
+        p = File.join(root, name)
+        next if p == state_dir
+
+        if File.symlink?(p)
+          skipped << [p, "a symlink: list it under other_teams if it is another team's state folder"] if team_state?(p)
+        elsif File.directory?(p) && team_state?(p)
+          if overlaps_own_state?(p)
+            skipped << [p, "it is this team's own state folder, holds it or sits inside it"]
+          else
+            found << { 'path' => p, 'observers' => [], 'how' => 'found' }
+          end
+        end
+      end
+      [found, skipped]
+    end
+  end
+
+  def other_teams_listed
+    v = @c['other_teams']
+    return [] if v.nil?
+
+    die 'other_teams must be a list of { state, observers } entries' unless v.is_a?(Array)
+    v.each_with_index.map do |e, i|
+      die "other_teams entry #{i + 1} must be a mapping of state and observers" unless e.is_a?(Hash)
+      bad = e.keys - OTHER_TEAM_KEYS
+      die "unknown key(s) under 'other_teams' entry #{i + 1}: #{bad.join(', ')} (allowed: #{OTHER_TEAM_KEYS.join(', ')})" unless bad.empty?
+      die "other_teams entry #{i + 1} needs state: the other team's state folder" unless e['state'].is_a?(String) && !e['state'].empty?
+      p = expand(e['state'])
+      obs = e['observers'] || []
+      die "other_teams: observers of #{p} must be a list of role ids" unless obs.is_a?(Array) && obs.all? { |o| o.is_a?(String) }
+      obs.each { |o| die "other_teams: observer #{o} of #{p} is not a role of this team" unless roles.key?(o) }
+      die "other_teams: #{p} is this team's own state folder, holds it or sits inside it" if overlaps_own_state?(p)
+      { 'path' => p, 'observers' => obs, 'how' => 'listed' }
+    end
+  end
+
+  # Found and listed together; a listed folder that was also found adds its observers to it.
+  def other_teams
+    @other_teams ||= other_teams_listed.each_with_object(other_teams_found[0].map(&:dup)) do |e, list|
+      same = list.find { |t| real_path(t['path']) == real_path(e['path']) }
+      if same
+        same['observers'] |= e['observers']
+      else
+        list << e
+      end
+    end
+  end
+
+  # The denies on other teams' folders for seat id, in both spellings: Read on triage records always,
+  # Read on the log and notes unless id observes that team, and Edit on all of it.
+  def other_team_rules(id)
+    other_teams.flat_map do |t|
+      [File.expand_path(t['path']), real_path(t['path'])].uniq.flat_map do |sp|
+        e = glob_escape(sp)
+        rules = ["Read(/#{e}/triage/**)", "Edit(/#{e}/**)"]
+        rules += ["Read(/#{e}/messages.log)", "Read(/#{e}/notes/**)"] unless t['observers'].include?(id)
+        rules
+      end
+    end
+  end
+
   # The Read deny on messages.log for a seat other than LOG_READER, in both spellings.
   def log_read_rules(id)
     return [] if id == LOG_READER
@@ -746,7 +844,8 @@ class TeamConfig
     own = note_rules(id)
     others = (roles.keys - [id]).flat_map { |r| note_rules(r) }
     tri = triage_rules(id)
-    deny = protected_paths(id).map { |p| "Edit(/#{p})" } + others + log_read_rules(id) + memory_rules(id) + tri['deny']
+    deny = protected_paths(id).map { |p| "Edit(/#{p})" } + others + log_read_rules(id) + memory_rules(id) + tri['deny'] +
+           other_team_rules(id)
     add.call({ 'deny' => deny, 'ask' => base_push_rules, 'allow' => own + tri['allow'] }, 'factory.sh')
     out
   end
@@ -881,7 +980,15 @@ class TeamConfig
 
   def permissions_report
     added_by = ->(e) { e[2] == 'factory.sh' }
-    out = ["permissions per seat (they add to the rules in ~/.claude/settings.json and the repo's .claude/ settings, which still apply):"]
+    out = []
+    # Other teams' state folders (#197): what was found and listed, and the links passed over.
+    teams = other_teams.map do |t|
+      obs = t['observers'].empty? ? '' : "; observers: #{t['observers'].join(', ')}"
+      "#{t['path']} (#{t['how']}#{obs})"
+    end
+    out << "other teams: #{teams.empty? ? 'none' : teams.join(', ')}"
+    other_teams_found[1].each { |p, why| out << "skipped   : #{p} (#{why})" }
+    out << "permissions per seat (they add to the rules in ~/.claude/settings.json and the repo's .claude/ settings, which still apply):"
     roles.each_key do |id|
       merged = merged_permissions(id)
       factory = permission_entries(id).select(&added_by).map(&:first)
@@ -892,11 +999,12 @@ class TeamConfig
         out << format('    %-5s: %s', list, own.empty? ? '(none)' : own.join(', '))
       end
       notes = (roles.keys - [id]).flat_map { |r| note_rules(r) }
+      others = other_team_rules(id)
       logs = log_read_rules(id)
       mem = memory_rules(id)
       tri = triage_rules(id)
       added = merged['deny'].count do |r|
-        factory.include?(r) && !notes.include?(r) && !logs.include?(r) && !mem.include?(r) && !tri['deny'].include?(r)
+        factory.include?(r) && !notes.include?(r) && !logs.include?(r) && !mem.include?(r) && !tri['deny'].include?(r) && !others.include?(r)
       end
       asks = merged['ask'].count { |r| factory.include?(r) }
       note = merged['allow'].any? { |r| factory.include?(r) } ? ', Edit allow on its own progress note and deny on the other seats\'' : ''
@@ -906,7 +1014,13 @@ class TeamConfig
                elsif id == LOG_READER then ', Read allow and Edit deny on the triage record folder'
                else ', Edit and Read deny on the triage record folder'
                end
-      out << "    added: Edit deny on #{added} protected paths#{asks.positive? ? ", ask on #{asks} push-to-#{base_branch} patterns" : ''}#{note}#{memo}#{log}#{triage}"
+      watched = other_teams.select { |t| t['observers'].include?(id) }.map { |t| t['path'] }
+      teams = if other_teams.empty? then ''
+              else
+                ", Read and Edit deny on #{other_teams.size} other teams' state folders" +
+                  (watched.empty? ? '' : " (observer of #{watched.join(', ')}: may read its log and notes)")
+              end
+      out << "    added: Edit deny on #{added} protected paths#{asks.positive? ? ", ask on #{asks} push-to-#{base_branch} patterns" : ''}#{note}#{memo}#{log}#{triage}#{teams}"
       out << '    note : allow rules have no effect in bypassPermissions' if mode.start_with?('bypassPermissions') && !(merged['allow'] - factory).empty?
       out << '    note : ask rules are refused in dontAsk mode, not asked' if mode == 'dontAsk' && !merged['ask'].empty?
     end
@@ -1034,6 +1148,7 @@ class TeamConfig
     die "project.name is required" if project['name'].to_s.empty?
     die "project.url must be an https://github.com/ URL" unless project['url'].to_s.start_with?('https://github.com/')
     die "repo.path is not a directory: #{repo_path}" unless File.directory?(repo_path)
+    other_teams_listed
     die 'storage.volume is required (an absolute path such as /Volumes/MyDrive)' unless storage['volume'].to_s.start_with?('/', '~')
     die 'storage.root is required and must be relative to the volume' if storage['root'].to_s.empty? || storage['root'].to_s.start_with?('/')
     die 'storage.root must not contain ..' if storage['root'].to_s.split('/').include?('..')

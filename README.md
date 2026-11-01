@@ -332,7 +332,29 @@ role's (team first; a role can add or tighten a rule, never loosen one), plus wh
   id is fixed: a team whose security seat has another id gets no record folder, every seat but `em`
   is denied it, and `check` warns about a role other than `sec` that lists the skill. Like the log's, these denies are an
   accident guard, not a boundary. As with any settings change, a `sec` seat that is already running
-  when `up` writes these rules keeps its old settings until it restarts.
+  when `up` writes these rules keeps its old settings until it restarts;
+- denies on **other teams' state folders** (#197), when more than one team runs on the machine. For each
+  other team's folder, every seat gets a `Read` deny on its `triage/**` and an `Edit` deny on all of
+  it, plus a `Read` deny on its `messages.log` and `notes/**` unless the seat's role observes that team.
+  All are written in both spellings. The other teams' folders come from two places:
+  - **Found:** every real folder beside this team's own in the state root (`.state/`) that holds
+    `settings/`, `launch/` and `prompts/`. A symlink there is never followed. `check` names the links
+    it skips: list one under `other_teams` if it is another team's state.
+  - **Listed:** `other_teams` in the team file, for a state folder elsewhere (a pinned team's, see
+    [Pinned releases](docs/pinned-release.md)), each with its `observers`. These are the roles of this
+    team the owner allows to read that team's log and notes, never its triage records:
+
+    ```yaml
+    other_teams:
+      - { state: /path/to/other/state, observers: [qa2] }
+    ```
+
+  A listed folder may not be, hold or sit inside this team's own state folder. `check` lists the other
+  teams found and listed, and each seat's denies. Settings are written at `up`, so a team that starts
+  after a seat does is covered from that seat's next restart. Teams on one machine still share the
+  machine user, so these denies are an accident guard, like the others: a command that reads or
+  writes another way is not stopped. They also share the tmux server and the shared `claude`
+  executable the copies come from.
 
 `permission_mode` (in `sessions.claude`, or per role) picks the mode; the example uses `auto`.
 `bypassPermissions` skips every prompt and is meant for an isolated machine only. Deny rules hold in

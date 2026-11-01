@@ -147,6 +147,15 @@ permissions:
     - Bash(gh api graphql*enablePullRequestAutoMerge*)
     - Bash(gh api graphql*mergeBranch*)
 
+# Other teams on this machine (#197). Every seat is denied reading another team's triage records,
+# message log and notes, and writing anything in its state folder. Teams whose state folders sit
+# beside this one's in the state root (.state/) are found by themselves. List here a team whose state
+# folder is elsewhere (a team pinned to a release: docs/pinned-release.md), and in `observers` the
+# roles of this team the owner allows to read that team's log and notes (never its triage records).
+# A team found by itself can be listed too, to give it observers. `check` lists the other teams.
+# other_teams:
+#   - { state: /path/to/other/team/state, observers: [qa2] }
+
 # Seats start in this order. Each needs: title, workdir, and one of `prompt` (a file) or
 # `prompt_text` (inline). `summary` is the line shown in the roster every seat sees.
 # Each seat costs tokens while it works, so start only the seats a task needs: README, "Right-sizing".

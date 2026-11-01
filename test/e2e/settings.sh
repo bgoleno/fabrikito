@@ -214,6 +214,57 @@ ssect sec | grep -F "added: " | grep -qF ", Edit and Read allow on the triage re
   && echo "$schk" | grep -qxF "warning: w2 lists factory:security-triage, but only a role with id sec may write triage records ($T/state/triage/): every other seat may not write there." \
   && ! echo "$schk" | grep -q "warning: sec lists factory:security-triage" \
   && ok "check: the triage folder rules on each seat's added line, and a warning for w2, which lists the skill and is not sec" || { bad "check: triage folder"; ssect sec; ssect em; echo "$schk" | grep warning; }
+echo "--- other teams' state folders (#197)"
+# Two teams on one factory checkout, their state folders side by side in one state root ($X): each
+# team's seats get Read denies on the other's triage records, log and notes and an Edit deny on all
+# of it, in both spellings ($T and its real path), and none of these on their own. A team's state
+# folder is one holding settings/, launch/ and prompts/, which up makes. In the root, a link is
+# skipped and named (one leads to our own state), and a folder without team state is passed over
+# quietly. A folder elsewhere is listed under other_teams, where an observer role (w1) may read its
+# log and notes, never its triage records. em, which reads its own team's log, is denied the other's.
+X=$T/xroot
+for d in $X/xa $X/xb $T/elsewhere; do mkdir -p $d/settings $d/launch $d/prompts; done
+mkdir -p $X/junk/notes $T/far/xc && ln -s $X/xa $X/xlink && ln -s $T/elsewhere $X/xlink2
+sed 's/^team: tt$/team: xa/' $T/sec.yaml > $T/xa.yaml && printf 'other_teams:\n  - { state: %s/far/xc, observers: [w1] }\n' $T >> $T/xa.yaml
+sed 's/^team: tt$/team: xb/' $T/sec.yaml > $T/xb.yaml
+xset() { TEAM_STATE_DIR=$X/$1 ruby $SRC/lib/team_config.rb $T/$1.yaml settings $2 | ruby -rjson -e 'puts((JSON.parse(STDIN.read)["permissions"] || {})[ARGV[0]] || [])' "$3"; }
+xhas() { printf '%s\n' "$1" | grep -qxF "$2"; }
+xr=""
+for r in em sec w1 w2; do
+  dn=$(xset xa $r deny); al=$(xset xa $r allow)
+  for sp in "$T" "$RT"; do
+    B=$sp/xroot/xb; C=$sp/far/xc
+    for rule in "Read(/$B/triage/**)" "Read(/$B/messages.log)" "Read(/$B/notes/**)" "Edit(/$B/**)" "Read(/$C/triage/**)" "Edit(/$C/**)"; do xhas "$dn" "$rule" || xr="$xr $r-lacks:$rule"; done
+    for rule in "Read(/$C/messages.log)" "Read(/$C/notes/**)"; do
+      if [ $r = w1 ]; then xhas "$dn" "$rule" && xr="$xr w1-observer-denied:$rule"; else xhas "$dn" "$rule" || xr="$xr $r-lacks:$rule"; fi
+    done
+    for rule in "Edit(/$sp/xroot/xa/**)" "Read(/$sp/xroot/xa/notes/**)"; do xhas "$dn" "$rule" && xr="$xr $r-denied-own:$rule"; done
+    printf '%s\n' "$dn" "$al" | grep -qE "/xroot/(xlink|xlink2|junk)[/)]" && xr="$xr $r-names-a-skipped-folder($sp)"
+  done
+  xhas "$al" "Edit(/$T/xroot/xa/triage/**)" || [ $r != sec ] || xr="$xr sec-lost-own-triage"
+done
+for r in em sec; do dn=$(xset xb $r deny)
+  for sp in "$T" "$RT"; do xhas "$dn" "Read(/$sp/xroot/xa/triage/**)" && xhas "$dn" "Read(/$sp/xroot/xa/messages.log)" && xhas "$dn" "Edit(/$sp/xroot/xa/**)" || xr="$xr xb-$r-lacks-xa($sp)"; done
+done
+[ -z "$xr" ] && [ "$T" != "$RT" ] && ok "other teams: each team's seats are denied the other's triage, log and notes (Read) and all of it (Edit), both spellings; an observer may read the listed team's log and notes; nothing for links, folders without state, or our own state" || bad "other teams' rules:$xr"
+xchk=$(TEAM_STATE_DIR=$X/xa $S -c $T/xa.yaml check 2>&1); xsect() { echo "$xchk" | sed -n "/^\[$1\]/,/^\[/p"; }
+echo "$xchk" | grep -qxF "other teams: $X/xb (found), $T/far/xc (listed; observers: w1)" \
+  && echo "$xchk" | grep -qxF "skipped   : $X/xlink (a symlink: list it under other_teams if it is another team's state folder)" \
+  && echo "$xchk" | grep -qxF "skipped   : $X/xlink2 (a symlink: list it under other_teams if it is another team's state folder)" \
+  && ! echo "$xchk" | grep -qF "$X/junk" \
+  && xsect em | grep -F "added: " | grep -qF ", Read and Edit deny on 2 other teams' state folders" \
+  && xsect w1 | grep -F "added: " | grep -qF ", Read and Edit deny on 2 other teams' state folders (observer of $T/far/xc: may read its log and notes)" \
+  && ok "check: lists the other teams found and listed, the links it skipped and why (not a folder without team state), and the denies on each seat's added line" || { bad "check: other teams"; echo "$xchk" | grep -E "^(other teams|skipped)"; xsect w1 | grep added; }
+# A team alone in its state root gets no rule of these, and a link or a folder without state beside it adds none.
+mkdir -p $T/aroot/solo/settings $T/aroot/solo/launch $T/aroot/solo/prompts; s0=$(TEAM_STATE_DIR=$T/aroot/solo ruby $SRC/lib/team_config.rb $T/sec.yaml settings w1)
+mkdir -p $T/aroot/stuff/notes && ln -s $T/aroot/solo $T/aroot/solink; s1=$(TEAM_STATE_DIR=$T/aroot/solo ruby $SRC/lib/team_config.rb $T/sec.yaml settings w1)
+[ -n "$s0" ] && [ "$s0" = "$s1" ] && ! echo "$s0" | grep -qF "/aroot/s" && ok "other teams: a team alone gets none of these rules, and a link or a folder without state beside it adds none" || { bad "other teams: a team alone"; diff <(echo "$s0") <(echo "$s1"); }
+reject "other_teams: this team's own state folder" "other_teams: $T/state is this team's own state folder, holds it or sits inside it" "" "other_teams: [{ state: $T/state }]"
+reject "other_teams: a folder that holds this team's state (/)" "other_teams: / is this team's own state folder, holds it or sits inside it" "" "other_teams: [{ state: / }]"
+reject "other_teams: a folder inside this team's state" "other_teams: $T/state/sub is this team's own state folder, holds it or sits inside it" "" "other_teams: [{ state: $T/state/sub }]"
+reject "other_teams: an observer that is not a role" "other_teams: observer nope of $T/far/xc is not a role of this team" "" "other_teams: [{ state: $T/far/xc, observers: [nope] }]"
+reject "other_teams: an unknown key" "unknown key(s) under 'other_teams' entry 1: bogus (allowed: state, observers)" "" "other_teams: [{ state: $T/far/xc, bogus: 1 }]"
+reject "other_teams: not a list" "other_teams must be a list of { state, observers } entries" "" "other_teams: $T/far/xc"
 # up makes the folder, owner-only, for a team with a sec role. up writes every seat's settings, so
 # this runs in a state folder and session prefix of its own, leaving the test team's alone. Only sec
 # is started; its session and worktree are removed afterwards.
