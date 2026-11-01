@@ -133,6 +133,10 @@ gives the reason when it refuses:
   `.state/<team>/say/<role>.lock`; remove it.
 - "does not show the message after the paste ... text left in input box": no Enter was sent, and
   the text goes out with the next Enter in that seat. Attach and send or clear it.
+- "the message's label was pasted into <role> but the message was not": tmux failed between the
+  label's paste and the message's (the seat's session ended, for example). Only `[from <role>]` is in
+  the box, and no Enter was sent. Attach and clear it, then send again. "could not paste into the
+  input box": tmux failed before anything reached the box. Send again.
 
 A refused message is logged as `NOT-DELIVERED`. If `say` refuses every seat after a Claude Code update,
 the update has changed how the input box is drawn, and `factory.sh` needs updating. See
