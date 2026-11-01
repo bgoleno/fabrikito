@@ -52,9 +52,10 @@ command ([docs](https://code.claude.com/docs/en/worktrees)):
 - `repo.bootstrap`: a command run with bash in the new worktree after the copy, with no terminal input
   and with `TEAM_ROLE` (the seat's role id) and `TEAM_REPO` (the main checkout) set, for example
   `npm ci` or `uv sync`. Its output is shown, indented, as it runs. It runs without the messaging and
-  tmux variables of a seat that runs `up` (`CLAUDE_CODE_MESSAGING_SOCKET`,
-  `CLAUDE_CODE_MESSAGING_TOKEN`, `CLAUDECODE`, `TMUX`, `TMUX_PANE`), so a seat's messaging token does
-  not reach an install script. Every other variable of the shell that runs `up` does reach it, and an
+  tmux variables of a seat that runs `up`: every variable whose name starts with
+  `CLAUDE_CODE_MESSAGING_` (today `CLAUDE_CODE_MESSAGING_SOCKET` and `CLAUDE_CODE_MESSAGING_TOKEN`,
+  and any that a later Claude Code adds), `CLAUDECODE`, `TMUX` and `TMUX_PANE`. So a seat's messaging
+  token does not reach an install script. Every other variable of the shell that runs `up` does reach it, and an
   install command runs third-party scripts (package install hooks, for example) with them. There is no
   time limit. If it fails, or `up` is interrupted meanwhile
   (Ctrl-C, TERM, HUP), `up` stops the bootstrap and stops before starting the seat; a worktree it has
