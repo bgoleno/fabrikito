@@ -96,9 +96,12 @@ them in for one PR, and does not restate them. Where the two differ, the role pr
    That is stricter than the hard rule on what stays out of public trackers, on purpose: `sec`
    rates it first. For each such point, once, post a marker: a PR comment whose whole text is the
    one line `<your role id>: one point sent to sec and the EM`, which `factory:merge-train` holds a
-   merge on until sec clears it. Your report refers to it only by its URL; a later report that
-   still has the point gives the same URL and posts no new marker. Send `sec` and the EM the
-   marker's URL with the point, so sec can match them.
+   merge on until sec clears it. Your report refers to it only by its URL, on a line of its own,
+   `held point: <marker URL>`, which `factory:merge-train` reads; a later report that still has
+   the point gives the same line and posts no new marker. Send `sec` and the EM the marker's URL
+   with the point, so sec can match them. A marker posted by mistake stays: tell `sec` and the EM,
+   and sec clears it (`factory:security-triage` step 6). Never delete or edit a marker: a train
+   may already have seen its hold, and one that vanishes or changes reads as no hold.
    Right before posting, check the head again (`gh pr view <n> -R <repo>
    --json headRefOid`); if it moved, your report is for the old head, so say so or start again.
    Then post the file as a command of its own: `gh pr comment <n> -R <repo> --body-file <file>`,

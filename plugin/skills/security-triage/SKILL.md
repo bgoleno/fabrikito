@@ -113,6 +113,10 @@ one finding, and does not restate them. Where the two differ, the role prompt wi
        matched by the marker URL its reporter sent you; never clear a marker you cannot match. That
        line is the only clearance the EM and `factory:merge-train` count, and only at that head: a
        new commit needs a new one.
+     - A marker posted by mistake (a point that was not one, a repeat, the wrong PR) is cleared the
+       same way, by that line, once its reporter has sent you its URL and said so. Never delete or
+       edit a marker, yours or another seat's, and never ask its poster to: a train may already
+       have seen its hold, and one that vanishes or changes reads as no hold.
      - Already written somewhere public: add nothing there, and tell the EM where it is. Editing or
        deleting it is the owner's decision.
    - "Unfixed" means not fixed on the base. A merged fix is still not disclosed until the owner says

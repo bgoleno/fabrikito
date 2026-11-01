@@ -145,6 +145,14 @@ nothing outside its scratch clone. Use it to see what a real run would do.
        Seats share one account, so each is self-labelled text. A comment with no verdict line (a
        diff check, a note that a verdict follows) is not a verdict, whatever head it names. A
        comment with more than one verdict line, or one you cannot read plainly, stops the train.
+   - **Order is by id, never by time.** "Latest", "later", "after" and "since" in this skill
+     compare ids: the number after `issuecomment-` in a comment's URL, or after
+     `pullrequestreview-` in a PR review's (its `id` in `gh api repos/<repo>/pulls/<n>/reviews`).
+     The `id` that `gh pr view` gives either kind is not that number. The larger id is the later.
+     Never order by `createdAt`, `submittedAt` or `updatedAt`: GitHub can give a later comment an
+     earlier time. Comment ids and review ids are separate counters, so a comment and a review
+     cannot be ordered against each other: where the result turns on which of the two came later
+     (a reviewer with a verdict of each kind), stop and ask.
    - **At `H`:** each required reviewer's latest verdict on the PR passes (`READY`, or a QA `pass`
      that names it) and its verdict line names `H` (by a prefix of at least 7 characters). A
      verdict at an older head never counts, even where that reviewer has since posted a check of
@@ -159,8 +167,11 @@ nothing outside its scratch clone. Use it to see what a real run would do.
        `sec: one change sent to the author and the EM` (`factory:review-pr`,
        `factory:verify-behavior`, `factory:security-triage` step 6), whoever posted it. Its comment
        id (the number after `issuecomment-` in its URL) names the hold. The same words inside a
-       longer comment (a verdict, a design note, a quote) are never a marker: verdicts refer to a
-       marker by its URL. If a marker seen earlier in this run is edited or gone, stop.
+       longer comment (a verdict, a design note, a quote) are never a marker: verdicts and QA
+       reports refer to a marker on a line `held point: <marker URL>`. If a marker seen earlier in
+       this run is edited or gone, stop. A marker posted by mistake still holds until sec clears it
+       as below (`factory:security-triage` step 6). Deleting or editing it clears nothing: a
+       reference to it then stops the train (below).
      - **Cleared** means a comment on the PR whose text starts with `sec` as a whole word (never
        text quoted inside another comment), with the line
        `sec: held points for #<n> cleared at <sha>: <comment id>, <comment id>` naming `H`
@@ -175,13 +186,16 @@ nothing outside its scratch clone. Use it to see what a real run would do.
        without it: write that entry, ask the reporter to post a marker and send its URL to sec and
        you, then stop.
      - **A reference to a marker that is gone or changed** stops the train. A reference is every id
-       in a clearance line, and every link to a comment on this PR
-       (`.../pull/<n>#issuecomment-<id>`) in a verdict or QA report whose line says it is a held
-       point (it says "held point", "sent to sec" or "marker"). Each must still be a comment on
-       this PR (in `gh pr view <n> --json comments` now) whose whole text is exactly a marker line.
-       If one is missing (deleted) or its text is no longer exactly that line (edited), stop, and
-       name the comment that refers to it and the id. Never read a missing or edited marker as no
-       hold.
+       in a clearance line, and the link on every `held point: <URL>` line in a verdict or QA
+       report (`factory:review-pr` step 7, `factory:verify-behavior` step 8; the line starts with
+       `held point:`, after any list mark or bold). A link to a comment on this PR
+       (`.../pull/<n>#issuecomment-<id>`) on another line of a verdict or QA report that says it is
+       a held point ("held point", "sent to sec" or "marker"), the form older reports use, is one
+       too. Each must still be a comment on this PR (in `gh pr view <n> --json comments` now) whose
+       whole text is exactly a marker line. If one is missing (deleted) or its text is no longer
+       exactly that line (edited), stop, and name the comment that refers to it and the id. A
+       `held point:` line whose link is not to a comment on this PR stops the train too. Never
+       read a missing or edited marker as no hold.
      - **Any link to a comment on this PR that is gone** stops the train too, wherever it sits in a
        verdict, QA report or clearance: what it pointed at cannot be checked. A link to a live
        comment that is not a marker, on a line that does not say it is a held point (an earlier
@@ -199,8 +213,9 @@ nothing outside its scratch clone. Use it to see what a real run would do.
 7. **Check again just before the merge:**
    - `git fetch origin`. `origin/<base>` must be `B0` (first PR), or this run's own last merge
      commit, checked in step 9. Anything else means the base moved: stop.
-   - `gh pr view <n> -R <repo> --json headRefOid,reviews,comments,statusCheckRollup`: the head
-     must still be `H`, and nothing posted since step 5 (a verdict, a held-point marker, a check)
+   - `gh pr view <n> -R <repo> --json headRefOid,reviews,comments,statusCheckRollup` (and
+     `gh api repos/<repo>/pulls/<n>/reviews` for review ids): the head must still be `H`, and no
+     comment or review that step 5 did not see, by id (a verdict, a held-point marker, a check),
      may change its result. A gate takes a while; a reviewer may have spoken during it. Check every
      marker reference again as step 5 says: a marker deleted or edited during the gate stops.
    - A message can reach you during the gate too: read your note's file again, and handle a
