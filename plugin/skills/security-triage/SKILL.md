@@ -96,9 +96,23 @@ one finding, and does not restate them. Where the two differ, the role prompt wi
      message, branch name or public alert comment. A message with an exposed credential also says
      that rotating it is the owner's step.
      - Found while reviewing a PR: ask the EM in that message to hold the merge until the fix is
-       reviewed. Give the author the details by `SendMessage`, and say no more on the PR than that
-       a change was sent to the author and the EM, with no class, file or severity, posted with
-       `gh pr comment --body-file <file>` (never a body in the command itself).
+       reviewed. Give the author the details by `SendMessage`, and say no more on the PR than a
+       marker: a comment whose whole text is the one line
+       `sec: one change sent to the author and the EM`, one per point and posted once, with
+       `gh pr comment --body-file <file>` (never a body in the command itself). Send the EM its URL.
+     - A point held on a PR: every hold has a marker on the PR, a comment whose whole text is one
+       line (yours above, or a reviewer's or qa's `<role id>: one point sent to sec and the EM`),
+       and its reporter sends you its URL. If you cannot match a marker to a point, ask its
+       reporter. Once the points behind some markers are fixed and reviewed at a head, rated low
+       or ruled out, or (for a point about code already on the base) tracked where step 8 records
+       it, post on the PR, the same way, in a comment that starts with `sec`,
+       as a line of its own (alone or in your verdict),
+       `sec: held points for #<n> cleared at <short sha>: <comment id>, <comment id>`, naming
+       each marker it clears by its comment id (the number after `issuecomment-` in its URL), and
+       nothing about the points themselves. Name only markers whose points you have triaged, each
+       matched by the marker URL its reporter sent you; never clear a marker you cannot match. That
+       line is the only clearance the EM and `factory:merge-train` count, and only at that head: a
+       new commit needs a new one.
      - Already written somewhere public: add nothing there, and tell the EM where it is. Editing or
        deleting it is the owner's decision.
    - "Unfixed" means not fixed on the base. A merged fix is still not disclosed until the owner says
