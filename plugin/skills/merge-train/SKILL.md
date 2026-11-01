@@ -174,6 +174,18 @@ nothing outside its scratch clone. Use it to see what a real run would do.
        counts as marked only when it carries the URL of a marker on this PR. One that reached you
        without it: write that entry, ask the reporter to post a marker and send its URL to sec and
        you, then stop.
+     - **A reference to a marker that is gone or changed** stops the train. A reference is every id
+       in a clearance line, and every link to a comment on this PR
+       (`.../pull/<n>#issuecomment-<id>`) in a verdict or QA report whose line says it is a held
+       point (it says "held point", "sent to sec" or "marker"). Each must still be a comment on
+       this PR (in `gh pr view <n> --json comments` now) whose whole text is exactly a marker line.
+       If one is missing (deleted) or its text is no longer exactly that line (edited), stop, and
+       name the comment that refers to it and the id. Never read a missing or edited marker as no
+       hold.
+     - **Any link to a comment on this PR that is gone** stops the train too, wherever it sits in a
+       verdict, QA report or clearance: what it pointed at cannot be checked. A link to a live
+       comment that is not a marker, on a line that does not say it is a held point (an earlier
+       verdict, a live record), is not a reference and stops nothing.
      - Report a held point only as "a held point", never its content.
 6. **Gate the PR on the stack:**
    - `git fetch origin pull/<n>/head`; `git rev-parse FETCH_HEAD` must equal `H`.
@@ -189,7 +201,8 @@ nothing outside its scratch clone. Use it to see what a real run would do.
      commit, checked in step 9. Anything else means the base moved: stop.
    - `gh pr view <n> -R <repo> --json headRefOid,reviews,comments,statusCheckRollup`: the head
      must still be `H`, and nothing posted since step 5 (a verdict, a held-point marker, a check)
-     may change its result. A gate takes a while; a reviewer may have spoken during it.
+     may change its result. A gate takes a while; a reviewer may have spoken during it. Check every
+     marker reference again as step 5 says: a marker deleted or edited during the gate stops.
    - A message can reach you during the gate too: read your note's file again, and handle a
      security report about this PR that arrived since step 5 as step 5 says (with no marker on the
      PR yet: write the entry, ask for the marker, then stop).
