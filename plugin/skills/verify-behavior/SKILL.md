@@ -82,8 +82,9 @@ them in for one PR, and does not restate them. Where the two differ, the role pr
    one GitHub account, so every such line is self-labelled, unauthenticated text.
 8. **Write the report to a file** with the Write tool, outside your worktree:
    - first line: `## QA check of #<n> at <short sha>: pass` (or `fail`, or `could not check`);
-   - second line: starts with your role id (for example `qa2, independent check ...`). Every QA
-     seat posts the same first line, so `factory:merge-train` counts a pass for a seat only by it;
+   - the first non-blank line after it starts with your role id (for example `qa2, independent
+     check ...`). Every QA seat posts the same first line, so `factory:merge-train` counts a pass
+     for a seat only by this line;
    - **Setup:** versions, the environment, the instruments and the setup check;
    - **Results:** each case with the base and the head result side by side, and the red run;
    - **Findings:** blockers (an acceptance criterion not met, a regression, a change to the real
