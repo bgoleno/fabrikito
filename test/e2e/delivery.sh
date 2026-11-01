@@ -1,5 +1,8 @@
 # Sourced by test/e2e.sh, in its shell and in the order of AREAS there (#70); not run alone.
 # say delivers only to a seat showing its input box. Its own team (tp) on the same tmux server and state.
+# Its label goes in as a paste of its own, and the message only once the box holds just that label
+# (#150): a missing or other label, a failed paste, and a placeholder without its label are refused
+# with no Enter; owner and live-test labels go in the same way.
 echo "--- say delivers only to a seat showing its input box"
 # The stand-in draws Claude Code 2.1.316's input box unless a seat has a dialog file, which it draws
 # instead (a dialog replaces the box). pp, pm, pd and ph show dialogs copied from 2.1.316 screens

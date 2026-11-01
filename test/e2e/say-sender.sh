@@ -1,5 +1,6 @@
 # Sourced by test/e2e.sh, in its shell and in the order of AREAS there (#70); not run alone.
 # say: who the sender is: TEAM_ROLE unset (#41, #97), across tmux servers (#115), not a sender (#89).
+# say writes its messages.log line before its terminal message, so a failed terminal write still logs it (#128).
 # Starts a live-env environment and removes it.
 echo "--- say with TEAM_ROLE unset (#41): never [from owner] from inside a seat"
 # waitlog <lines before>: wait up to 10s for say to append its log line.

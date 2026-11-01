@@ -166,14 +166,14 @@ them. When `check` lists a copy with no running seat, remove that folder by its 
 
 Under heavy load, macOS's bash 3.2 does not restart a pipe write that a child's exit interrupts
 ([#101](../../../issues/101)). Rerun the test. This is the only failure where a green rerun is the
-answer: for any other failure, a green rerun is not evidence. See [Tests](../README.md#tests).
+answer: for any other failure, a green rerun is not evidence. See [The one failure to rerun](testing.md#the-one-failure-to-rerun).
 
 ### A test command reached the real team's tmux server
 
 tmux follows `$TMUX` when it is set, and falls back to the default server, without a word, when
 `TMUX_TMPDIR` is empty or names a folder that does not exist. Run live tests through
 `test/live-env.sh`, which unsets `TMUX`, points `TMUX_TMPDIR` at a folder of its own and checks that
-folder on every call. See [Tests](../README.md#tests).
+folder on every call. See [Live tests](testing.md#live-tests).
 
 ## For contributors
 
