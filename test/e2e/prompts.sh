@@ -43,3 +43,4 @@ for r in $(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml ids); do
   [ $rc = 0 ] && [ $rn = 0 ] && [ -n "$want" ] && [ "$c" = "$want" ] && [ "$none" = "$want" ] \
     && ok "example seat $r renders the same under LC_ALL=C and with no locale" || { bad "example seat $r under LC_ALL=C (rc=$rc) or no locale (rc=$rn)"; echo "$c" | tail -2; }
 done
+e2e_end=prompts # the last line: test/e2e.sh checks that the file ran to here

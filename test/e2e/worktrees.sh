@@ -89,3 +89,4 @@ echo '  w3: { title: Worker Three, workdir: { type: worktree }, prompt_text: "w3
 rm_out=$($S -c $T/team2.yaml up --no-view w3 2>&1); echo "$rm_out" | grep -E "error|skip" | cut -c1-150 | head -2
 echo "$rm_out" | grep -q "is not mounted; refusing" && ok "unmounted volume refused with a clear error" || { bad "unmounted volume refused"; echo "<<<$rm_out>>>"; }
 [ ! -e /Volumes/NotMounted ] && ok "nothing created at the missing volume" || bad "nothing created at the missing volume"
+e2e_end=worktrees # the last line: test/e2e.sh checks that the file ran to here

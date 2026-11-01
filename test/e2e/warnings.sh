@@ -75,3 +75,4 @@ for c in 'gh pr comment 83 --body "ready to merge"' 'gh pr view 5 --json mergeab
 done
 # A quoted "yes" is a string, not a boolean. (An unquoted yes is YAML 1.1's true, and is accepted.)
 reject "a quoted \"yes\" for may_merge" "roles.em.may_merge must be true or false" "" "" ', may_merge: "yes"'
+e2e_end=warnings # the last line: test/e2e.sh checks that the file ran to here

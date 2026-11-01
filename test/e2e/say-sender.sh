@@ -189,3 +189,4 @@ TEAM_ROLE=nosuch $S -c $T/team.yaml say all "to all from nosuch" >/dev/null 2>&1
 TEAM_ROLE=w2 $S -c $T/team.yaml say w1 "sent as w2, a role of the team" >/dev/null 2>&1; sleep 1
 tmux capture-pane -p -t '=tt-w1:' | grep -qF "[from w2] sent as w2, a role of the team" && [ "$(tail -1 $T/state/messages.log | cut -f2-4)" = "w2	w1	delivered" ] &&
   ok "say with TEAM_ROLE set to a role of the team (w2, whose own seat is down) is delivered" || { bad "say with a valid TEAM_ROLE"; tail -1 $T/state/messages.log; }
+e2e_end=say-sender # the last line: test/e2e.sh checks that the file ran to here

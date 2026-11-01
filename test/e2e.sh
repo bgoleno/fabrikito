@@ -47,6 +47,11 @@ pass=0; fail=0; ok(){ echo "PASS $1"; pass=$((pass+1)); }; bad(){ echo "FAIL $1"
 # the count and the exit trap. Each holds a run of sections and relies on the state the areas before it
 # leave. A file not listed here would never run, and sourcing a file with a syntax error runs part of it
 # and carries on, so either one would lower the count without a failure: both stop the run here.
+# bash -n does not catch every way a sourced file stops short: bash 3.2 passes a heredoc whose
+# terminator does not match (sourced, it swallows the rest of the file and returns 0), and a top-level
+# return, continue or break ends the file (continue and break also act on the loop that sources it).
+# So each file's last line is e2e_end=<its name>, checked after it is sourced, and the list of files
+# that got there is checked after the loop, which catches the continue and break that skip the check.
 AREAS="launch settings say say-sender worktrees view delivery config skills warnings gate hooks claude-copy prompts live"
 E2E_DIR=$SRC/test/e2e
 for e2e_f in "$E2E_DIR"/*.sh; do e2e_a=${e2e_f##*/}; e2e_a=${e2e_a%.sh}; [ "$e2e_a" = lib ] && continue
@@ -54,7 +59,7 @@ for e2e_f in "$E2E_DIR"/*.sh; do e2e_a=${e2e_f##*/}; e2e_a=${e2e_a%.sh}; [ "$e2e
 done
 for e2e_a in lib $AREAS; do
   [ -f "$E2E_DIR/$e2e_a.sh" ] || { echo "test/e2e/$e2e_a.sh is missing" >&2; exit 2; }
-  bash -n "$E2E_DIR/$e2e_a.sh" || { echo "test/e2e/$e2e_a.sh has a syntax error" >&2; exit 2; }
+  "$BASH" -n "$E2E_DIR/$e2e_a.sh" || { echo "test/e2e/$e2e_a.sh has a syntax error" >&2; exit 2; }
 done
 # throwaway repo with a "github" slug the origin URL contains
 git init -q --bare $T/local/origin.git; git clone -q $T/local/origin.git $T/repo 2>/dev/null
@@ -108,8 +113,15 @@ Y
 export PATH=$T/bin:$PATH
 # legacy worktree for w2, internal disk
 git -C $T/repo worktree add -q --detach $T/repo/.claude/worktrees/team-w2 origin/main
-. "$E2E_DIR/lib.sh"
-for e2e_a in $AREAS; do . "$E2E_DIR/$e2e_a.sh"; done
+e2e_done=
+for e2e_a in lib $AREAS; do
+  e2e_end=
+  . "$E2E_DIR/$e2e_a.sh"
+  [ "$e2e_end" = "$e2e_a" ] || { echo "test/e2e/$e2e_a.sh stopped before its last line (e2e_end=$e2e_a): a heredoc terminator that does not match, or a top-level return" >&2; exit 2; }
+  e2e_done="$e2e_done $e2e_a"
+done
+[ "$e2e_done" = " lib $AREAS" ] || { for e2e_x in lib $AREAS; do case "$e2e_done " in *" $e2e_x "*) ;; *) break ;; esac; done
+  echo "test/e2e/$e2e_x.sh did not run to its last line (these did:$e2e_done): a top-level continue or break" >&2; exit 2; }
 echo "--- iTerm"
 [ ! -e $T/osascript.log ] && ok "nothing in this run called osascript, so no iTerm window was opened" || { bad "osascript was called $(wc -l < $T/osascript.log | tr -d ' ') time(s)"; cut -c1-120 $T/osascript.log | head -5; }
 echo "--- cleanup"

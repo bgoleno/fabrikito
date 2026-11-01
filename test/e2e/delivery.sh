@@ -180,3 +180,4 @@ tall td refused "$(msg 290)" "the end of a tall message in a box that is not ful
 # A full box whose visible end matches but is under 40 characters is too little to go on: refused.
 tall te refused "$(msg 50)"$'\n'"ok"$'\n'"go" "a tall message whose visible end is under 40 characters"
 $S -c $T/tp.yaml down --yes >/dev/null 2>&1
+e2e_end=delivery # the last line: test/e2e.sh checks that the file ran to here

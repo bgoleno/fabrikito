@@ -15,3 +15,4 @@ sed 's#^storage:#display: { primary: w2 }\nstorage:#' $T/team.yaml > $T/team3.ya
 $S -c $T/team3.yaml view --print | grep "tell s0 to write text" | grep -q "tt-w2" && ok "view: display.primary moves w2 to the left" || bad "view: display.primary"
 sed 's#^storage:#display: { primary: nobody }\nstorage:#' $T/team.yaml > $T/team4.yaml
 $S -c $T/team4.yaml check 2>&1 | grep -q "not a role id" && ok "view: unknown display.primary rejected" || bad "view: unknown primary"
+e2e_end=view # the last line: test/e2e.sh checks that the file ran to here

@@ -62,3 +62,4 @@ mk; sed -i '' 's#github: local/origin.git }#github: local/origin.git, base: main
 nb=$($S -c $T/v.yaml check 2>&1); TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml settings em | grep -q "git push" && bad "base without a remote still produced push rules" || { echo "$nb" | grep -qF "no base-branch push rules" && ok "repo.base without a remote: no push rules, and check says so" || { bad "check: no base-branch note"; echo "$nb" | tail -3; }; }
 mk "args: [--dangerously-skip-permissions]"
 lg=$($S -c $T/v.yaml check 2>&1) && echo "$lg" | grep -qE "^em .* bypassPermissions \(args\)" && ok "legacy: --dangerously-skip-permissions in args with no mode still loads; check shows bypassPermissions (args)" || { bad "legacy args file"; echo "$lg" | tail -4; }
+e2e_end=skills # the last line: test/e2e.sh checks that the file ran to here

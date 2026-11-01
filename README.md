@@ -680,7 +680,9 @@ tools, not Bash.
 The cases live in `test/e2e/`, one file per area, and `test/e2e.sh` sources them in the order of its
 `AREAS` list, in one shell, after one shared setup ([#70](../../issues/70)). A new case goes in its
 area's file. A new file must be added to `AREAS`, or the run stops: it never skips a file it was not told
-about.
+about. Each file's last line is `e2e_end=<its name>`, and the run stops when a file does not get there (a
+heredoc that never ends, a top-level `return`, `continue` or `break`), so no part of an area is skipped
+in silence.
 
 The exit code is authoritative: `test/e2e.sh` exits 0 only when it reaches the end with every
 assertion passed (`RESULT pass=<n> fail=0`), and non-zero when any assertion fails or the run stops

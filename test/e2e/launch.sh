@@ -54,3 +54,4 @@ miss=""; for x in $(grep -o 'factory:[a-z][a-z0-9-]*' $SRC/teams/example.yaml | 
 pd() { grep -E "^$1 " $T/args.log | grep -o -- "--plugin-dir [^ ]*"; }
 [ "$PLUG" = "$(cd $SRC && pwd -P)/plugin" ] && [ "$(pd em)" = "--plugin-dir $PLUG" ] && [ "$(pd w1)" = "--plugin-dir $PLUG" ] && ok "every seat got --plugin-dir once, with the real path of <install>/plugin" || { bad "--plugin-dir per seat"; cat $T/args.log; }
 $S -c $T/team.yaml check 2>&1 | grep -qxF "plugin    : $PLUG (skills as /factory:<skill>)" && ok "check: plugin header shows the loaded plugin" || { bad "check: plugin header"; $S -c $T/team.yaml check 2>&1 | head -10; }
+e2e_end=launch # the last line: test/e2e.sh checks that the file ran to here

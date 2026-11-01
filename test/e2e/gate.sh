@@ -77,3 +77,4 @@ before=$(runs); gate s8 $T/plain/sub
 # Every send-back above (first, last, new turn, new session, timeout, failed status, unreadable
 # repository and worktree) carried it.
 [ "$bounces" -ge 10 ] && [ -z "$nopurp" ] && ok "every send-back ($bounces) says how to stop on purpose and gives the limit (2)" || bad "send-backs without the stop-on-purpose sentence and limit (sessions:$nopurp; $bounces send-backs)"
+e2e_end=gate # the last line: test/e2e.sh checks that the file ran to here

@@ -154,3 +154,4 @@ rm -f $T/le4link; [ -e "$le4" ] && $LE down "$le4" >/dev/null 2>&1
 srvsock="$(cd "$le/tmux" && pwd -P)/tmux-$(id -u)/default"
 out=$($LE down "$le" 2>&1); rc=$?
 [ $rc = 0 ] && [ ! -e "$le" ] && [ ! -e "$le2" ] && ! tmux -S "$srvsock" has-session 2>/dev/null && ok "live-env down stops the private server and removes the folder" || { bad "live-env down (rc=$rc)"; echo "$out"; ls -la "$le" 2>&1 | head -3; }
+e2e_end=live # the last line: test/e2e.sh checks that the file ran to here

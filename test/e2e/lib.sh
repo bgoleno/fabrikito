@@ -27,3 +27,4 @@ accept() {
   if out=$($S -c $T/v.yaml check 2>&1); then ok "accepts $what"; else bad "accepts $what"; echo "$out" | tail -2; fi
 }
 rule() { echo "permissions: { $1: [$2] }"; }
+e2e_end=lib # the last line: test/e2e.sh checks that the file ran to here

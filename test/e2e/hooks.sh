@@ -112,3 +112,4 @@ printf '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"comma
 o3=$(printf '{"hook_event_name":"PostToolUse","tool_name":"SendMessage","tool_input":{"to":"tt-w2","message":"m"}}' | $SRC/lib/log_message.sh $T/no-such-dir/messages.log w9 2>&1); r3=$?
 [ $r1 = 0 ] && [ $r3 = 0 ] && [ -z "$o3" ] && [ "$(wc -l < $LG)" -eq "$n" ] && [ ! -e $T/no-such-dir ] \
   && ok "another tool, and a log that cannot be written: exit 0, nothing printed, nothing logged" || { bad "log hook failure cases ($r1 $r3)"; echo "$o3"; }
+e2e_end=hooks # the last line: test/e2e.sh checks that the file ran to here

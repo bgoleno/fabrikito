@@ -251,3 +251,4 @@ chmod u+w $T/state/settings/em.json && echo '{"permissions":{}}' > $T/state/sett
 $S -c $T/team.yaml down --yes em >/dev/null; TEAM_VIEW=0 $S -c $T/team.yaml up --no-view em >/dev/null 2>&1
 [ "$(perms $T/state/settings/em.json)" = "$want_em" ] && [ "$(stat -f %Lp $T/state/settings/em.json)" = 444 ] && ok "up rewrites a stale settings file" || { bad "up rewrites settings"; perms $T/state/settings/em.json; }
 [ "$(cat $T/state/notes/em.md 2>&1)" = "Task: survive a restart" ] && ok "a seat's progress note survives down and up" || { bad "progress note after down/up"; ls -la $T/state/notes 2>&1; }
+e2e_end=settings # the last line: test/e2e.sh checks that the file ran to here
