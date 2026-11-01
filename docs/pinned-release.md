@@ -11,7 +11,7 @@ The placeholders below stand for your own paths and names:
 | Placeholder | What it is |
 |---|---|
 | `<factory>` | Your main checkout of software-factory. |
-| `<release>` | A tag or a commit of software-factory, for example `v0.1.0`, the first release tag. Cutting release tags is the owner's call. A commit works the same way, and `check` names a lightweight tag as well as an annotated one. |
+| `<release>` | A tag or a commit of software-factory, for example `v0.1.0`, the first release tag. Release tags are annotated, and a tag's message holds that release's notes, including any change to the state layout. Creating and pushing a tag is the owner's step. A commit works the same way, and `check` names a lightweight tag as well as an annotated one. |
 | `<releases>` | A folder outside `<factory>` that holds one checkout per release, for example `<releases>/factory-<release>`. |
 | `<state>` | The team's state folder, outside every checkout, on the same volume as `<factory>`. |
 | `<team>` | The team's name (`team:` in the team file). |
@@ -76,9 +76,12 @@ The team's state is moved, not copied, so nothing is left behind:
 2. Note what to check afterwards: the number of files in `<factory>/.state/<team>/notes/`, the last line
    of `<factory>/.state/<team>/messages.log`, and the number of records in `triage/`, if there is one.
 3. Stop the team from the main checkout: `<factory>/factory.sh -c <factory>/teams/<team>.yaml down --yes`.
-4. Move the state folder: `mv <factory>/.state/<team> <state>`. On one volume, this is a rename, and
-   nothing is copied or lost. To another volume, `mv` copies and then deletes: do it only with every seat
-   down, and check the counts before you rely on it.
+4. Move the state folder: `mv <factory>/.state/<team> <state>`. `<state>` must not exist yet: if it
+   does, `mv` puts the folder inside it, at `<state>/<team>`, and the link would then point one level
+   too high, so `up` would start with no notes and no log. Check right after the move that
+   `<state>/notes/` and `<state>/messages.log` exist. On one volume, the move is a rename, and nothing is
+   copied or lost. To another volume, `mv` copies and then deletes: do it only with every seat down, and
+   check the counts before you rely on it.
 5. Set up the release checkout as above, steps 1 to 3.
 6. Move the team file out of the main checkout's `teams/`, so the main checkout cannot start this team
    by mistake.
@@ -109,8 +112,8 @@ During the overlap, old and new seats share the state folder: the message log, t
 `say` takes and the claude copies. They can message each other, and both write the same log. That is
 safe only while the two releases agree on two things:
 
-- **The state layout.** If a release's notes say it changed what is kept in the state folder, or how,
-  upgrade with a full restart instead.
+- **The state layout.** If the new release's notes (its tag's message: `git -C <factory> tag -n99 -l <new>`)
+  say it changed what is kept in the state folder, or how, upgrade with a full restart instead.
 - **The team file.** Each checkout has its own copy of the team file, and an old seat's `say` reads the
   old copy. A changed team file (a role added or removed, a changed prefix or session name, a changed
   roster) needs a full restart, not a rolling one.

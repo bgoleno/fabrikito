@@ -66,9 +66,17 @@ Bash(git push */main *)'
 [ "$(rules $T/state/settings/em.json ask | grep '^Bash(git push ')" = "$base_rules" ] && ok "ask on any push to the base branch (main, from origin/main): the 8 patterns" || { bad "base-branch ask"; rules $T/state/settings/em.json ask; }
 chk=$($S -c $T/team.yaml check 2>&1)
 # check names the factory checkout the team runs from and its commit (#189): a team pinned to a
-# release runs from its own checkout. $SRC is a git checkout here; an install of links is not.
-idesc=$(git -C $SRC describe --tags --always --dirty 2>/dev/null)
-[ -n "$idesc" ] && echo "$chk" | grep -qxF "install   : $SRC at $idesc" && ok "check: the install line names the factory checkout and its git describe" || { bad "check: install line (describe '$idesc')"; echo "$chk" | grep -E "^install "; }
+# release runs from its own checkout. Not read from $SRC, which may be an export with no .git (tl on
+# #191): a throwaway git checkout of copied files, with a lightweight tag (plain describe skips one),
+# then a change to a tracked file (-dirty). The team file in teams/ is untracked, so not dirty.
+mkdir -p $T/ginst/teams && cp -R $SRC/factory.sh $SRC/lib $SRC/roles $SRC/plugin $T/ginst/ && echo tracked > $T/ginst/VERSION
+gq() { git -C $T/ginst -c user.name=e2e -c user.email=e2e@example.invalid -c commit.gpgsign=false "$@" >/dev/null 2>&1; }
+gq init -q && gq add -A && gq commit -q -m release && gq tag v9.8.7 && cp $T/team.yaml $T/ginst/teams/team.yaml
+gl=$($T/ginst/factory.sh -c $T/ginst/teams/team.yaml check 2>&1 | grep "^install ")
+echo changed >> $T/ginst/VERSION
+gd=$($T/ginst/factory.sh -c $T/ginst/teams/team.yaml check 2>&1 | grep "^install ")
+[ "$gl" = "install   : $T/ginst at v9.8.7" ] && [ "$gd" = "install   : $T/ginst at v9.8.7-dirty" ] \
+  && ok "check: the install line names the factory checkout and its tag (lightweight), with -dirty after a change" || { bad "check: install line in a git checkout"; echo "clean: $gl"; echo "dirty: $gd"; }
 mkdir -p $T/linst/teams; for p in factory.sh lib roles plugin; do ln -s $SRC/$p $T/linst/$p; done; cp $T/team.yaml $T/linst/teams/team.yaml
 $T/linst/factory.sh -c $T/linst/teams/team.yaml check 2>&1 | grep -qxF "install   : $T/linst (not a git checkout)" && ok "check: an install outside any git checkout says so" || { bad "check: install line outside git"; $T/linst/factory.sh -c $T/linst/teams/team.yaml check 2>&1 | grep -E "^(install|error)"; }
 echo "$chk" | grep -qxF "bootstrap : $T/bin/boot (run in each new worktree before its seat starts)" && echo "$chk" | grep -qxF "copy      : .env.local, conf/dev.json, missing.txt (from the main checkout into each new worktree)" && ok "check: bootstrap and copy lines" || { bad "check: bootstrap and copy lines"; echo "$chk" | grep -E "^(bootstrap|copy) "; }
