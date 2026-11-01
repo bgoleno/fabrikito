@@ -592,14 +592,24 @@ class TeamConfig
 
   # How path overlaps this team's own work, or nil: it is, holds or sits inside the repository, the
   # worktree folder or a seat's working directory, or it is or holds the home folder or this factory
-  # checkout (a state folder may sit inside either: the state root is in the checkout).
+  # checkout. When the repository or a working directory holds this team's own state root (a team
+  # working on software-factory keeps .state/ in its own checkout, tl on #200), a folder inside that
+  # state root is exempt from "sits inside" it: the other teams' folders are there.
   def own_work_overlap(path)
-    return "is, holds or sits inside this team's repository (repo.path)" if path_overlap?(path, repo_path)
-    return "is, holds or sits inside this team's worktree folder (#{worktree_root})" if path_overlap?(path, worktree_root)
+    fold = RUBY_PLATFORM.include?('darwin') ? ->(x) { x.unicode_normalize(:nfc).downcase } : ->(x) { x }
+    within = ->(i, o) { i == o || i.start_with?(o.end_with?('/') ? o : "#{o}/") }
+    r = fold.call(real_path(path))
+    root = fold.call(real_path(File.dirname(state_dir)))
+    holds = ->(dir) { within.call(fold.call(real_path(dir)), r) }
+    in_root = r != root && within.call(r, root)
+    meets = lambda do |dir|
+      d = fold.call(real_path(dir))
+      in_root && within.call(root, d) ? holds.call(dir) : path_overlap?(path, dir)
+    end
+    return "is, holds or sits inside this team's repository (repo.path)" if meets.call(repo_path)
+    return "is, holds or sits inside this team's worktree folder (#{worktree_root})" if meets.call(worktree_root)
 
-    roles.each_key { |id| return "is, holds or sits inside seat #{id}'s working directory" if path_overlap?(path, workdir(id)) }
-    r = real_path(path)
-    holds = ->(dir) { d = real_path(dir); d == r || d.start_with?(r.end_with?('/') ? r : "#{r}/") }
+    roles.each_key { |id| return "is, holds or sits inside seat #{id}'s working directory" if meets.call(workdir(id)) }
     return 'is or holds the home folder' if holds.call(home_utf8)
     return 'is or holds this factory checkout' if holds.call(INSTALL)
 

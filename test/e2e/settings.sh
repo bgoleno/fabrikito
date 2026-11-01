@@ -256,6 +256,17 @@ echo "$xchk" | grep -qxF "other teams: $X/xb (found), $T/far/xc (listed; observe
   && xsect em | grep -F "added: " | grep -qF ", Read and Edit deny on 2 other teams' state folders" \
   && xsect w1 | grep -F "added: " | grep -qF ", Read and Edit deny on 2 other teams' state folders (observer of $T/far/xc: may read its log and notes)" \
   && ok "check: lists the other teams found and listed, the links it skipped and why (not a folder without team state), and the denies on each seat's added line" || { bad "check: other teams"; echo "$xchk" | grep -E "^(other teams|skipped)"; xsect w1 | grep added; }
+# A state root inside the team's own repository (a team working on software-factory keeps .state/ in
+# its checkout, tl on #200): a team found there, or listed there before it exists, is not "inside the
+# repository", so it still gets its denies.
+mkdir -p $T/repo/.state/me $T/repo/.state/other/settings $T/repo/.state/other/launch $T/repo/.state/other/prompts
+printf 'other_teams:\n  - { state: %s/repo/.state/later }\n' $T | cat $T/sec.yaml - > $T/inrepo.yaml
+idn=$(TEAM_STATE_DIR=$T/repo/.state/me ruby $SRC/lib/team_config.rb $T/inrepo.yaml settings w1 2>&1 | ruby -rjson -e 'puts JSON.parse(STDIN.read)["permissions"]["deny"]' 2>&1)
+ichk=$(TEAM_STATE_DIR=$T/repo/.state/me $S -c $T/inrepo.yaml check 2>&1)
+printf '%s\n' "$idn" | grep -qxF "Edit(/$T/repo/.state/other/**)" && printf '%s\n' "$idn" | grep -qxF "Read(/$T/repo/.state/other/triage/**)" && printf '%s\n' "$idn" | grep -qxF "Edit(/$T/repo/.state/later/**)" \
+  && echo "$ichk" | grep -qxF "other teams: $T/repo/.state/other (found), $T/repo/.state/later (listed; not found yet)" \
+  && ok "other teams: a state root inside the repository still finds and lists the teams there" || { bad "other teams: state root inside the repository"; echo "$idn" | grep -F ".state/" | head -4; echo "$ichk" | grep -E "^(other teams|skipped|error)"; }
+rm -r "$T/repo/.state"
 # A team alone in its state root gets no rule of these, and a link or a folder without state beside it adds none.
 mkdir -p $T/aroot/solo/settings $T/aroot/solo/launch $T/aroot/solo/prompts; s0=$(TEAM_STATE_DIR=$T/aroot/solo ruby $SRC/lib/team_config.rb $T/sec.yaml settings w1)
 mkdir -p $T/aroot/stuff/notes && ln -s $T/aroot/solo $T/aroot/solink; s1=$(TEAM_STATE_DIR=$T/aroot/solo ruby $SRC/lib/team_config.rb $T/sec.yaml settings w1)
