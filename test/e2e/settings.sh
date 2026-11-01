@@ -267,6 +267,12 @@ printf '%s\n' "$idn" | grep -qxF "Edit(/$T/repo/.state/other/**)" && printf '%s\
   && echo "$ichk" | grep -qxF "other teams: $T/repo/.state/other (found), $T/repo/.state/later (listed; not found yet)" \
   && ok "other teams: a state root inside the repository still finds and lists the teams there" || { bad "other teams: state root inside the repository"; echo "$idn" | grep -F ".state/" | head -4; echo "$ichk" | grep -E "^(other teams|skipped|error)"; }
 rm -r "$T/repo/.state"
+# A state root that is the repository itself exempts nothing (sec on #200): a folder there is inside the repository.
+mkdir -p $T/repo/me
+rout=$(TEAM_STATE_DIR=$T/repo/me $S -c $T/inrepo.yaml check 2>&1); rc=$?
+[ $rc != 0 ] && echo "$rout" | grep -qF "other_teams: $T/repo/.state/later is, holds or sits inside this team's repository (repo.path)" \
+  && ok "other teams: a state root that is the repository itself exempts nothing" || { bad "other teams: state root = repository (rc=$rc)"; echo "$rout" | tail -2; }
+rmdir "$T/repo/me"
 # A team alone in its state root gets no rule of these, and a link or a folder without state beside it adds none.
 mkdir -p $T/aroot/solo/settings $T/aroot/solo/launch $T/aroot/solo/prompts; s0=$(TEAM_STATE_DIR=$T/aroot/solo ruby $SRC/lib/team_config.rb $T/sec.yaml settings w1)
 mkdir -p $T/aroot/stuff/notes && ln -s $T/aroot/solo $T/aroot/solink; s1=$(TEAM_STATE_DIR=$T/aroot/solo ruby $SRC/lib/team_config.rb $T/sec.yaml settings w1)

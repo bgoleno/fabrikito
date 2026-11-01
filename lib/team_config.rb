@@ -604,7 +604,9 @@ class TeamConfig
     in_root = r != root && within.call(r, root)
     meets = lambda do |dir|
       d = fold.call(real_path(dir))
-      in_root && within.call(root, d) ? holds.call(dir) : path_overlap?(path, dir)
+      # Only a repository or workdir that holds the state root strictly: one that IS the state root
+      # would exempt all of itself (sec on #200).
+      in_root && root != d && within.call(root, d) ? holds.call(dir) : path_overlap?(path, dir)
     end
     return "is, holds or sits inside this team's repository (repo.path)" if meets.call(repo_path)
     return "is, holds or sits inside this team's worktree folder (#{worktree_root})" if meets.call(worktree_root)
