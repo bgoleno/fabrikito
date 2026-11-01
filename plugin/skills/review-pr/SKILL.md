@@ -85,7 +85,11 @@ differ, the role prompt wins.
    - **Gate:** the commands and result lines at that head;
    - **Not verified:** what you did not check or could not;
    - last line: `READY at <short sha>` or `CHANGES NEEDED at <short sha>`, and what else the PR
-     waits for (another reviewer, qa, a merge with its base, the owner).
+     waits for (another reviewer, qa, a merge with its base, the owner);
+   - if the PR needs a reviewer its assignment record does not name, a line of its own
+     `Requires: <role ids>`, reviewing roles only (`tl`, `tl2`, `qa`, `qa2`, `sec`).
+     `factory:merge-train` reads only that line to add a reviewer, never the prose. A request
+     with a condition ("sec, if ...") goes to the EM to record instead.
 
    A security finding held back as below goes in neither the file nor the PR, and nothing you
    post describes it: no other part of the verdict (a criterion, an optional point, Not verified)
@@ -94,8 +98,10 @@ differ, the role prompt wins.
      whatever severity you think it has. Only `sec` rates findings, and a real medium posted as a
      low is public. Send it to `sec` and the EM only, with `SendMessage` (`say` only as your role
      prompt's fallback). Tell the author nothing about it: sec's triage decides who is told. Do
-     not post READY while it is open; a blocking point says only that one point went to `sec` and
-     the EM, with no class, file, line or severity.
+     not post READY while it is open; a blocking point says only "one point sent to sec and the
+     EM", with no class, file, line or severity. That line is the marker `factory:merge-train`
+     holds a merge on: send your message to `sec` and the EM after posting (step 8), with the
+     comment's URL, so sec can match the point to its marker.
    - **The security engineer:** triage it with `factory:security-triage`. A low or ruled-out
      finding may go in the verdict as that skill's step 6 says. A medium or higher (what your role
      prompt's rule 5 keeps out of public trackers) is held back, and the skill says who is told

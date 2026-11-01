@@ -94,7 +94,11 @@ them in for one PR, and does not restate them. Where the two differ, the role pr
 
    A security-relevant finding goes in neither the file nor the PR: send it to `sec` and the EM.
    That is stricter than the hard rule on what stays out of public trackers, on purpose: `sec`
-   rates it first. Right before posting, check the head again (`gh pr view <n> -R <repo>
+   rates it first. Post on the PR a comment of its own that says only `<your role id>: one point
+   sent to sec and the EM`, with nothing else in it: the marker `factory:merge-train` holds a
+   merge on until sec clears it. Send your message to `sec` and the EM after posting it, with the
+   marker comment's URL, so sec can match the point to its marker.
+   Right before posting, check the head again (`gh pr view <n> -R <repo>
    --json headRefOid`); if it moved, your report is for the old head, so say so or start again.
    Then post the file as a command of its own: `gh pr comment <n> -R <repo> --body-file <file>`,
    never `--body "$(...)"`.
