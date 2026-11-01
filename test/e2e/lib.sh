@@ -27,4 +27,7 @@ accept() {
   if out=$($S -c $T/v.yaml check 2>&1); then ok "accepts $what"; else bad "accepts $what"; echo "$out" | tail -2; fi
 }
 rule() { echo "permissions: { $1: [$2] }"; }
+# A stand-in's key log (a file, or stdin) with the bracketed-paste marks removed: say pastes a
+# message's label and its body separately (#150), so the label and the text sit in different pastes.
+keytext() { LC_ALL=C sed $'s/\033\\[20[01]~//g' "$@"; }
 e2e_end=lib # the last line: test/e2e.sh checks that the file ran to here

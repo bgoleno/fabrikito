@@ -117,7 +117,11 @@ settings.
 cannot reach. It types a message into the seat's tmux pane by bracketed paste, then presses Enter. It
 types only when the bottom of the seat's screen is Claude Code's input box, empty or showing only one
 dim line (a hint or a suggested prompt), and presses Enter only when the box then holds just the
-message. Anything else fails closed, with a reason:
+message. The `[from <role>]` label goes in as a paste of its own, before the message
+([#150](../../issues/150)). Claude Code hands a long paste, one it shows as `[Pasted text #N]`, to the
+seat inside `<pasted_content>` tags, and seats doubted a label inside them. A paste as short as the
+label stays plain text, outside the tags. `say` pastes the message only once the box holds just the
+label, so a message never goes in without it. Anything else fails closed, with a reason:
 
 - a seat that is not running claude (the text would run as a shell command);
 - any dialog, prompt or menu, known or not, the held-message approval dialog included ("screen not
@@ -137,7 +141,9 @@ message. Anything else fails closed, with a reason:
 
 Attach to the seat, deal with it, and send again. After the paste, `say` sends Enter only when the box
 holds the message and nothing else: the whole message (whitespace aside, since the box wraps it), its
-placeholder, or the end of a message taller than the box (below). If it does not, no Enter is sent and
+label and one placeholder, or the end of a message taller than the box (below). If it does not, if
+the box does not hold just the label after the label's paste (then the message is not pasted at all),
+or if the message's paste fails after its label's, no Enter is sent and
 the text stays in the box, where it goes out with the next Enter; `say` says so, and says why: the
 screen no longer ends with the box, dim text was drawn next to the message, the box shows fewer rows
 than it can and not just the message (as when someone typed after it), too little of the message's
@@ -159,12 +165,14 @@ while the window is grown, the seat's pane shows a clipped part of the bigger wi
 redraws twice, for about a second. The traps put the window back however `say` ends, except SIGKILL;
 a `say` killed that way can leave the window at 220x50 with `window-size` set to `manual`, and
 `tmux set-option -w -u -t '=<session>:' window-size` puts it back to following the iTerm pane.
-A message taller than the box (up to 800 characters and 3 lines; a longer paste shows as a `[Pasted
-text #N]` placeholder) scrolls it, so only the message's end is visible. `say` then sends it only when
+A message taller than the box (up to 800 characters and 3 lines, not counting its label; a longer
+paste shows as a `[Pasted text #N]` placeholder) scrolls it, so only the message's end is visible. `say` then sends it only when
 the box is full (floor((pane rows - 10) / 2) rows, at least 3) and its visible text is the message's
-last 40 or more characters. One gap remains: if someone starts typing in the moment between `say`'s
-empty-box check and the paste, and the message scrolls that text out of view, it goes out with the
-message.
+last 40 or more characters. Its label has scrolled out of view by then, which is why `say` checks the
+label alone, before it pastes the message. Two gaps remain: if someone starts typing in the moment
+between `say`'s empty-box check and the paste, and the message scrolls that text out of view, it goes
+out with the message; and if the label is cleared from the box (Ctrl-C, Esc) in the moment between
+`say`'s check of it and the message's paste, the message goes out without it.
 The input box is recognised as Claude Code 2.1.316 draws it, so a CLI update that changes it makes `say`
 refuse every seat until `factory.sh` is updated. A refused message is logged as NOT-DELIVERED. Messages
 are labelled `[from <role>]`, and the owner's are `[from owner]`. The label is set by the sender (from
