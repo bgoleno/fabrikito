@@ -868,16 +868,17 @@ box_full_rows() {
   h=$(( (h - 10) / 2 )); [ "$h" -lt 3 ] && h=3; echo "$h"
 }
 
-# Whether box state $2 of seat $1 shows just message $3, after its paste: text with nothing drawn
-# dim, such as a suggestion left next to it, that is the whole message, or the placeholder Claude
-# Code shows for a long paste and nothing else, or else shows the message's end in a full, scrolled
-# box. Whitespace is where the box and the message may differ (the box wraps at spaces and
-# box_state joins rows with one), so both are compared with all of it removed. Whole: the visible
-# text is the message. It is not enough that it starts with the message's "[from <role>]": text
-# typed after the message would go out with it, and a box that scrolled in a small pane is whole
-# again once grown (tl on #132).
-# Placeholder: "[Pasted text #N]" or "[Pasted text #N +K lines]" as the whole box, so text typed
-# after it, or a second paste, does not pass either (tl on #132).
+# Whether box state $2 of seat $1 shows just the message, label $3 then body $4, after their pastes:
+# text with nothing drawn dim, such as a suggestion left next to it, that is the whole message, or
+# the label and the placeholder Claude Code shows for a long body and nothing else, or else shows the
+# message's end in a full, scrolled box. Whitespace is where the box and the message may differ (the
+# box wraps at spaces and box_state joins rows with one), so both are compared with all of it
+# removed. Whole: the visible text is the message. It is not enough that it starts with the
+# message's "[from <role>]": text typed after the message would go out with it, and a box that
+# scrolled in a small pane is whole again once grown (tl on #132).
+# Placeholder: this message's own label, then "[Pasted text #N]" or "[Pasted text #N +K lines]", as
+# the whole box. Text typed after it, a second paste, a placeholder with no label or with another
+# label do not pass (tl on #132 and #150).
 # End: the visible text is a suffix of the message of at least 40 characters, and the box shows as
 # many rows as it can. A box only scrolls once full, so a shorter box that is not the whole message
 # holds something else. Text before the message would show at the top and text after it at the end,
@@ -886,7 +887,7 @@ box_full_rows() {
 # tall message, would go out with it (the README says so). When the box does not show just the
 # message, it prints why, so the refusal names the real cause (#84).
 box_has_message() {
-  local state dim rows vis full m v ph
+  local state dim rows vis full m v ph lab
   IFS='	' read -r state dim rows vis <<EOF
 $2
 EOF
@@ -897,10 +898,12 @@ EOF
     *) box_refusal "$1" "$2"; return 1 ;;
   esac
   [ "$dim" = 0 ] || { echo "dim text was drawn next to the message (a hint or suggestion from Claude Code)"; return 1; }
-  m=$(printf '%s' "$3" | LC_ALL=C tr -d '[:space:]'); v=$(printf '%s' "$vis" | LC_ALL=C tr -d '[:space:]')
+  m=$(printf '%s%s' "$3" "$4" | LC_ALL=C tr -d '[:space:]'); v=$(printf '%s' "$vis" | LC_ALL=C tr -d '[:space:]')
   [ "$v" != "$m" ] || return 0
+  # The label is compared as a string (quoted in ${v#...}), never as a pattern.
+  lab=$(printf '%s' "$3" | LC_ALL=C tr -d '[:space:]')
   ph='^\[Pastedtext#[0-9]+(\+[0-9]+lines?)?\]$'
-  if [[ $v =~ $ph ]]; then return 0; fi
+  if [ "${v#"$lab"}" != "$v" ] && [[ ${v#"$lab"} =~ $ph ]]; then return 0; fi
   full=$(box_full_rows "$1") || { echo "could not read the height of $1's pane"; return 1; }
   [ "$rows" = "$full" ] || { echo "the box shows $rows of its $full rows and not just the message, so it holds something else"; return 1; }
   [ "${#v}" -ge 40 ] || { echo "only ${#v} characters of the message's end are visible (short last lines in a narrow pane), under the 40 say needs to recognise it"; return 1; }
@@ -1007,10 +1010,11 @@ seat_lock() {
 }
 seat_unlock() { exec 9>&-; }
 
-# Deliver one message by bracketed paste (safe for multi-line text), then Enter. If the seat is
-# mid-turn the text queues in its input box and is submitted by the Enter all the same.
+# Deliver one message, label $2 ("[from <role>] ") and body $3, by bracketed paste (safe for
+# multi-line text), then Enter. If the seat is mid-turn the text queues in its input box and is
+# submitted by the Enter all the same.
 send_one() {
-  local to=$1 text=$2 sess rc
+  local to=$1 label=$2 body=$3 sess rc
   sess=$(session "$to")
   if ! alive "$to"; then
     echo "not delivered: $to is down ($sess)" >&2
@@ -1026,7 +1030,7 @@ send_one() {
     echo "not delivered: $LOCK_WHY" >&2
     return 1
   fi
-  deliver_one "$to" "$text" "$sess"; rc=$?
+  deliver_one "$to" "$label" "$body" "$sess"; rc=$?
   shrink_window
   seat_unlock
   return "$rc"
@@ -1043,7 +1047,7 @@ size_may_matter() {
 # second answer counts, and send_one puts the window back (#84, tl on #132). In #84's own case the
 # box is whole before the paste and it is the check after the paste that refuses.
 deliver_one() {
-  local to=$1 text=$2 sess=$3 buf st why ok
+  local to=$1 label=$2 body=$3 sess=$4 buf st why ok
   st=$(box_state "$to"); why=$(box_refusal "$to" "$st")
   if [ -n "$why" ] && size_may_matter "$st" && grow_window "$to"; then
     st=$(box_state "$to"); why=$(box_refusal "$to" "$st")
@@ -1052,9 +1056,25 @@ deliver_one() {
     echo "not delivered: $why" >&2
     return 1
   fi
+  # The label and the body go in as two pastes (#150). Claude Code shows a long body as "[Pasted text
+  # #N ...]" and hands it to the seat inside <pasted_content> tags; a label inside that block made
+  # seats doubt who sent it (fs1's live runs on #150: a seat declining a suspicious request replied to
+  # the labelled sender 0 times in 5, against 8 in 10 with the label outside). A paste as short as
+  # the label is never collapsed, so it stays the seat's own text, before the block. It is pasted,
+  # not typed: in the window described below, typed keys could answer a dialog (role ids hold
+  # digits, and "1" is often Yes), while a paste cannot (tl on #150). An empty body has no second
+  # paste: tmux makes no buffer of nothing, and the label is then the whole message.
   buf="team-$$-$to"
-  printf '%s' "$text" | tmux load-buffer -b "$buf" -
-  tmux paste-buffer -p -d -b "$buf" -t "=$sess:"
+  if ! { printf '%s' "$label" | tmux load-buffer -b "$buf" - && tmux paste-buffer -p -d -b "$buf" -t "=$sess:"; }; then
+    tmux delete-buffer -b "$buf" 2>/dev/null || true
+    echo "not delivered: could not paste into the input box of $to (tmux failed)" >&2
+    return 1
+  fi
+  if [ -n "$body" ] && ! { printf '%s' "$body" | tmux load-buffer -b "$buf" - && tmux paste-buffer -p -d -b "$buf" -t "=$sess:"; }; then
+    tmux delete-buffer -b "$buf" 2>/dev/null || true
+    echo "not delivered: the message's label was pasted into $to but the message was not (tmux failed); text left in input box: it goes out with the next Enter" >&2
+    return 1
+  fi
   sleep 0.5 9>&-
   # Enter only when the box now holds just this message (box_has_message), so the Enter can only
   # submit the message. Otherwise a dialog came up, or the paste went nowhere. Still open: a dialog
@@ -1062,9 +1082,9 @@ deliver_one() {
   # no box and sends no Enter), and one that appears after this check, before the Enter. When this
   # check refuses in a small window, the text is already in the box: the window is grown and the
   # check runs again on the screen as redrawn, and only a pass there sends the Enter.
-  st=$(box_state "$to"); ok=1; why=$(box_has_message "$to" "$st" "$text") || ok=0
+  st=$(box_state "$to"); ok=1; why=$(box_has_message "$to" "$st" "$label" "$body") || ok=0
   if [ "$ok" = 0 ] && size_may_matter "$st" && grow_window "$to"; then
-    st=$(box_state "$to"); ok=1; why=$(box_has_message "$to" "$st" "$text") || ok=0
+    st=$(box_state "$to"); ok=1; why=$(box_has_message "$to" "$st" "$label" "$body") || ok=0
   fi
   if [ "$ok" = 0 ]; then
     echo "not delivered: the input box of $to does not show the message after the paste${why:+ ($why)}; text left in input box: it goes out with the next Enter" >&2
@@ -1218,7 +1238,7 @@ sender_refusal() {
 cmd_say() {
   # Before anything else, tmux, caller_seat and the log included (#105).
   if [ "${1:-}" = --default-socket ]; then shift; else refuse_default_tmux say "type into seats"; fi
-  local to=${1:-} from=${TEAM_ROLE:-} why="" text r rc=0 lrc=0 held out=""
+  local to=${1:-} from=${TEAM_ROLE:-} why="" label r rc=0 lrc=0 held out=""
   [ -n "$to" ] && [ $# -ge 2 ] || die "usage: say <role|all> <message...>"
   [ "$to" = all ] || check_role "$to"
   # Inside a seat, a message without TEAM_ROLE goes out under that seat's role, never as the owner's.
@@ -1231,7 +1251,8 @@ cmd_say() {
   fi
   [ -z "$why" ] && [ "$to" = "$from" ] && why="a seat cannot message itself"
   shift
-  text="[from $from] $*"
+  # The label is pasted on its own, before the message (deliver_one, #150).
+  label="[from $from] "
   mkdir -p "$STATE"
   # Record before report (#128): the messages.log line is written before any terminal message.
   # The log is the record the owner and the EM go by. A write to the terminal or a pipe can fail:
@@ -1255,10 +1276,10 @@ cmd_say() {
     for r in $ROLES; do
       [ "$r" = "$from" ] && continue
       alive "$r" || continue
-      say_send "$r" "$text" || rc=1
+      say_send "$r" "$label" "$*" || rc=1
     done
   else
-    say_send "$to" "$text" || rc=1
+    say_send "$to" "$label" "$*" || rc=1
   fi
   # The log records what happened, not what was attempted: a refused delivery says so. One line
   # per say (all included), in the format the README documents under "The message log". $to is a
