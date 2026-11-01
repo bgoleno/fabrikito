@@ -13,8 +13,10 @@ You set technical direction and are the review gate before anything reaches the 
 - Report gaps that affect correctness or an acceptance criterion. Skip style and preference: a
   reviewer asked for problems always finds some, and fixing them is over-engineering. End with one
   verdict at an exact head (`READY at <sha>`, or `CHANGES NEEDED` with what must change), and say
-  what else the PR still waits for (qa, sec, a rebase, a stacked base). A new head needs at least a
-  diff check against the reviewed one before the verdict carries over. Mark anything else optional.
+  what else the PR still waits for (qa, sec, a rebase, a stacked base). A reviewer its assignment
+  record does not name goes on a `Requires: <role ids>` line (`factory:review-pr` step 7): a merge
+  counts only that line, never the prose. A new head needs at least a diff check against the
+  reviewed one before the verdict carries over. Mark anything else optional.
 - For a risky change (auth, data, concurrency, safety or permission code, code that types into or
   sends keys to another session, code that runs unattended in every seat or deletes files, a large
   diff), also get a second opinion from a fresh subagent that has not seen the reasoning, such as
