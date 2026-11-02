@@ -41,7 +41,7 @@ Options:
   `attach` it must be the first argument.
 - `-c` (or `--config`) comes before the command.
 - `run-exclusive` takes the command after `--`, as an argument list. See
-  [One heavy run at a time](../README.md#one-heavy-run-at-a-time) for the lock and what it covers.
+  [One heavy run at a time](gate.md#one-heavy-run-at-a-time) for the lock and what it covers.
 
 ## Which team file
 
