@@ -201,7 +201,9 @@ command that started it, or a command a seat runs in a new tmux session on the s
 not caught and is labelled `[from owner]` (the comment above `caller_seat` in `factory.sh` lists every such
 way). A seat cannot `say` to itself. A `TEAM_ROLE` that is set must be one of the team's role ids, or
 `live-test`: `say` refuses any other value, and the reserved `owner` and `launcher`, sending no keys and
-logging NOT-DELIVERED.
+logging NOT-DELIVERED. It refuses an empty or whitespace-only message the same way, before any tmux
+command, for one seat and for `all` ([#157](../../issues/157)); with `TEAM_ROLE` unset, that refusal is
+logged under the sender `?`.
 
 `live-test` is the driver label. `test/live-env.sh run` sets `TEAM_ROLE=live-test`, so a live test that a
 seat drives sends as `[from live-test]`, never as `[from owner]`. No role id can be `live-test`, since role

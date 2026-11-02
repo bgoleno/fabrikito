@@ -128,6 +128,8 @@ gives the reason when it refuses:
 - "has no claude process running (its pane is at a shell)": the text would run as a shell command.
   Start the seat again (`down --yes <role>`, then `up <role>`).
 - "is down": the seat is not running. Start it with `up <role>`.
+- "the message is empty or only whitespace": the text given to `say` was empty, often an unset
+  variable in a script. Nothing was typed. Check what the caller passes.
 - "another say is typing into <role> and did not finish within 8 seconds": try again. "is not a
   regular file: remove it": something other than a plain file sits at the seat's lock path,
   `.state/<team>/say/<role>.lock`; remove it.
