@@ -105,6 +105,12 @@ prompts:
                                # @@GITHUB_REPO@@ @@GITHUB_URL@@ @@PROJECT_NAME@@ @@PROJECT_URL@@
                                # @@WORKDIR@@ @@WORKTREE_ROOT@@ @@VOLUME@@ @@ROSTER@@ @@GATE_MAX_BLOCKS@@
                                # @@NOTE@@ (the seat's progress note, <state>/notes/<role>.md)
+  # project: ../projects/myapp/project.md
+                               # optional: your project's specifics (what the product is, folders
+                               # that are off limits, a running instance never to touch, the gate,
+                               # the merge procedure), rendered after common and before each role's
+                               # prompt, so the shipped prompts need no copy. Same placeholders; no
+                               # [from ...] label; its lines count toward check's 199-line warning.
 
 # First message typed into a seat at startup (a role can override it with its own `kickoff`).
 kickoff: >-
@@ -146,6 +152,15 @@ permissions:
     - Bash(gh api graphql*mergePullRequest*)
     - Bash(gh api graphql*enablePullRequestAutoMerge*)
     - Bash(gh api graphql*mergeBranch*)
+
+# Other teams on this machine (#197). Every seat is denied reading another team's triage records,
+# message log and notes, and writing anything in its state folder. Teams whose state folders sit
+# beside this one's in the state root (.state/) are found by themselves. List here a team whose state
+# folder is elsewhere (a team pinned to a release: docs/pinned-release.md), and in `observers` the
+# roles of this team the owner allows to read that team's log and notes (never its triage records).
+# A team found by itself can be listed too, to give it observers. `check` lists the other teams.
+# other_teams:
+#   - { state: /path/to/other/team/state, observers: [qa2] }
 
 # Seats start in this order. Each needs: title, workdir, and one of `prompt` (a file) or
 # `prompt_text` (inline). `summary` is the line shown in the roster every seat sees.

@@ -277,10 +277,17 @@ bootstrap_worktree() {
     # bootstrap never ends), and so a Ctrl-C reaches up, not the install. sed -l passes each line
     # on as it comes. It runs without the messaging and tmux variables of a seat that runs up: a
     # seat's messaging token must not reach an install script (sec, PR #106).
+    # The messaging ones are every name that starts with CLAUDE_CODE_MESSAGING_ (#164, agreed with tl),
+    # so one a later Claude Code adds is dropped too. They are dropped with env -u, not unset: bash
+    # lists an inherited name that is not a shell identifier in ${!prefix@} and passes it on to its
+    # children, but cannot unset it. Not an env -i allowlist: docs/team-file.md promises the bootstrap
+    # every other variable, and installs rely on the user's (proxies, SSH_AUTH_SOCK, tool paths).
+    local v; local -a drop=()
+    for v in "${!CLAUDE_CODE_MESSAGING_@}"; do drop+=(-u "$v"); done # quoted: a name may hold a space or *
     set -m
     (
       set +e
-      (cd "$dir" && exec env -u CLAUDE_CODE_MESSAGING_SOCKET -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDECODE \
+      (cd "$dir" && exec env ${drop[@]+"${drop[@]}"} -u CLAUDECODE \
         -u TMUX -u TMUX_PANE TEAM_ROLE="$id" TEAM_REPO="$REPO" bash -c "$BOOTSTRAP") </dev/null 2>&1 | sed -l 's/^/    | /'
       exit "${PIPESTATUS[0]}"
     ) &
@@ -320,9 +327,28 @@ setup_failed() {
   die "$1; the worktree was left as it is (it may hold work) and is not marked set up, so the next up tries again"
 }
 
+# The factory checkout this script runs from, and its commit (#189). A team pinned to a release runs
+# from a checkout of its own (docs/pinned-release.md), and its seats' say, hooks and plugin come from
+# the checkout that started them, so check says which one before a seat is restarted. Only a checkout
+# whose top folder is this one counts: an install copied into some other repository is not described
+# as that repository. --tags names a lightweight tag too (git tag <name>), which plain describe skips,
+# showing only a commit. GIT_OPTIONAL_LOCKS=0 keeps describe --dirty from writing the checkout's index.
+install_line() {
+  local top real d
+  real=$(cd -P "$HERE" && pwd -P)
+  top=$(git -C "$HERE" rev-parse --show-toplevel 2>/dev/null) || top=""
+  if [ -n "$top" ] && [ "$(cd -P "$top" && pwd -P)" = "$real" ] &&
+    d=$(GIT_OPTIONAL_LOCKS=0 git -C "$HERE" describe --tags --always --dirty 2>/dev/null); then
+    echo "install   : $HERE at $d"
+  else
+    echo "install   : $HERE (not a git checkout)"
+  fi
+}
+
 cmd_check() {
   local r on="not mounted" d real users
   mount | grep -qF " on $VOLUME (" && on="mounted"
+  install_line
   echo "team file : $CONFIG"
   echo "team      : $TEAM (tmux prefix '$PREFIX')"
   echo "repo      : $GITHUB at $REPO (origin must contain '$GITHUB', base $BASE)"
@@ -333,6 +359,9 @@ cmd_check() {
   plugin=$(cfg get sessions.plugin)
   if [ -n "$plugin" ]; then echo "plugin    : $plugin (skills as /factory:<skill>)"; else echo "plugin    : off (sessions.claude.plugin: false)"; fi
   echo "gate      : $(cfg get repo.gate_summary)"
+  echo "prompts   : $(cfg get prompts.summary)"
+  prompts_warn=$(cfg get prompts.warning)
+  [ -z "$prompts_warn" ] || echo "$prompts_warn"
   hooks_note=$(cfg get hooks.note)
   [ -z "$hooks_note" ] || echo "hooks     : $hooks_note"
   echo "bootstrap : ${BOOTSTRAP:-none}$([ -n "$BOOTSTRAP" ] && echo ' (run in each new worktree before its seat starts)')"
@@ -375,7 +404,7 @@ cmd_check() {
 }
 
 cmd_up() {
-  local want_view=1 started=0 args="" roles r sess dir launch a args_q settings default_ok=0 tdir ndir d
+  local want_view=1 started=0 args="" roles r sess dir launch a args_q settings default_ok=0 tdir ndir d gdirs hdirs
   for a in "$@"; do
     case $a in
       --no-view) want_view=0 ;;
@@ -389,20 +418,32 @@ cmd_up() {
   command -v tmux >/dev/null || die "tmux not found"
   resolve_claude || die "$CLAUDE_ERR"
   for r in $roles; do check_role "$r"; done
+  # Assignments, so a cfg failure stops up here (set -e) rather than leaving the list below short.
   ndir=$(cfg get state.notes_dir)
   tdir=$(cfg get state.triage_dir)
-  # The notes and triage folders must be real folders or not there yet (#148, sec on #141), checked
-  # before up makes anything: mkdir -p and chmod follow a symlink, so up would make or chmod the
-  # folder it points at, and seats would write notes and records there. A plain file at the name
-  # is refused too. Only a seat could put one there, so this is hardening; as in seat_lock (#132),
-  # the check is not atomic with the mkdir below.
-  for d in "$ndir" "$tdir"; do
+  gdirs=$(cfg get state.generated_dirs)
+  hdirs=$(cfg get state.hook_dirs)
+  # Every folder up makes or writes under the state folder must be a real folder or not there yet,
+  # checked before up makes, writes or starts anything: the generated folders (settings, prompts and
+  # launch scripts are written there; bin holds the claude copy the seats run; setup the marks),
+  # the folder of this claude copy, the hooks' gate folder (a gated seat's hook makes it), and the
+  # notes and triage folders (#148, sec on #141; the rest #168, sec on #165). mkdir -p, chmod and a
+  # write follow a symlink, so up would make, chmod or write wherever it points, and the seats' Edit
+  # denies name the state-folder path, not the link's target. A plain file at the name is refused
+  # too. Only a seat could put one there, so this is hardening; as in seat_lock (#132), the check is
+  # not atomic with the mkdir below. bin comes before the copy's folder in it, so a link at bin is
+  # the one named. No supported setup links one of these on purpose: TEAM_STATE_DIR moves the whole
+  # state folder, which may itself be reached through a link and is not checked here (#168).
+  while IFS= read -r d; do
     [ -n "$d" ] || continue
     if [ -L "$d" ] || { [ -e "$d" ] && [ ! -d "$d" ]; }; then
       die "$d is not a real folder (a symlink, or not a folder): remove it, then run up again"
     fi
-  done
-  for a in $(cfg get state.generated_dirs); do mkdir -p "$STATE/$a"; done
+  done < <(for a in $gdirs; do echo "$STATE/$a"; done
+    dirname "$CLAUDE_COPY"
+    for a in $hdirs; do echo "$STATE/$a"; done
+    printf '%s\n' "$ndir" "$tdir")
+  for a in $gdirs; do mkdir -p "$STATE/$a"; done
   # Progress notes (#5): seats write them, so up only makes the folder and never touches a note.
   mkdir -p "$ndir"
   # The security-triage record folder (#138), when the team has the role that writes it: up only
@@ -880,25 +921,27 @@ box_full_rows() {
   h=$(( (h - 10) / 2 )); [ "$h" -lt 3 ] && h=3; echo "$h"
 }
 
-# Whether box state $2 of seat $1 shows just message $3, after its paste: text with nothing drawn
-# dim, such as a suggestion left next to it, that is the whole message, or the placeholder Claude
-# Code shows for a long paste and nothing else, or else shows the message's end in a full, scrolled
-# box. Whitespace is where the box and the message may differ (the box wraps at spaces and
-# box_state joins rows with one), so both are compared with all of it removed. Whole: the visible
-# text is the message. It is not enough that it starts with the message's "[from <role>]": text
-# typed after the message would go out with it, and a box that scrolled in a small pane is whole
-# again once grown (tl on #132).
-# Placeholder: "[Pasted text #N]" or "[Pasted text #N +K lines]" as the whole box, so text typed
-# after it, or a second paste, does not pass either (tl on #132).
+# Whether box state $2 of seat $1 shows just the message, label $3 then body $4, after their pastes:
+# text with nothing drawn dim, such as a suggestion left next to it, that is the whole message, or
+# the label and the placeholder Claude Code shows for a long body and nothing else, or else shows the
+# message's end in a full, scrolled box. Whitespace is where the box and the message may differ (the
+# box wraps at spaces and box_state joins rows with one), so both are compared with all of it
+# removed. Whole: the visible text is the message. It is not enough that it starts with the
+# message's "[from <role>]": text typed after the message would go out with it, and a box that
+# scrolled in a small pane is whole again once grown (tl on #132).
+# Placeholder: this message's own label, then "[Pasted text #N]" or "[Pasted text #N +K lines]", as
+# the whole box. Text typed after it, a second paste, a placeholder with no label or with another
+# label do not pass (tl on #132 and #150).
 # End: the visible text is a suffix of the message of at least 40 characters, and the box shows as
 # many rows as it can. A box only scrolls once full, so a shorter box that is not the whole message
-# holds something else. Text before the message would show at the top and text after it at the end,
-# so neither passes, except one gap:
+# holds something else. The label has scrolled off by then, so this rule cannot see it: deliver_one
+# checks it alone (box_has_label) before the body goes in (tl on #175). Text before the message would
+# show at the top and text after it at the end, so neither passes, except one gap:
 # a draft typed in the moment between the empty-box check and the paste, scrolled out of view by a
 # tall message, would go out with it (the README says so). When the box does not show just the
 # message, it prints why, so the refusal names the real cause (#84).
 box_has_message() {
-  local state dim rows vis full m v ph
+  local state dim rows vis full m v ph lab
   IFS='	' read -r state dim rows vis <<EOF
 $2
 EOF
@@ -909,14 +952,36 @@ EOF
     *) box_refusal "$1" "$2"; return 1 ;;
   esac
   [ "$dim" = 0 ] || { echo "dim text was drawn next to the message (a hint or suggestion from Claude Code)"; return 1; }
-  m=$(printf '%s' "$3" | LC_ALL=C tr -d '[:space:]'); v=$(printf '%s' "$vis" | LC_ALL=C tr -d '[:space:]')
+  m=$(printf '%s%s' "$3" "$4" | LC_ALL=C tr -d '[:space:]'); v=$(printf '%s' "$vis" | LC_ALL=C tr -d '[:space:]')
   [ "$v" != "$m" ] || return 0
+  # The label is compared as a string (quoted in ${v#...}), never as a pattern.
+  lab=$(printf '%s' "$3" | LC_ALL=C tr -d '[:space:]')
   ph='^\[Pastedtext#[0-9]+(\+[0-9]+lines?)?\]$'
-  if [[ $v =~ $ph ]]; then return 0; fi
+  if [ "${v#"$lab"}" != "$v" ] && [[ ${v#"$lab"} =~ $ph ]]; then return 0; fi
   full=$(box_full_rows "$1") || { echo "could not read the height of $1's pane"; return 1; }
   [ "$rows" = "$full" ] || { echo "the box shows $rows of its $full rows and not just the message, so it holds something else"; return 1; }
   [ "${#v}" -ge 40 ] || { echo "only ${#v} characters of the message's end are visible (short last lines in a narrow pane), under the 40 say needs to recognise it"; return 1; }
   [ "${m%"$v"}" != "$m" ] || { echo "the box does not end with the message: other text is in it"; return 1; }
+}
+
+# Whether box state $2 of seat $1 holds just label $3, after the label's paste and before the body's
+# (#150, tl on #175): text, nothing drawn dim, and with whitespace removed exactly the label. A body
+# that scrolls the box hides the label, so this is the only check that sees it: a label cleared from
+# the box (Ctrl-C, Esc) or swallowed would otherwise let the body go out unlabelled, as the owner's.
+box_has_label() {
+  local state dim rows vis
+  IFS='	' read -r state dim rows vis <<EOF
+$2
+EOF
+  case $state in
+    text) ;;
+    empty) echo "the box is empty after the label's paste (the paste did not reach it)"; return 1 ;;
+    unknown) echo "the screen no longer ends with the input box (a dialog came up?)"; return 1 ;;
+    *) box_refusal "$1" "$2"; return 1 ;;
+  esac
+  [ "$dim" = 0 ] || { echo "dim text was drawn next to the label (a hint or suggestion from Claude Code)"; return 1; }
+  [ "$(printf '%s' "$vis" | LC_ALL=C tr -d '[:space:]')" = "$(printf '%s' "$3" | LC_ALL=C tr -d '[:space:]')" ] ||
+    { echo "the box holds something other than the label"; return 1; }
 }
 
 # Short panes (#84). The team view gives seats panes as small as 89x13 (10 seats) or 10 to 11 rows
@@ -1019,10 +1084,11 @@ seat_lock() {
 }
 seat_unlock() { exec 9>&-; }
 
-# Deliver one message by bracketed paste (safe for multi-line text), then Enter. If the seat is
-# mid-turn the text queues in its input box and is submitted by the Enter all the same.
+# Deliver one message, label $2 ("[from <role>] ") and body $3, by bracketed paste (safe for
+# multi-line text), then Enter. If the seat is mid-turn the text queues in its input box and is
+# submitted by the Enter all the same.
 send_one() {
-  local to=$1 text=$2 sess rc
+  local to=$1 label=$2 body=$3 sess rc
   sess=$(session "$to")
   if ! alive "$to"; then
     echo "not delivered: $to is down ($sess)" >&2
@@ -1038,7 +1104,7 @@ send_one() {
     echo "not delivered: $LOCK_WHY" >&2
     return 1
   fi
-  deliver_one "$to" "$text" "$sess"; rc=$?
+  deliver_one "$to" "$label" "$body" "$sess"; rc=$?
   shrink_window
   seat_unlock
   return "$rc"
@@ -1055,7 +1121,7 @@ size_may_matter() {
 # second answer counts, and send_one puts the window back (#84, tl on #132). In #84's own case the
 # box is whole before the paste and it is the check after the paste that refuses.
 deliver_one() {
-  local to=$1 text=$2 sess=$3 buf st why ok
+  local to=$1 label=$2 body=$3 sess=$4 buf st why ok
   st=$(box_state "$to"); why=$(box_refusal "$to" "$st")
   if [ -n "$why" ] && size_may_matter "$st" && grow_window "$to"; then
     st=$(box_state "$to"); why=$(box_refusal "$to" "$st")
@@ -1064,9 +1130,37 @@ deliver_one() {
     echo "not delivered: $why" >&2
     return 1
   fi
+  # The label and the body go in as two pastes (#150). Claude Code shows a long body as "[Pasted text
+  # #N ...]" and hands it to the seat inside <pasted_content> tags; a label inside that block made
+  # seats doubt who sent it (fs1's live runs on #150: a seat declining a suspicious request replied to
+  # the labelled sender 0 times in 5, against 8 in 10 with the label outside). A paste as short as
+  # the label is never collapsed, so it stays the seat's own text, before the block. It is pasted,
+  # not typed: in the window described below, typed keys could answer a dialog (role ids hold
+  # digits, and "1" is often Yes), while a paste cannot (tl on #150). An empty body has no second
+  # paste: tmux makes no buffer of nothing, and the label is then the whole message.
   buf="team-$$-$to"
-  printf '%s' "$text" | tmux load-buffer -b "$buf" -
-  tmux paste-buffer -p -d -b "$buf" -t "=$sess:"
+  if ! { printf '%s' "$label" | tmux load-buffer -b "$buf" - && tmux paste-buffer -p -d -b "$buf" -t "=$sess:"; }; then
+    tmux delete-buffer -b "$buf" 2>/dev/null || true
+    echo "not delivered: could not paste into the input box of $to (tmux failed)" >&2
+    return 1
+  fi
+  # The body goes in only once the box holds just the label (box_has_label, tl on #175), so it cannot
+  # go out without it. A small window is grown for this check as for the others. Still open: the label
+  # cleared in the moment between this check and the body's paste.
+  sleep 0.5 9>&-
+  st=$(box_state "$to"); ok=1; why=$(box_has_label "$to" "$st" "$label") || ok=0
+  if [ "$ok" = 0 ] && size_may_matter "$st" && grow_window "$to"; then
+    st=$(box_state "$to"); ok=1; why=$(box_has_label "$to" "$st" "$label") || ok=0
+  fi
+  if [ "$ok" = 0 ]; then
+    echo "not delivered: the input box of $to does not show just the message's label after its paste${why:+ ($why)}, so the message was not pasted; text left in input box, if any: it goes out with the next Enter" >&2
+    return 1
+  fi
+  if [ -n "$body" ] && ! { printf '%s' "$body" | tmux load-buffer -b "$buf" - && tmux paste-buffer -p -d -b "$buf" -t "=$sess:"; }; then
+    tmux delete-buffer -b "$buf" 2>/dev/null || true
+    echo "not delivered: the message's label was pasted into $to but the message was not (tmux failed); text left in input box: it goes out with the next Enter" >&2
+    return 1
+  fi
   sleep 0.5 9>&-
   # Enter only when the box now holds just this message (box_has_message), so the Enter can only
   # submit the message. Otherwise a dialog came up, or the paste went nowhere. Still open: a dialog
@@ -1074,9 +1168,9 @@ deliver_one() {
   # no box and sends no Enter), and one that appears after this check, before the Enter. When this
   # check refuses in a small window, the text is already in the box: the window is grown and the
   # check runs again on the screen as redrawn, and only a pass there sends the Enter.
-  st=$(box_state "$to"); ok=1; why=$(box_has_message "$to" "$st" "$text") || ok=0
+  st=$(box_state "$to"); ok=1; why=$(box_has_message "$to" "$st" "$label" "$body") || ok=0
   if [ "$ok" = 0 ] && size_may_matter "$st" && grow_window "$to"; then
-    st=$(box_state "$to"); ok=1; why=$(box_has_message "$to" "$st" "$text") || ok=0
+    st=$(box_state "$to"); ok=1; why=$(box_has_message "$to" "$st" "$label" "$body") || ok=0
   fi
   if [ "$ok" = 0 ]; then
     echo "not delivered: the input box of $to does not show the message after the paste${why:+ ($why)}; text left in input box: it goes out with the next Enter" >&2
@@ -1230,11 +1324,24 @@ sender_refusal() {
 cmd_say() {
   # Before anything else, tmux, caller_seat and the log included (#105).
   if [ "${1:-}" = --default-socket ]; then shift; else refuse_default_tmux say "type into seats"; fi
-  local to=${1:-} from=${TEAM_ROLE:-} why="" text r rc=0 lrc=0 held out=""
+  local to=${1:-} from=${TEAM_ROLE:-} why="" label r rc=0 lrc=0 held out=""
   [ -n "$to" ] && [ $# -ge 2 ] || die "usage: say <role|all> <message...>"
   [ "$to" = all ] || check_role "$to"
+  shift
+  # An empty or whitespace-only message (a script bug, an unset variable) would go out as a bare label,
+  # a turn of its own in the seat (#157). It is refused here, before caller_seat's tmux calls, and
+  # logged like any refusal. With TEAM_ROLE unset the sender is logged as '?', since telling a seat
+  # from the owner takes those tmux calls. The check reads "$*", what is sent and logged: on bash 3.2
+  # "${*:2}" holds \177 for each empty argument. A case pattern, because ${m//[[:space:]]/} takes
+  # seconds on a long message (tl on #202).
+  case "$*" in
+    *[![:space:]]*) ;;
+    *) why="the message is empty or only whitespace; give say the text to send"; from=${from:-?} ;;
+  esac
+  if [ -n "$why" ]; then
+    :
   # Inside a seat, a message without TEAM_ROLE goes out under that seat's role, never as the owner's.
-  if [ -z "$from" ]; then
+  elif [ -z "$from" ]; then
     # A refusal goes through the logged path below like any other (#97), under the sender '?'. The
     # reason says what to do.
     if from=$(caller_seat); then from=${from:-owner}; else why=$from; from='?'; fi
@@ -1242,8 +1349,8 @@ cmd_say() {
     why=$(sender_refusal "$from")
   fi
   [ -z "$why" ] && [ "$to" = "$from" ] && why="a seat cannot message itself"
-  shift
-  text="[from $from] $*"
+  # The label is pasted on its own, before the message (deliver_one, #150).
+  label="[from $from] "
   mkdir -p "$STATE"
   # Record before report (#128): the messages.log line is written before any terminal message.
   # The log is the record the owner and the EM go by. A write to the terminal or a pipe can fail:
@@ -1267,10 +1374,10 @@ cmd_say() {
     for r in $ROLES; do
       [ "$r" = "$from" ] && continue
       alive "$r" || continue
-      say_send "$r" "$text" || rc=1
+      say_send "$r" "$label" "$*" || rc=1
     done
   else
-    say_send "$to" "$text" || rc=1
+    say_send "$to" "$label" "$*" || rc=1
   fi
   # The log records what happened, not what was attempted: a refused delivery says so. One line
   # per say (all included), in the format the README documents under "The message log". $to is a

@@ -21,27 +21,7 @@ Moved to [Commands: The iTerm view](docs/commands.md#the-iterm-view).
 
 ## Right-sizing
 
-Every seat is a separate Claude Code session with its own context, so token use grows with the number
-of seats that are working, and with how long each works. Coding has fewer truly parallel tasks than it
-seems: three focused seats often get more done than five scattered ones, and a team of three to five is
-a good start.
-
-- Start only the seats a task needs: `./factory.sh up em tl fs1`. Add one later with `up fs2`, and stop
-  one that is done with `down --yes fs2` (its worktree is kept).
-- An idle seat spends little (Claude Code's session recap and idle compaction can still use some
-  tokens). A message delivered to it starts a turn that sends its whole conversation again, so a seat
-  that is sent many messages keeps spending.
-- Effort is the main cost and depth control (`effort` per role, or `sessions.claude.effort` for all).
-  The example team runs the manager at `medium` and the seats that write, test and review code at
-  `high`; keep `max` for a hard problem a seat works on unattended, such as a security hunt. A `model`
-  per role works the same way. `./factory.sh check` shows each seat's model and effort, and
-  `(inherit)` where the seat takes them from `~/.claude/settings.json`.
-- To see what a team costs, run `/usage` in a seat. Its Session block counts that seat's own tokens
-  (its dollar figure is a list-price estimate, meaningful on API billing). On a subscription it also
-  shows the plan usage bars, which every seat draws on, and a breakdown (by skill, subagent, plugin
-  and MCP server, with recommendations) of recent usage computed from this machine's session history.
-  That covers all the seats together, but also every other Claude Code session on the machine, and it
-  is not split by seat. See [Manage costs](https://code.claude.com/docs/en/costs).
+Moved to [Right-sizing a team](docs/right-sizing.md).
 
 ## The team file
 
@@ -53,37 +33,7 @@ Moved to [The team file: New worktrees](docs/team-file.md#new-worktrees).
 
 ## The factory plugin
 
-`plugin/` is a Claude Code [plugin](https://code.claude.com/docs/en/plugins) (`.claude-plugin/plugin.json`
-and `skills/`) that `up` loads into every seat with `--plugin-dir <this checkout>/plugin`. Seats work in
-the target project's folders, where this repository's own `.claude/` is never read, so this is how the
-factory's skills reach them. Nothing is installed into your settings: a session the factory did not start
-does not have the plugin. Its skills are namespaced by the plugin name and show as `/factory:<skill>`.
-
-Its skills are procedures for a role (assigning an issue, for example), loaded only when used instead of
-sitting in every prompt. The skill folders under [`plugin/skills/`](plugin/skills/) are the list, and each
-skill's `description` says whom it is for and when to use it. `/factory:ping` only proves the plugin loaded.
-Every seat loads every skill. A skill reaches its role through its description and through that role's
-`skills:` in the team file (`teams/example.yaml` names each one where it belongs). A skill only the owner
-may start sets `disable-model-invocation`. A skill is the procedure. The rules it applies (a brief's
-template, the review bar) stay in the role prompt, which the skill points to rather than copies, and a
-skill stops if the prompt lacks them. `test/e2e.sh` checks every skill's frontmatter, so adding one needs no
-new test code.
-
-- It is on by default. A team file without `sessions.claude.plugin` gets the plugin at its next `up`, and
-  with it every skill (and, later, every hook or agent) added to `plugin/` after that. Set
-  `sessions.claude.plugin: false` to leave the flag out. `check` shows the plugin's path, or `off`.
-- A `--plugin-dir` of your own in `sessions.claude.args` is allowed: the flag repeats, so both load. Your
-  installed plugins load as usual alongside it.
-- Seats get an `Edit` deny on `plugin/`, like `lib/` and `roles/` (see [Safety](#safety)), since it is
-  code every seat runs at its next start, and on each plugin a team loads itself with `--plugin-dir` in
-  `args` (the folder with everything under it, or the `.zip`; a relative path is taken from the seat's
-  folder).
-- What the plugin carries runs in or steers every seat: skills, agents, commands, hooks and MCP
-  servers, including hooks and servers declared inline in `plugin.json`. So every pull request that
-  changes anything under `plugin/`, `plugin.json` included, gets a security review as well as the
-  usual one.
-- Managed settings can turn `--plugin-dir` off (Claude Code's docs say so; not tried here), and then the
-  seats have no factory skills.
+Moved to [The factory plugin](docs/plugin.md).
 
 ## Issues first
 
@@ -147,7 +97,11 @@ settings.
 cannot reach. It types a message into the seat's tmux pane by bracketed paste, then presses Enter. It
 types only when the bottom of the seat's screen is Claude Code's input box, empty or showing only one
 dim line (a hint or a suggested prompt), and presses Enter only when the box then holds just the
-message. Anything else fails closed, with a reason:
+message. The `[from <role>]` label goes in as a paste of its own, before the message
+([#150](../../issues/150)). Claude Code hands a long paste, one it shows as `[Pasted text #N]`, to the
+seat inside `<pasted_content>` tags, and seats doubted a label inside them. A paste as short as the
+label stays plain text, outside the tags. `say` pastes the message only once the box holds just the
+label, so a message never goes in without it. Anything else fails closed, with a reason:
 
 - a seat that is not running claude (the text would run as a shell command);
 - any dialog, prompt or menu, known or not, the held-message approval dialog included ("screen not
@@ -167,7 +121,9 @@ message. Anything else fails closed, with a reason:
 
 Attach to the seat, deal with it, and send again. After the paste, `say` sends Enter only when the box
 holds the message and nothing else: the whole message (whitespace aside, since the box wraps it), its
-placeholder, or the end of a message taller than the box (below). If it does not, no Enter is sent and
+label and one placeholder, or the end of a message taller than the box (below). If it does not, if
+the box does not hold just the label after the label's paste (then the message is not pasted at all),
+or if the message's paste fails after its label's, no Enter is sent and
 the text stays in the box, where it goes out with the next Enter; `say` says so, and says why: the
 screen no longer ends with the box, dim text was drawn next to the message, the box shows fewer rows
 than it can and not just the message (as when someone typed after it), too little of the message's
@@ -189,12 +145,14 @@ while the window is grown, the seat's pane shows a clipped part of the bigger wi
 redraws twice, for about a second. The traps put the window back however `say` ends, except SIGKILL;
 a `say` killed that way can leave the window at 220x50 with `window-size` set to `manual`, and
 `tmux set-option -w -u -t '=<session>:' window-size` puts it back to following the iTerm pane.
-A message taller than the box (up to 800 characters and 3 lines; a longer paste shows as a `[Pasted
-text #N]` placeholder) scrolls it, so only the message's end is visible. `say` then sends it only when
+A message taller than the box (up to 800 characters and 3 lines, not counting its label; a longer
+paste shows as a `[Pasted text #N]` placeholder) scrolls it, so only the message's end is visible. `say` then sends it only when
 the box is full (floor((pane rows - 10) / 2) rows, at least 3) and its visible text is the message's
-last 40 or more characters. One gap remains: if someone starts typing in the moment between `say`'s
-empty-box check and the paste, and the message scrolls that text out of view, it goes out with the
-message.
+last 40 or more characters. Its label has scrolled out of view by then, which is why `say` checks the
+label alone, before it pastes the message. Two gaps remain: if someone starts typing in the moment
+between `say`'s empty-box check and the paste, and the message scrolls that text out of view, it goes
+out with the message; and if the label is cleared from the box (Ctrl-C, Esc) in the moment between
+`say`'s check of it and the message's paste, the message goes out without it.
 The input box is recognised as Claude Code 2.1.316 draws it, so a CLI update that changes it makes `say`
 refuse every seat until `factory.sh` is updated. A refused message is logged as NOT-DELIVERED. Messages
 are labelled `[from <role>]`, and the owner's are `[from owner]`. The label is set by the sender (from
@@ -213,7 +171,9 @@ command that started it, or a command a seat runs in a new tmux session on the s
 not caught and is labelled `[from owner]` (the comment above `caller_seat` in `factory.sh` lists every such
 way). A seat cannot `say` to itself. A `TEAM_ROLE` that is set must be one of the team's role ids, or
 `live-test`: `say` refuses any other value, and the reserved `owner` and `launcher`, sending no keys and
-logging NOT-DELIVERED.
+logging NOT-DELIVERED. It refuses an empty or whitespace-only message the same way, before any tmux
+command, for one seat and for `all` ([#157](../../issues/157)); with `TEAM_ROLE` unset, that refusal is
+logged under the sender `?`.
 
 `live-test` is the driver label. `test/live-env.sh run` sets `TEAM_ROLE=live-test`, so a live test that a
 seat drives sends as `[from live-test]`, never as `[from owner]`. No role id can be `live-test`, since role
@@ -332,7 +292,32 @@ role's (team first; a role can add or tighten a rule, never loosen one), plus wh
   id is fixed: a team whose security seat has another id gets no record folder, every seat but `em`
   is denied it, and `check` warns about a role other than `sec` that lists the skill. Like the log's, these denies are an
   accident guard, not a boundary. As with any settings change, a `sec` seat that is already running
-  when `up` writes these rules keeps its old settings until it restarts.
+  when `up` writes these rules keeps its old settings until it restarts;
+- denies on **other teams' state folders** (#197), when more than one team runs on the machine. For each
+  other team's folder, every seat gets a `Read` deny on its `triage/**` and an `Edit` deny on all of
+  it, plus a `Read` deny on its `messages.log` and `notes/**` unless the seat's role observes that team.
+  All are written in both spellings. The other teams' folders come from two places:
+  - **Found:** every real folder beside this team's own in the state root (`.state/`) that holds
+    `settings/`, `launch/` and `prompts/`. A symlink there is never followed. `check` names the links
+    it skips: list one under `other_teams` if it is another team's state.
+  - **Listed:** `other_teams` in the team file, for a state folder elsewhere (a pinned team's, see
+    [Pinned releases](docs/pinned-release.md)), each with its `observers`. These are the roles of this
+    team the owner allows to read that team's log and notes, never its triage records:
+
+    ```yaml
+    other_teams:
+      - { state: /path/to/other/state, observers: [qa2] }
+    ```
+
+  A listed folder may not be, hold or sit inside this team's own state folder, its repository, its
+  worktree folder or a seat's working directory, whether or not it exists yet. If it exists, it must be
+  a team's state folder itself (holding `settings/`, `launch/` and `prompts/`), not its checkout or
+  `.state/` above it. One that doesn't exist yet is accepted, and `check` says so. `check` lists the
+  other teams found and listed, and each seat's denies. Settings are written at `up`, so a team that starts
+  after a seat does is covered from that seat's next restart. Teams on one machine still share the
+  machine user, so these denies are an accident guard, like the others: a command that reads or
+  writes another way is not stopped. They also share the tmux server and the shared `claude`
+  executable the copies come from.
 
 `permission_mode` (in `sessions.claude`, or per role) picks the mode; the example uses `auto`.
 `bypassPermissions` skips every prompt and is meant for an isolated machine only. Deny rules hold in

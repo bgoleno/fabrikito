@@ -95,7 +95,7 @@ tmux session and keeps the worktree, and closing the iTerm tab only detaches fro
   When a seat's permission mode is set and is not `bypassPermissions`, the file also sets
   `disableBypassPermissionsMode`, so the seat cannot be switched into bypass from inside the session.
 - **The factory plugin,** loaded with `--plugin-dir` unless `sessions.claude.plugin` is `false`. See
-  [The factory plugin](../README.md#the-factory-plugin).
+  [The factory plugin](plugin.md).
 - **A progress note,** `.state/<team>/notes/<role>.md`, outside the working directory, so it survives
   a restart and a recreated worktree. See [Progress notes](../README.md#progress-notes).
 
@@ -173,7 +173,7 @@ The skills under `plugin/skills/` are procedures for a role, such as assigning a
 (`factory:assign`), starting a task (`factory:start-task`) or reviewing a pull request
 (`factory:review-pr`). A skill is loaded only when it is used, instead of sitting in every prompt.
 The rules a skill applies, such as the brief's template or the review bar, stay in the role prompt,
-and the skill points to them. See [The factory plugin](../README.md#the-factory-plugin).
+and the skill points to them. See [The factory plugin](plugin.md).
 
 ## What the rules are, and are not
 
