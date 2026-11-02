@@ -89,7 +89,8 @@ A listed folder that doesn't exist yet, or is still empty because that team hasn
 accepted, and `check` says so. If the pinned team works on software-factory itself, so that its
 `repo.path` is `<factory>`, it may still list `<factory>/.state/<other team>` although that is inside
 its repository: a team's state folder whose parent is a real folder named `.state` is the one thing
-inside its own work that a team may list.
+inside its own work that a team may list. That holds only once the other team has run `up`: until then
+the folder is missing or empty, and such a folder inside the repository is refused.
 
 Each seat then gets a Read deny on the listed team's triage records, message log and notes, and an Edit
 deny on the whole folder, from its next start. Add `observers: [<role>]` to an entry for a role the
