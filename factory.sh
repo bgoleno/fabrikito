@@ -1415,11 +1415,13 @@ cmd_say() {
   return "$rc"
 }
 
-# messages.log is something say must not append to (#194): a symlink (to anywhere, -L tests the link
-# itself); a FIFO, which >> would block on; or a hard link, a regular file to every other test here
-# that shares its data with another name (tl and sec on #206). The real log never has a second link.
+# The file (messages.log when none is named) is something say must not append to (#194): a symlink
+# (to anywhere, -L tests the link itself); a FIFO, which >> would block on; or a hard link, a regular
+# file to every other test here that shares its data with another name (tl and sec on #206). The real
+# log never has a second link. The argument lets another append-only state file reuse the guard (#216).
 log_unsafe() {
-  [ -L "$LOG" ] || [ -p "$LOG" ] || { [ -f "$LOG" ] && [ "$(stat -f %l "$LOG" 2>/dev/null || echo 1)" -gt 1 ]; }
+  local f=${1:-$LOG}
+  [ -L "$f" ] || [ -p "$f" ] || { [ -f "$f" ] && [ "$(stat -f %l "$f" 2>/dev/null || echo 1)" -gt 1 ]; }
 }
 
 # send_one, with what it prints held for cmd_say to show after the log line (#128).
