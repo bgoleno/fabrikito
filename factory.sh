@@ -739,13 +739,27 @@ resolve_claude() {
   CLAUDE_COPY="$STATE/bin/claude-$CLAUDE_VERSION/claude"
 }
 
+# A file already at the copy's path is the copy only if it is the shared file byte for byte (#208).
+# Otherwise any runnable file there is what every seat runs, one put at the next version's path before
+# an update included. The size is compared first, then the bytes (cmp reads both; nothing is copied).
+# One that differs is refused, not replaced: seats may be running it, and replacing a running seat's
+# file is what the copy exists to avoid (see resolve_claude). A reinstall of the same version brings
+# the same bytes, so an update does not trip this; a new version gets a path of its own.
+copy_same_or_die() {
+  if [ -f "$CLAUDE_COPY" ] && [ "$(stat -f %z "$CLAUDE_COPY")" = "$(stat -f %z "$CLAUDE_SRC")" ] &&
+    cmp -s "$CLAUDE_COPY" "$CLAUDE_SRC"; then
+    return 0
+  fi
+  die "$CLAUDE_COPY is not the same file as $CLAUDE_SRC (claude $CLAUDE_VERSION), so up starts no seat on it: it was refused, not replaced. Only a seat or a person could have put it there; report it. Once no seat runs it ($SELF status), remove that exact file, then run up again"
+}
+
 # Make the copy if it is not there yet: an APFS clone (cp -c: a file of its own that shares the
 # original's blocks) where the state folder is on the same file system, else a plain copy. It is
 # checked before it is moved into place, so a seat never runs a partial copy. Any failure stops up:
 # falling back to the shared file would bring the problem back without a sign.
 ensure_claude_copy() {
   local dir tmp how
-  [ -x "$CLAUDE_COPY" ] && return 0
+  [ -x "$CLAUDE_COPY" ] && { copy_same_or_die; return 0; }
   dir=$(dirname "$CLAUDE_COPY")
   tmp="$dir/.claude.partial.$$"
   mkdir -p "$dir" 2>/dev/null || die "could not copy claude to $dir (cannot create the folder)"
@@ -767,6 +781,8 @@ ensure_claude_copy() {
   if [ -e "$tmp" ]; then
     rm -f "$tmp"
     [ -x "$CLAUDE_COPY" ] || die "$CLAUDE_COPY exists but is not a runnable copy of claude; remove that exact file, then retry up"
+    # Made by another up, which checked it against the same shared file, unless it was put there.
+    copy_same_or_die
     return 0
   fi
   echo "$how" >"$dir/.how"

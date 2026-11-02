@@ -536,7 +536,9 @@ under (a removable volume holding the worktrees, for example) stop working until
   makes it from the shared executable when it is missing: an APFS clone where the state folder is on
   the same file system (it takes no space while the shared file exists), else a plain copy. It is
   checked (size, `--version`) before use, and if it cannot be made, `up` stops instead of running the
-  shared file. Nothing but `up` writes there, and seats cannot edit it.
+  shared file. A copy that is already there is used only if it is the shared executable byte for byte;
+  one that differs is refused, not replaced, and `up` starts no seat ([#208](../../issues/208)).
+  Nothing but `up` writes there, and seats cannot edit it.
 - **The seats' own updater is off** (`DISABLE_AUTOUPDATER=1`, in the launch script and the generated
   settings), so the seats do not add reinstalls of their own.
 - `check` names the shared executable, its version and the copy seats will run, and lists every copy

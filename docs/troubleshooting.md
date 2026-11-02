@@ -156,6 +156,14 @@ worktree volume, for example). Restart the seat: `./factory.sh down --yes <role>
 `./factory.sh up <role>`. To update every seat, run `claude update` in your own shell, then
 `down --yes` and `up`. See [Updating Claude Code](../README.md#updating-claude-code).
 
+### `up` stops: "... is not the same file as ..."
+
+The file at the team's copy of claude, `.state/<team>/bin/claude-<version>/claude`, is runnable but
+differs from the shared executable of that version, so `up` would have every seat run something that
+is not claude. Only a seat or a person could have put it there: find out which before going on. `up`
+does not replace it, because a running seat may be using it. Once `status` shows no seat running it,
+remove that exact file and run `up` again, which makes a fresh copy ([#208](../../../issues/208)).
+
 ### `.state/<team>/bin/` takes a lot of disk space
 
 Each old copy of claude holds about 310 MB once the shared file has moved on, and nothing removes
