@@ -16,7 +16,7 @@ skill's `description` says whom it is for and when to use it. `/factory:ping` on
 Every seat loads every skill. A skill reaches its role through its description and through that role's
 `skills:` in the team file (`teams/example.yaml` names each one where it belongs). A skill only the owner
 may start sets `disable-model-invocation`. A skill is the procedure. The rules it applies (a brief's
-template, the review bar) stay in the role prompt, which the skill points to rather than copies, and a
+fields, the review bar) stay in the role prompt, which the skill points to rather than copies, and a
 skill stops if the prompt lacks them. `test/e2e/launch.sh` checks every skill's frontmatter, so adding
 one needs no new test code.
 
