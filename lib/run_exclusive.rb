@@ -36,6 +36,8 @@ args.shift if args.first == "--"
 die("usage: factory.sh run-exclusive -- <command> [args...]", 64) if args.empty?
 
 lock = ENV["FACTORY_RUN_LOCK"].to_s
+# A relative path would name a different lock in each caller's folder (tl on #240).
+die("FACTORY_RUN_LOCK must be an absolute path, not #{lock}", 64) unless lock.empty? || lock.start_with?("/")
 if lock.empty?
   home = (Etc.getpwuid(Process.uid).dir rescue nil).to_s
   die("cannot find this user's home folder in the user database, so there is no place for the lock") if home.empty?
@@ -63,9 +65,17 @@ rescue StandardError
   nil
 end
 
+# The record's fields come from another run (its folder, its command), so control characters in them
+# are shown escaped, never sent to the terminal that reads this (sec on #240).
+def shown(x)
+  x.to_s.gsub(/[[:cntrl:]\u007f-\u009f]/) { |c| c.bytes.map { |b| format("\\x%02X", b) }.join }
+rescue StandardError
+  "?"
+end
+
 def who(rec)
   return "an unknown holder" unless rec.is_a?(Hash) && alive?(rec["pid"])
-  "#{rec["who"]} (pid #{rec["pid"]}, in #{rec["cwd"]}), holding since #{rec["since"]}: #{rec["cmd"]}"
+  "#{shown(rec["who"])} (pid #{rec["pid"]}, in #{shown(rec["cwd"])}), holding since #{shown(rec["since"])}: #{shown(rec["cmd"])}"
 end
 
 # Nesting: a run-exclusive inside the command of another (a gate script that calls it again) would wait
@@ -124,11 +134,19 @@ rescue SystemCallError => e
   die("cannot open #{lock}: #{e.message}")
 end
 
-# Until the command runs, a signal ends this run (130, 143, 129) without running it; from then on it is
-# passed on to the command's process group, and the command's own end decides the exit status.
+# Until the command is about to start, a signal ends this run (130, 143, 129) without running it. From
+# then on it is passed on to the command, and the command's own end decides the exit status. A signal
+# that arrives while the command is being started is held and passed on once its pid is known.
 child = nil
+spawning = false
+pending = nil
 { "INT" => 130, "TERM" => 143, "HUP" => 129 }.each do |s, code|
-  trap(s) { child ? (Process.kill(s, -child) rescue nil) : exit(code) }
+  trap(s) do
+    if child then (Process.kill(s, child) rescue nil)
+    elsif spawning then pending ||= s
+    else exit(code)
+    end
+  end
 end
 
 started = Time.now
@@ -177,17 +195,29 @@ begin
   File.open(tmp, File::WRONLY | File::CREAT | File::EXCL | File::NOFOLLOW, 0o600) { |o| o.write(JSON.generate(rec)) }
   File.rename(tmp, holder)
 rescue SystemCallError => e
-  say "could not write the holder record #{holder} (#{e.message}); waiters will see an unknown holder"
+  # Without the record, a run-exclusive inside this command could not tell that its parent holds the
+  # lock, and would wait for it forever, with every other run on the host behind it (tl on #240). So
+  # nothing runs: the lock is released and the run fails, saying why.
+  (File.unlink(tmp) rescue nil)
+  f.close
+  die("could not write the holder record #{holder} (#{e.message}), so the command was not run: remove that exact path if it is not a regular file, or make room, then run again")
 end
 say "got the lock after #{(Time.now - started).round}s" if waited
 locked = f.stat
 
-# The command runs in a process group of its own, so INT, TERM and HUP reach all of it (a test and what
-# it started), passed on from here. Not in the terminal's foreground group: a command that reads the
-# terminal stops; the gate and the e2e do not read it.
+# The command runs in this run's process group, the caller's. Whoever stops work by process group (the
+# stop gate's time limit sends TERM, then KILL, to the gate's group) then reaches the command and this
+# run alike. In a group of its own, a KILL to the caller's group would end only this run: the lock would
+# drop while the command ran on, beside the next run (tl on #240). A signal sent to this run alone is
+# passed on to the command; one sent to the whole group reaches the command twice, which ends it the
+# same way. Ctrl-C at a terminal reaches both, as for any foreground command.
 env = { "FACTORY_RUN_EXCLUSIVE_HELD" => "#{lock}:#{me}" }
 begin
-  child = Process.spawn(env, [args[0], args[0]], *args[1..-1], pgroup: true)
+  spawning = true
+  pid = Process.spawn(env, [args[0], args[0]], *args[1..-1])
+  child = pid
+  spawning = false
+  (Process.kill(pending, child) rescue nil) if pending
 rescue SystemCallError => e
   File.unlink(holder) rescue nil
   die("cannot run #{args[0]}: #{e.message}", 127)
