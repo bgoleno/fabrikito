@@ -315,6 +315,13 @@ role's (team first; a role can add or tighten a rule, never loosen one), plus wh
   writes another way is not stopped. They also share the tmux server and the shared `claude`
   executable the copies come from.
 
+  An observer may read the observed team's message log, which records that team's messages in full,
+  so it can carry the private reports its seats send to `sec` and the EM: an unfixed security point
+  among them, before it is rated ([#222](../../issues/222)). An observer treats everything in that log
+  under rule 5 of its prompt ([`roles/common.md`](roles/common.md)): it never quotes the log anywhere,
+  and sends `sec` and the EM only a pointer to what it saw: the team and the time of the log line, and
+  its line number when several lines share that time.
+
 `permission_mode` (in `sessions.claude`, or per role) picks the mode; the example uses `auto`.
 `bypassPermissions` skips every prompt and is meant for an isolated machine only. Deny rules hold in
 every mode, bypass included, and ask rules still prompt there, so a seat that hits one waits until
