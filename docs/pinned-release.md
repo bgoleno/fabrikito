@@ -15,6 +15,7 @@ The placeholders below stand for your own paths and names:
 | `<releases>` | A folder outside `<factory>` that holds one checkout per release, for example `<releases>/factory-<release>`. |
 | `<state>` | The team's state folder, outside every checkout, on the same volume as `<factory>`. |
 | `<team>` | The team's name (`team:` in the team file). |
+| `<name>` | The project's folder under `projects/`, the one the team file's prompt paths name. |
 
 ## What comes from where
 
@@ -50,8 +51,15 @@ Do not use `TEAM_STATE_DIR` for a pinned team. `up` honours it, but the seats do
 
    ```
    cp <factory>/teams/<team>.yaml <releases>/factory-<release>/teams/
+   mkdir -p <releases>/factory-<release>/projects
    cp -pR <factory>/projects/<name> <releases>/factory-<release>/projects/
    ```
+
+   Make `projects/` first: a new checkout has no `projects/` folder, so without it `cp` makes
+   `projects/` itself the copy of `<name>`. The prompts then land at `projects/project.md`, not
+   `projects/<name>/project.md`, and `check` fails with `prompt file not found`
+   ([#218](../../../issues/218)). `teams/` needs no `mkdir`, because it is tracked (it holds
+   `example.yaml`).
 
    Keep the prompt paths in the team file relative to it (`../roles/common.md`, `../projects/<name>/...`),
    so each checkout uses its own copy. An absolute path keeps pointing at whichever checkout it names.
@@ -74,6 +82,15 @@ or prune it with git, and change the code the pinned team runs at its next start
 releases folder to every other team file's `permissions`. For a releases folder at `/path/to/releases`,
 that is `deny: ["Edit(//path/to/releases/**)"]` (an absolute path takes `//` in a rule). Or keep it
 where those teams never work.
+
+The releases-folder deny goes in the other teams' files only, never in the pinned team's own. Each
+seat's prompt names its progress note through its checkout's state link,
+`<releases>/factory-<release>/.state/<team>/notes/<role>.md`, which is inside the releases folder. In
+the pinned team's file, the deny covers that path, and a deny wins over the allow the seat's settings
+give its note, so every seat is refused when it writes its note by the path its prompt gives
+([#219](../../../issues/219)). For the same reason, give each pinned team a releases folder of its
+own: two pinned teams sharing one would each deny it in the other's file, and so block each other's
+notes.
 
 The shared `<state>` folder, which holds the pinned team's notes, log and records, needs the same care
 in both directions, and the factory finds neither direction itself. It finds another team's state only
@@ -116,7 +133,9 @@ The team's state is moved, not copied, so nothing is left behind:
 
 ## Upgrade to a newer release (rolling)
 
-1. Set up a checkout for the new release (the three steps above), linked to the same `<state>`.
+1. Set up a checkout for the new release, with `<new>` for `<release>`: steps 1 to 3 of
+   [Set up a release checkout](#set-up-a-release-checkout), the `mkdir` of `projects/` included, linked
+   to the same `<state>`.
 2. For each seat in turn, once it has written its handoff:
 
    ```

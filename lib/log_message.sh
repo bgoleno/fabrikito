@@ -107,9 +107,17 @@ ruby --disable-gems -rjson -e '
     x.inspect
   end
 
-  # One write in append mode, as say appends with >>: lines from both stay whole.
+  # One write in append mode, as say appends with >>: lines from both stay whole. Never through a
+  # link at the log, or into anything there but a regular file (#194, as say): NOFOLLOW makes the
+  # open fail on a symlink, NONBLOCK keeps it from waiting on a FIFO, and what was opened must be a
+  # regular file with one link: a hard link passes the other two (tl and sec on #206). A refused
+  # open raises, which costs the line, as any other failure here does.
   def append(log, fields)
-    File.open(log, "a") { |f| f.write(fields.join("\t") + "\n") } if File.directory?(File.dirname(log))
+    return unless File.directory?(File.dirname(log))
+    File.open(log, File::WRONLY | File::APPEND | File::CREAT | File::NOFOLLOW | File::NONBLOCK, 0o666) do |f|
+      st = f.stat
+      f.write(fields.join("\t") + "\n") if st.file? && st.nlink == 1
+    end
   end
 
   j = (JSON.parse(lone_surrogates_replaced(STDIN.read)) rescue nil)

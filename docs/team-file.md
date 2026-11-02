@@ -8,18 +8,20 @@ the reference for each key, and the file to copy.
 
 - `repo`, `project`, `owner`: the local checkout, its GitHub repo (`owner/name`), the GitHub Project the
   team tracks work on, and the human it works for. The prompts name them, so this is the only edit to
-  retarget a team. `repo.gate` is the repo's pass/fail command: see [The gate](../README.md#the-gate).
+  retarget a team. `repo.gate` is the repo's pass/fail command: see [The gate](gate.md).
 - `storage`: `volume` and `root`. Every worktree is created under `<volume>/<root>/`. The volume must be
   mounted, checked from the mount table when a worktree is created; the launcher never falls back to
   another disk.
 - `sessions`: tmux name prefix, an optional claude `wrapper`, `args`, and an optional default `model`,
   `effort` and `permission_mode`. Unset means the flag is omitted and the seat inherits
   `~/.claude/settings.json`. `sessions.claude.plugin` (default `true`) loads the factory plugin into
-  every seat: see [The factory plugin](../README.md#the-factory-plugin).
+  every seat: see [The factory plugin](plugin.md).
 - `permissions` (`deny`, `ask`, `allow`), at the top level and per role: see
   [Safety](../README.md#safety).
 - `other_teams`: other teams' state folders that aren't beside this team's own, each with the
-  `observers` allowed to read its log and notes: see [Safety](../README.md#safety).
+  `observers` allowed to read its log and notes. That log can carry private security reports, so an
+  observer treats it under rule 5 and sends `sec` and the EM only a pointer: see
+  [Safety](../README.md#safety).
 - `prompts.common` and a per-role `prompt` (file) or `prompt_text` (inline). Placeholders such as
   `@@ROSTER@@`, `@@GITHUB_REPO@@`, `@@PROJECT_URL@@` and `@@WORKTREE_ROOT@@` are filled in per seat.
 - `prompts.project` (optional): a file with your project's specifics, such as what the product is,
