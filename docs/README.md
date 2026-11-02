@@ -10,9 +10,10 @@ Reference documentation for software-factory. The [README](../README.md) introdu
 | [Right-sizing a team](right-sizing.md) | Decide how many seats to run, set effort and model per seat, and see what a team costs. |
 | [The factory plugin](plugin.md) | See how the factory's skills reach every seat, which skills run only when typed, and how the plugin is loaded and protected. |
 | [How work is tracked](workflow.md) | See the issues-first rule, how a seat's progress note is kept and shown back at every start, and how a security point found in a review holds a merge until `sec` clears it. |
+| [The gate](gate.md) | See how a seat with `gate_on_stop` is held to the repository's gate when it stops with uncommitted work, and what the gate does not catch. |
 | [Pinned releases](pinned-release.md) | Run a team from a checkout of its own, fixed at a release, so changes here do not reach its running seats: the one-time move of its state, a rolling upgrade, and removing an old release. |
 | [Testing](testing.md) | Run a live test on a private tmux server, and run, extend or read the end-to-end test. |
 | [Troubleshooting](troubleshooting.md) | Find what you see (an error, a refused message, a silent seat) and what to do about it. |
 
-The rest of the reference is in the [README](../README.md): safety and permissions, messaging,
-the gate and updating Claude Code.
+The rest of the reference is in the [README](../README.md): safety and permissions, messaging
+and updating Claude Code.

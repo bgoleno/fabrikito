@@ -122,7 +122,7 @@ hook is installed into your own settings.
   [The gate](#the-gate) below.
 
 A user setting of `disableAllHooks: true` switches hooks off, with an exception for gated seats:
-see [Progress notes](workflow.md#progress-notes) and [The gate](../README.md#the-gate).
+see [Progress notes](workflow.md#progress-notes) and [The gate](gate.md).
 
 ## How seats talk
 
@@ -158,7 +158,7 @@ roster names, which guards against mistakes, not impersonation. See
 `Stop` hook each time it ends a turn with uncommitted changes, and is sent back to work while it
 fails, up to a limit. The shared prompt also tells every seat to run the whole gate
 before new work. The reviewer's own run of the gate on the pull request is the real check. See
-[The gate](../README.md#the-gate).
+[The gate](gate.md).
 
 ## Progress notes
 
