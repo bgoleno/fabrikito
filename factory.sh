@@ -748,13 +748,17 @@ resolve_claude() {
 # an update included. The size is compared first, then the bytes (cmp reads both; nothing is copied).
 # One that differs is refused, not replaced: seats may be running it, and replacing a running seat's
 # file is what the copy exists to avoid (see resolve_claude). A reinstall of the same version brings
-# the same bytes, so an update does not trip this; a new version gets a path of its own.
+# the same bytes, so an update does not trip this; a new version gets a path of its own. The copy also
+# has one name (sec on #234): up makes it with cp, so a second name means it was put there, and a hard
+# link to the shared file itself would change under the seats when that file is written in place.
 copy_same_or_die() {
-  if [ -f "$CLAUDE_COPY" ] && [ "$(stat -f %z "$CLAUDE_COPY")" = "$(stat -f %z "$CLAUDE_SRC")" ] &&
-    cmp -s "$CLAUDE_COPY" "$CLAUDE_SRC"; then
+  if [ -f "$CLAUDE_COPY" ] && [ "$(stat -f %l "$CLAUDE_COPY")" = 1 ] &&
+    [ "$(stat -f %z "$CLAUDE_COPY")" = "$(stat -f %z "$CLAUDE_SRC")" ] && cmp -s "$CLAUDE_COPY" "$CLAUDE_SRC"; then
     return 0
   fi
-  die "$CLAUDE_COPY is not the same file as $CLAUDE_SRC (claude $CLAUDE_VERSION), so up starts no seat on it: it was refused, not replaced. Only a seat or a person could have put it there; report it. Once no seat runs it ($SELF status), remove that exact file, then run up again"
+  # Not only a planted file: the shared claude can also change without a new version, as a reinstall
+  # under way can (tl on #234). The message names both.
+  die "$CLAUDE_COPY is not a copy of $CLAUDE_SRC (claude $CLAUDE_VERSION): its bytes differ, or it has a second name (a hard link). So up starts no seat on it: it was refused, not replaced. Either it was put there (report it), or the shared claude changed without a new version (if a reinstall is under way, retry up when it is done). Once no seat runs it ($SELF status), remove that exact file, then run up again"
 }
 
 # Make the copy if it is not there yet: an APFS clone (cp -c: a file of its own that shares the
@@ -762,7 +766,7 @@ copy_same_or_die() {
 # checked before it is moved into place, so a seat never runs a partial copy. Any failure stops up:
 # falling back to the shared file would bring the problem back without a sign.
 copy_link() {
-  [ ! -L "$CLAUDE_COPY" ] || die "$CLAUDE_COPY is a symlink, not the team's copy of claude: remove that exact link, then run up again"
+  [ ! -L "$CLAUDE_COPY" ] || die "$CLAUDE_COPY is a symlink, not a copy of claude, so up starts no seat on it: it was refused, not removed. Once no seat runs it ($SELF status), remove that exact link, then run up again"
 }
 ensure_claude_copy() {
   local dir tmp how

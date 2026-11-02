@@ -51,7 +51,7 @@ mkdir -p $T/stateb/bin/$cv && printf '#!/bin/sh\necho ran >> %s/planted.log\nexe
 cp $T/stateb/bin/$cv/claude $T/planted.want; ino=$(stat -f %i $T/stateb/bin/$cv/claude)
 fc=$(TEAM_STATE_DIR=$T/stateb TEAM_VIEW=0 $S -c $T/tc.yaml up --no-view 2>&1); rc=$?
 sleep 1
-[ $rc -ne 0 ] && echo "$fc" | grep -qF "$T/stateb/bin/$cv/claude is not the same file as" && echo "$fc" | grep -qF "refused, not replaced" && ! tmux has-session -t '=tc-x' 2>/dev/null && [ ! -e $T/planted.log ] \
+[ $rc -ne 0 ] && echo "$fc" | grep -qF "$T/stateb/bin/$cv/claude is not a copy of" && echo "$fc" | grep -qF "refused, not replaced" && ! tmux has-session -t '=tc-x' 2>/dev/null && [ ! -e $T/planted.log ] \
   && [ "$(stat -f %i $T/stateb/bin/$cv/claude)" = "$ino" ] && cmp -s $T/stateb/bin/$cv/claude $T/planted.want \
   && ok "up refuses a runnable claude copy that differs from the shared claude, says it was not replaced, and no seat runs it" || { bad "a planted claude copy (rc=$rc)"; echo "$fc" | tail -3; cat $T/planted.log 2>/dev/null; }
 TEAM_STATE_DIR=$T/stateb $S -c $T/tc.yaml down --yes x >/dev/null 2>&1
@@ -62,4 +62,10 @@ fc=$(TEAM_STATE_DIR=$T/statec TEAM_VIEW=0 $S -c $T/tc.yaml up --no-view 2>&1); r
   && [ ! -e $T/statec/bin/$cv/.how ] && [ -z "$(ls -A $T/statec/bin/$cv | grep partial)" ] \
   && ok "up reuses a claude copy that matches the shared claude, unchanged and without a new copy" || { bad "a matching claude copy (rc=$rc)"; echo "$fc" | tail -3; ls -la $T/statec/bin/$cv; }
 TEAM_STATE_DIR=$T/statec $S -c $T/tc.yaml down --yes x >/dev/null 2>&1
+# A hard link to the shared claude has its bytes, but a second name: refused too (sec on #234).
+mkdir -p $T/stated/bin/$cv && ln $T/bin/claude $T/stated/bin/$cv/claude
+fc=$(TEAM_STATE_DIR=$T/stated TEAM_VIEW=0 $S -c $T/tc.yaml up --no-view 2>&1); rc=$?
+[ $rc -ne 0 ] && echo "$fc" | grep -qF "$T/stated/bin/$cv/claude is not a copy of" && echo "$fc" | grep -qF "second name" && ! tmux has-session -t '=tc-x' 2>/dev/null \
+  && ok "up refuses a claude copy that is a hard link to the shared claude, and starts no seat" || { bad "a hard-linked claude copy (rc=$rc)"; echo "$fc" | tail -3; }
+TEAM_STATE_DIR=$T/stated $S -c $T/tc.yaml down --yes x >/dev/null 2>&1
 e2e_end=claude-copy # the last line: test/e2e.sh checks that the file ran to here
