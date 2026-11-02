@@ -21,27 +21,7 @@ Moved to [Commands: The iTerm view](docs/commands.md#the-iterm-view).
 
 ## Right-sizing
 
-Every seat is a separate Claude Code session with its own context, so token use grows with the number
-of seats that are working, and with how long each works. Coding has fewer truly parallel tasks than it
-seems: three focused seats often get more done than five scattered ones, and a team of three to five is
-a good start.
-
-- Start only the seats a task needs: `./factory.sh up em tl fs1`. Add one later with `up fs2`, and stop
-  one that is done with `down --yes fs2` (its worktree is kept).
-- An idle seat spends little (Claude Code's session recap and idle compaction can still use some
-  tokens). A message delivered to it starts a turn that sends its whole conversation again, so a seat
-  that is sent many messages keeps spending.
-- Effort is the main cost and depth control (`effort` per role, or `sessions.claude.effort` for all).
-  The example team runs the manager at `medium` and the seats that write, test and review code at
-  `high`; keep `max` for a hard problem a seat works on unattended, such as a security hunt. A `model`
-  per role works the same way. `./factory.sh check` shows each seat's model and effort, and
-  `(inherit)` where the seat takes them from `~/.claude/settings.json`.
-- To see what a team costs, run `/usage` in a seat. Its Session block counts that seat's own tokens
-  (its dollar figure is a list-price estimate, meaningful on API billing). On a subscription it also
-  shows the plan usage bars, which every seat draws on, and a breakdown (by skill, subagent, plugin
-  and MCP server, with recommendations) of recent usage computed from this machine's session history.
-  That covers all the seats together, but also every other Claude Code session on the machine, and it
-  is not split by seat. See [Manage costs](https://code.claude.com/docs/en/costs).
+Moved to [Right-sizing a team](docs/right-sizing.md).
 
 ## The team file
 
@@ -53,37 +33,7 @@ Moved to [The team file: New worktrees](docs/team-file.md#new-worktrees).
 
 ## The factory plugin
 
-`plugin/` is a Claude Code [plugin](https://code.claude.com/docs/en/plugins) (`.claude-plugin/plugin.json`
-and `skills/`) that `up` loads into every seat with `--plugin-dir <this checkout>/plugin`. Seats work in
-the target project's folders, where this repository's own `.claude/` is never read, so this is how the
-factory's skills reach them. Nothing is installed into your settings: a session the factory did not start
-does not have the plugin. Its skills are namespaced by the plugin name and show as `/factory:<skill>`.
-
-Its skills are procedures for a role (assigning an issue, for example), loaded only when used instead of
-sitting in every prompt. The skill folders under [`plugin/skills/`](plugin/skills/) are the list, and each
-skill's `description` says whom it is for and when to use it. `/factory:ping` only proves the plugin loaded.
-Every seat loads every skill. A skill reaches its role through its description and through that role's
-`skills:` in the team file (`teams/example.yaml` names each one where it belongs). A skill only the owner
-may start sets `disable-model-invocation`. A skill is the procedure. The rules it applies (a brief's
-template, the review bar) stay in the role prompt, which the skill points to rather than copies, and a
-skill stops if the prompt lacks them. `test/e2e.sh` checks every skill's frontmatter, so adding one needs no
-new test code.
-
-- It is on by default. A team file without `sessions.claude.plugin` gets the plugin at its next `up`, and
-  with it every skill (and, later, every hook or agent) added to `plugin/` after that. Set
-  `sessions.claude.plugin: false` to leave the flag out. `check` shows the plugin's path, or `off`.
-- A `--plugin-dir` of your own in `sessions.claude.args` is allowed: the flag repeats, so both load. Your
-  installed plugins load as usual alongside it.
-- Seats get an `Edit` deny on `plugin/`, like `lib/` and `roles/` (see [Safety](#safety)), since it is
-  code every seat runs at its next start, and on each plugin a team loads itself with `--plugin-dir` in
-  `args` (the folder with everything under it, or the `.zip`; a relative path is taken from the seat's
-  folder).
-- What the plugin carries runs in or steers every seat: skills, agents, commands, hooks and MCP
-  servers, including hooks and servers declared inline in `plugin.json`. So every pull request that
-  changes anything under `plugin/`, `plugin.json` included, gets a security review as well as the
-  usual one.
-- Managed settings can turn `--plugin-dir` off (Claude Code's docs say so; not tried here), and then the
-  seats have no factory skills.
+Moved to [The factory plugin](docs/plugin.md).
 
 ## Issues first
 
@@ -221,7 +171,9 @@ command that started it, or a command a seat runs in a new tmux session on the s
 not caught and is labelled `[from owner]` (the comment above `caller_seat` in `factory.sh` lists every such
 way). A seat cannot `say` to itself. A `TEAM_ROLE` that is set must be one of the team's role ids, or
 `live-test`: `say` refuses any other value, and the reserved `owner` and `launcher`, sending no keys and
-logging NOT-DELIVERED.
+logging NOT-DELIVERED. It refuses an empty or whitespace-only message the same way, before any tmux
+command, for one seat and for `all` ([#157](../../issues/157)); with `TEAM_ROLE` unset, that refusal is
+logged under the sender `?`.
 
 `live-test` is the driver label. `test/live-env.sh run` sets `TEAM_ROLE=live-test`, so a live test that a
 seat drives sends as `[from live-test]`, never as `[from owner]`. No role id can be `live-test`, since role
