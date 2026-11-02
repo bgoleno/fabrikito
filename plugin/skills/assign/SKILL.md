@@ -1,6 +1,6 @@
 ---
 name: assign
-description: "For the engineering manager: hand one issue to one seat with a complete brief written from the template in your role prompt, send it, and record the assignment on the issue. Arguments: <issue> <role id> [--dry-run]."
+description: "For the engineering manager: hand one issue to one seat with a complete brief, one line per field your role prompt lists, send it, and record the assignment on the issue. Arguments: <issue> <role id> [--dry-run]."
 argument-hint: <issue number or URL> <role id> [--dry-run]
 ---
 
@@ -9,10 +9,10 @@ argument-hint: <issue number or URL> <role id> [--dry-run]
 Arguments: `$ARGUMENTS`. They are an issue (number or URL), the role id of the seat taking it, and
 optionally `--dry-run`. If the issue or the seat is missing, ask for it and stop.
 
-Your role prompt holds the rules: the brief template, and any limits on how much work a seat holds
-at once and on two seats editing the same files, with the seats each limit applies to. This skill
-is only the order to apply them in, and does not restate them. Where the two differ, the role prompt
-wins.
+Your role prompt holds the rules: the fields a brief must fill, and any limits on how much work a seat
+holds at once and on two seats editing the same files, with the seats each limit applies to. This
+skill is the order to apply them in, and what each field holds (step 5); it does not restate the
+rules. Where the two differ, the role prompt wins.
 
 ## When to use
 - When you hand one issue to one seat to work on, review or verify.
@@ -23,8 +23,8 @@ wins.
 ## Steps
 0. **Check that you assign work.** Every seat loads this skill. If your role prompt does not make
    you the role that assigns work (the engineering manager), stop and say so.
-1. **Find the template.** Find the brief template in your role prompt: the block that starts
-   `Issue:` and lists the lines a brief must fill. If your role prompt has none, stop and say so. Do
+1. **Find the brief's fields.** Find the rule in your role prompt that lists the labelled lines a
+   brief must fill, from `Issue:` to `Reviewers:`. If your role prompt has none, stop and say so. Do
    not write a brief from memory or from this skill.
 2. **Read the issue in full,** with its comments:
    `gh issue view <n> -R <repo> --json title,state,body,comments`. Not `--comments`: without a
@@ -50,11 +50,21 @@ wins.
    prompt's rule on two seats editing the same files: sequence the work (say so under Boundaries),
    or stop and choose a different issue. For a review or a verification, name the PR under
    Boundaries instead.
-5. **Write the brief.** Fill every line of the template. Write "none" rather than leaving a line
-   out.
-   - Name the branch, and the base ref with its current commit (`git ls-remote <remote> <base>`).
-   - Name the reviewers the role prompt calls for, including `sec` when the change is
-     security-sensitive.
+5. **Write the brief,** one line per field your role prompt lists, in its order and with its labels.
+   Write "none" rather than leaving a line out: vague delegation is how work gets done twice or not at
+   all. What each line holds:
+   - `Issue:` the full URL.
+   - `Objective:` the outcome in one sentence, not the steps.
+   - `Deliverable and done:` what comes back (a PR that closes the issue, a review verdict, a
+     verification report) and what done means: the acceptance criteria, the full gate, the evidence.
+   - `Branch:` its name, cut from the base ref, with the base's current commit
+     (`git ls-remote <remote> <base>`).
+   - `Tools and sources:` files, docs, earlier PRs or reviews to read first; anything to use or avoid.
+   - `Boundaries:` what is out of scope; what other seats own or have in flight in these files (seat,
+     PR).
+   - `Reviewers:` `tl`, plus `sec` when the change is security-sensitive and `qa` for behaviour.
+
+   Then:
    - Include nothing that must not reach a tracker: no secret, and no detail of an unfixed security
      finding the role prompt keeps private.
 6. **Send it** to the seat with `SendMessage`, `to` set to its session name. Use the role prompt's
@@ -76,7 +86,7 @@ anything.
 - After a dry run: the message and the comment as they would go out.
 
 ## Stop and ask when
-- You are not the role that assigns work, or your role prompt has no brief template.
+- You are not the role that assigns work, or your role prompt does not list the brief's fields.
 - The issue has no acceptance criteria, or depends on unmerged work the seat cannot avoid.
 - The seat is not in the roster or is not up.
 - Your role prompt's limits stop the assignment (work in flight, or file overlap for work that

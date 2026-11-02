@@ -172,7 +172,7 @@ and deny every other seat's. See [Progress notes](workflow.md#progress-notes).
 The skills under `plugin/skills/` are procedures for a role, such as assigning an issue
 (`factory:assign`), starting a task (`factory:start-task`) or reviewing a pull request
 (`factory:review-pr`). A skill is loaded only when it is used, instead of sitting in every prompt.
-The rules a skill applies, such as the brief's template or the review bar, stay in the role prompt,
+The rules a skill applies, such as the brief's fields or the review bar, stay in the role prompt,
 and the skill points to them. See [The factory plugin](plugin.md).
 
 ## What the rules are, and are not
