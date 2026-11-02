@@ -488,12 +488,12 @@ command at a time across every seat of every team on the host, and the owner's s
 - **The command** is an argument list, not a shell string (write a pipeline as `bash -c '...'`). It
   runs in a process group of its own, so it cannot read the terminal. The exit status is the
   command's, or 128 plus the signal that ended it. It needs no team file, so it works from any checkout.
-- **The lock** is one file per user, `$(getconf DARWIN_USER_TEMP_DIR)software-factory/run-exclusive.lock`,
+- **The lock** is one file per user, `~/Library/Application Support/software-factory/run-exclusive.lock`,
   outside every team's state and checkout. Teams on one machine share the user, so they share the lock.
   `FACTORY_RUN_LOCK` names another file (the e2e uses its own). The folder is owner-only, and a lock
   file that is a symlink or a hard link is refused. Never remove the lock file while a run holds it: a
-  run that starts after that does not wait for the one holding it (the holder warns). Because macOS
-  cleans that folder of files unused for days, a run touches the lock while it holds it.
+  run that starts after that does not wait for the one holding it, and the holder can only say so when
+  it ends.
 - **The lock ends with the command.** It is released when the command ends or when its run is killed:
   TERM, INT or HUP is passed on to the command's group, and a run killed with SIGKILL has its lock
   dropped by the system. A command whose run was killed with SIGKILL is not stopped and can overlap

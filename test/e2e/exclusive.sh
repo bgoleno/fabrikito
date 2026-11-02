@@ -9,7 +9,7 @@ rx_until() { local i=0; until eval "$1"; do i=$((i + 1)); [ $i -ge 150 ] && retu
 # A holder (a script: run-exclusive runs a program) that records its start, then waits for a go file
 # before it records its end: hold <name> <marks> <go file>.
 printf '#!/bin/sh\necho "$1 start" >> "$2"\nuntil [ -e "$3" ]; do sleep 0.1; done\necho "$1 end" >> "$2"\n' > $rx/hold; chmod +x $rx/hold
-real=$(getconf DARWIN_USER_TEMP_DIR)software-factory; [ -e "$real" ] && real_was=1 || real_was=0
+real="$(ruby -retc -e 'print Etc.getpwuid(Process.uid).dir')/Library/Application Support/software-factory"; [ -e "$real" ] && real_was=1 || real_was=0
 
 out=$($S run-exclusive -- sh -c 'echo ran; exit 7' 2>&1); rc=$?
 [ $rc = 7 ] && [ "$out" = ran ] && ok "run-exclusive runs the command and exits with its status" || { bad "run-exclusive status (rc=$rc)"; echo "$out" | tail -2; }

@@ -9,12 +9,15 @@
 # lock. Ctrl-C or TERM while waiting exits 130 or 143 without running the command.
 #
 # The lock is a flock on one file per user, outside every team's state folder and checkout:
-# $(getconf DARWIN_USER_TEMP_DIR)software-factory/run-exclusive.lock. That folder is the user's own
-# (mode 700, set by the system, not from TMPDIR), so every seat, team and checkout of this user finds
-# the same file. FACTORY_RUN_LOCK names another file instead (the e2e uses its own).
+# <home>/Library/Application Support/software-factory/run-exclusive.lock, home from the user database,
+# not $HOME, so every seat, team and checkout of this user finds the same file. Not the per-user T/
+# folder: macOS removes files there that have not been used for some days, and a lock whose name is
+# removed while a run holds it no longer makes the next run wait (tl on #214). FACTORY_RUN_LOCK names
+# another file instead (the e2e uses its own).
 #
 # System ruby 2.6: no gems, no endless methods.
 require "json"
+require "etc"
 
 LOCK_POLL = 2       # seconds between tries while the lock is busy
 REMIND = 300        # seconds between "still waiting" lines
@@ -34,9 +37,9 @@ die("usage: factory.sh run-exclusive -- <command> [args...]", 64) if args.empty?
 
 lock = ENV["FACTORY_RUN_LOCK"].to_s
 if lock.empty?
-  tmp = `getconf DARWIN_USER_TEMP_DIR 2>/dev/null`.chomp
-  die("getconf DARWIN_USER_TEMP_DIR printed nothing, so there is no per-user folder for the lock") if tmp.empty?
-  lock = File.join(tmp, "software-factory", "run-exclusive.lock")
+  home = (Etc.getpwuid(Process.uid).dir rescue nil).to_s
+  die("cannot find this user's home folder in the user database, so there is no place for the lock") if home.empty?
+  lock = File.join(home, "Library", "Application Support", "software-factory", "run-exclusive.lock")
 end
 lock = File.expand_path(lock)
 holder = "#{lock}.holder"
@@ -177,25 +180,7 @@ rescue SystemCallError => e
   say "could not write the holder record #{holder} (#{e.message}); waiters will see an unknown holder"
 end
 say "got the lock after #{(Time.now - started).round}s" if waited
-
-# The name must also last while this run holds the lock: once it is gone, the next run makes a new file
-# and does not wait for this one, and no check of its own can see that. macOS removes files in that T/
-# folder that have not been used for some days, so the lock is touched when taken and every 30 s while
-# held. If the name stops leading to the file held (a person removed it), the run says so, once.
 locked = f.stat
-watch = Thread.new do
-  warned = false
-  loop do
-    cur = (File.lstat(lock) rescue nil)
-    if cur && cur.dev == locked.dev && cur.ino == locked.ino
-      (File.utime(nil, nil, lock) rescue nil)
-    elsif !warned
-      say "warning: #{lock} was removed or replaced while this run holds the lock: a run that starts now does not wait for this one"
-      warned = true
-    end
-    sleep 30
-  end
-end
 
 # The command runs in a process group of its own, so INT, TERM and HUP reach all of it (a test and what
 # it started), passed on from here. Not in the terminal's foreground group: a command that reads the
@@ -216,7 +201,13 @@ loop do
     next
   end
 end
-watch.kill
+# The name must also have lasted while this run held the lock: once it is gone, a run that starts makes
+# a new file and does not wait for this one, and nothing can see that in time (a holder cannot give its
+# open file the name back). So it is only reported, at the end, for whoever reads this run's output.
+cur = (File.lstat(lock) rescue nil)
+unless cur && cur.dev == locked.dev && cur.ino == locked.ino
+  say "warning: #{lock} was removed or replaced while this run held the lock, so a run that started meanwhile may have overlapped it"
+end
 # Removed while the lock is still held, so it can only be this run's record.
 File.unlink(holder) rescue nil
 f.close
