@@ -88,7 +88,9 @@ seat's prompt names its progress note through its checkout's state link,
 `<releases>/factory-<release>/.state/<team>/notes/<role>.md`, which is inside the releases folder. In
 the pinned team's file, the deny covers that path, and a deny wins over the allow the seat's settings
 give its note, so every seat is refused when it writes its note by the path its prompt gives
-([#219](../../../issues/219)).
+([#219](../../../issues/219)). For the same reason, give each pinned team a releases folder of its
+own: two pinned teams sharing one would each deny it in the other's file, and so block each other's
+notes.
 
 The shared `<state>` folder, which holds the pinned team's notes, log and records, needs the same care
 in both directions, and the factory finds neither direction itself. It finds another team's state only
