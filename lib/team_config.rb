@@ -60,7 +60,7 @@ def home_utf8
   utf8(Dir.home, 'the home folder (HOME)')
 end
 
-TOP_KEYS = %w[team owner repo project storage sessions display prompts kickoff permissions roles].freeze
+TOP_KEYS = %w[team owner repo project storage sessions display prompts kickoff permissions roles other_teams].freeze
 DISPLAY_KEYS = %w[iterm primary window].freeze
 PROJECT_KEYS = %w[name url].freeze
 EFFORTS = %w[low medium high xhigh max].freeze
@@ -68,7 +68,9 @@ REPO_KEYS = %w[path github base gate gate_timeout gate_max_blocks bootstrap copy
 STORAGE_KEYS = %w[volume root].freeze
 SESSION_KEYS = %w[prefix claude].freeze
 CLAUDE_KEYS = %w[wrapper args model effort permission_mode plugin auto_memory].freeze
-PROMPT_KEYS = %w[common].freeze
+PROMPT_KEYS = %w[common project].freeze
+# The #117 budget for one seat's rendered prompt: every line is loaded on every task.
+PROMPT_MAX_LINES = 199
 ROLE_KEYS = %w[title summary workdir prompt prompt_text kickoff session model effort permission_mode permissions
                gate_on_stop skills may_merge auto_memory].freeze
 WORKDIR_KEYS = %w[type path name].freeze
@@ -160,6 +162,11 @@ TRIAGE_DIR = 'triage'.freeze
 # Where each seat keeps its progress note, <state>/notes/<role>.md (#5). Outside the worktree, so it
 # survives the worktree being recreated, and in neither list above, so a seat may write it.
 NOTES_DIR = 'notes'.freeze
+
+# other_teams entries (#197), and the folders up makes in every team's state folder, by which one is
+# recognised beside this team's own (see other_teams_found).
+OTHER_TEAM_KEYS = %w[state observers].freeze
+STATE_MARKERS = %w[settings launch prompts].freeze
 
 # The field a tool's own specifier already covers. Claude Code ignores a `Tool(field:...)` rule on
 # it, with only a startup warning.
@@ -405,11 +412,30 @@ class TeamConfig
     out
   end
 
+  # common, then the project's addendum (prompts.project), then the role's own prompt and skills.
+  # Without prompts.project the text is exactly what it was before the key existed (#190).
   def render(id)
     common = prompts_common
     own = role_prompt(id)
     own = "#{own.chomp}\n\n#{skills_section(id)}" unless skills(id).empty?
-    subst(common + "\n" + own, id)
+    project = prompts_project
+    middle = project ? "#{check_project_text(project, id).chomp}\n\n" : ''
+    subst(common + "\n" + middle + own, id)
+  end
+
+  # The project file is the team's own text in every seat's system prompt, so, like a kickoff, it may
+  # not carry a [from ...] label that could read as another sender's. Checked after substitution and
+  # on a normalised copy, as the kickoff is. Returns the text unsubstituted (render substitutes all).
+  def check_project_text(text, id)
+    norm = subst(text, id).unicode_normalize(:nfkc).gsub(/\p{Cf}/, '')
+    die "prompts.project must not contain a [from ...] label: it would read as another sender's" if norm =~ /\[\s*from\b/i
+    text
+  end
+
+  # Lines a seat's rendered prompt has, counted as wc -l counts the output of `render`.
+  def render_lines(id)
+    t = render(id)
+    t.count("\n") + (t.end_with?("\n") ? 0 : 1)
   end
 
   # roles.<id>.skills: each item is a skill name, or a one-entry mapping of a name to when to use
@@ -453,6 +479,32 @@ class TeamConfig
     return '' if p.nil?
 
     read_prompt_file(p['common'])
+  end
+
+  def prompts_project
+    p = @c['prompts']
+    p && p['project'] ? read_prompt_file(p['project']) : nil
+  end
+
+  def prompts_project_path
+    p = @c['prompts']
+    p && p['project'] ? expand(p['project']) : nil
+  end
+
+  # For check: where each part of the prompts comes from, and the longest rendered seat.
+  def prompts_summary
+    lens = roles.keys.map { |id| [id, render_lines(id)] }
+    long = lens.max_by { |_, n| n }
+    "common #{prompts_common_path || 'none'}; project #{prompts_project_path || 'none'}; " \
+      "longest rendered prompt #{long[1]} lines (#{long[0]})"
+  end
+
+  def prompts_warning
+    over = roles.keys.map { |id| [id, render_lines(id)] }.select { |_, n| n > PROMPT_MAX_LINES }
+    return '' if over.empty?
+
+    "warning: #{over.map { |id, n| "#{id} (#{n})" }.join(', ')} render prompts over #{PROMPT_MAX_LINES} lines. " \
+      'Every line is loaded on every task (#117): move procedure into skills, or shorten prompts.project.'
   end
 
   def kickoff(id)
@@ -555,6 +607,160 @@ class TeamConfig
     { 'allow' => [], 'deny' => edit + read }
   end
 
+  # Other teams' state folders (#197). The denies above name only this team's own state folder, so a
+  # seat could read another team's triage records (which can hold unfixed findings) and message log,
+  # and write any of it, when two teams share a machine. A glob over the state root cannot cover
+  # them: it would also deny this team's own folder (a deny wins over an allow; rules have no
+  # negation). So each other team's folder is named, from two sources:
+  # - found: every real folder beside this team's own in the state root (the folder holding
+  #   state_dir, normally <install>/.state/) that holds settings/, launch/ and prompts/, which up
+  #   makes. A link is never followed: one could lead to this team's own state, or to / and give
+  #   every seat Edit(//**) (sec on #197). check names the links it skips.
+  # - listed: other_teams in the team file, for folders elsewhere (a pinned team's shared state,
+  #   docs/pinned-release.md), with the roles of this team that observe that team: they may read
+  #   its log and notes, as the owner approves (an observer scope), never its triage records.
+  # Neither may be, hold or sit inside this team's own state folder (real paths), nor this team's own
+  # work: an Edit deny there would stop the seats working. A listed folder that does not exist yet
+  # passes the state-folder test below, so this one must also catch a future worktree (qa on #200).
+  # macOS disks are normally case-insensitive and normalization-insensitive, and File.realpath keeps
+  # the path as typed, so paths compare in NFC lower case there (tl and sec on #200); erring this way
+  # refuses more.
+  def path_overlap?(a, b)
+    fold = RUBY_PLATFORM.include?('darwin') ? ->(x) { x.unicode_normalize(:nfc).downcase } : ->(x) { x }
+    x = fold.call(real_path(a))
+    y = fold.call(real_path(b))
+    within = ->(i, o) { i == o || i.start_with?(o.end_with?('/') ? o : "#{o}/") }
+    within.call(x, y) || within.call(y, x)
+  end
+
+  def overlaps_own_state?(path)
+    path_overlap?(path, state_dir)
+  end
+
+  # How path overlaps this team's own work, or nil: it is, holds or sits inside the repository, the
+  # worktree folder or a seat's working directory, or it is or holds the home folder or this factory
+  # checkout. When the repository or a working directory holds this team's own state root (a team
+  # working on software-factory keeps .state/ in its own checkout, tl on #200), a folder inside that
+  # state root is exempt from "sits inside" it: the other teams' folders are there.
+  def own_work_overlap(path)
+    fold = RUBY_PLATFORM.include?('darwin') ? ->(x) { x.unicode_normalize(:nfc).downcase } : ->(x) { x }
+    within = ->(i, o) { i == o || i.start_with?(o.end_with?('/') ? o : "#{o}/") }
+    r = fold.call(real_path(path))
+    root = fold.call(real_path(File.dirname(state_dir)))
+    holds = ->(dir) { within.call(fold.call(real_path(dir)), r) }
+    in_root = r != root && within.call(r, root)
+    meets = lambda do |dir|
+      d = fold.call(real_path(dir))
+      # Only a repository or workdir that holds the state root strictly: one that IS the state root
+      # would exempt all of itself (sec on #200).
+      in_root && root != d && within.call(root, d) ? holds.call(dir) : path_overlap?(path, dir)
+    end
+    return "is, holds or sits inside this team's repository (repo.path)" if meets.call(repo_path)
+    return "is, holds or sits inside this team's worktree folder (#{worktree_root})" if meets.call(worktree_root)
+
+    roles.each_key { |id| return "is, holds or sits inside seat #{id}'s working directory" if meets.call(workdir(id)) }
+    return 'is or holds the home folder' if holds.call(home_utf8)
+    return 'is or holds this factory checkout' if holds.call(INSTALL)
+
+    nil
+  end
+
+  def team_state?(path)
+    STATE_MARKERS.all? { |m| File.directory?(File.join(path, m)) }
+  end
+
+  # [found, skipped]: other teams' folders found in the state root, and [path, why] for each link
+  # passed over that leads to a team's state, or folder that overlaps this team's own.
+  def other_teams_found
+    @other_teams_found ||= begin
+      root = File.dirname(state_dir)
+      found = []
+      skipped = []
+      names = begin
+        File.directory?(root) ? Dir.children(root).sort : []
+      rescue SystemCallError => e
+        skipped << [root, "could not be listed (#{e.class.name.split('::').last}): no other teams found there"]
+        []
+      end
+      names.each do |name|
+        p = File.join(root, name)
+        next if p == state_dir
+
+        if File.symlink?(p)
+          if overlaps_own_state?(p)
+            skipped << [p, "a symlink to this team's own state folder, or to a folder holding it"]
+          elsif team_state?(p)
+            skipped << [p, "a symlink: list it under other_teams if it is another team's state folder"]
+          end
+        elsif File.directory?(p) && team_state?(p)
+          if overlaps_own_state?(p)
+            skipped << [p, "it is this team's own state folder, holds it or sits inside it"]
+          elsif (what = own_work_overlap(p))
+            skipped << [p, "it #{what}"]
+          else
+            found << { 'path' => p, 'observers' => [], 'how' => 'found' }
+          end
+        end
+      end
+      [found, skipped]
+    end
+  end
+
+  def other_teams_listed
+    v = @c['other_teams']
+    return [] if v.nil?
+
+    die 'other_teams must be a list of { state, observers } entries' unless v.is_a?(Array)
+    v.each_with_index.map do |e, i|
+      die "other_teams entry #{i + 1} must be a mapping of state and observers" unless e.is_a?(Hash)
+      bad = e.keys - OTHER_TEAM_KEYS
+      die "unknown key(s) under 'other_teams' entry #{i + 1}: #{bad.join(', ')} (allowed: #{OTHER_TEAM_KEYS.join(', ')})" unless bad.empty?
+      die "other_teams entry #{i + 1} needs state: the other team's state folder" unless e['state'].is_a?(String) && !e['state'].empty?
+      p = expand(e['state'])
+      obs = e['observers'] || []
+      die "other_teams: observers of #{p} must be a list of role ids" unless obs.is_a?(Array) && obs.all? { |o| o.is_a?(String) }
+      obs.each { |o| die "other_teams: observer #{o} of #{p} is not a role of this team" unless roles.key?(o) }
+      die "other_teams: #{p} is this team's own state folder, holds it or sits inside it" if overlaps_own_state?(p)
+      what = own_work_overlap(p)
+      die "other_teams: #{p} #{what}" if what
+      # Only a team's state folder: a wrong entry such as ~, the volume or repo.path would deny this
+      # team's own work, and a .state root one level too high would protect nothing while check said
+      # it did (tl on #200). One that does not exist yet (that team has not started) is accepted, and
+      # its denies apply once it does.
+      exists = File.exist?(p)
+      if exists && !team_state?(p)
+        die "other_teams: #{p} is not a team's state folder (it holds no settings/, launch/ and prompts/): " \
+            'name the folder itself, such as <checkout>/.state/<team>'
+      end
+      { 'path' => p, 'observers' => obs, 'how' => exists ? 'listed' : 'listed; not found yet' }
+    end
+  end
+
+  # Found and listed together; a listed folder that was also found adds its observers to it.
+  def other_teams
+    @other_teams ||= other_teams_listed.each_with_object(other_teams_found[0].map(&:dup)) do |e, list|
+      same = list.find { |t| real_path(t['path']) == real_path(e['path']) }
+      if same
+        same['observers'] |= e['observers']
+      else
+        list << e
+      end
+    end
+  end
+
+  # The denies on other teams' folders for seat id, in both spellings: Read on triage records always,
+  # Read on the log and notes unless id observes that team, and Edit on all of it.
+  def other_team_rules(id)
+    other_teams.flat_map do |t|
+      [File.expand_path(t['path']), real_path(t['path'])].uniq.flat_map do |sp|
+        e = glob_escape(sp)
+        rules = ["Read(/#{e}/triage/**)", "Edit(/#{e}/**)"]
+        rules += ["Read(/#{e}/messages.log)", "Read(/#{e}/notes/**)"] unless t['observers'].include?(id)
+        rules
+      end
+    end
+  end
+
   # The Read deny on messages.log for a seat other than LOG_READER, in both spellings.
   def log_read_rules(id)
     return [] if id == LOG_READER
@@ -610,7 +816,7 @@ class TeamConfig
       File.join(state_dir, 'messages.log'),
       # the team file and the prompts it loads into every seat
       @path,
-      *([prompts_common_path] + roles.values.map { |r| r['prompt'] && expand(r['prompt']) }).compact,
+      *([prompts_common_path, prompts_project_path] + roles.values.map { |r| r['prompt'] && expand(r['prompt']) }).compact,
       # the launcher itself, and the wrapper it runs claude through
       File.join(INSTALL, 'factory.sh'), File.join(INSTALL, 'lib', '**'), File.join(INSTALL, 'roles', '**'),
       # the factory's plugin, which every seat loads at its next start
@@ -746,7 +952,8 @@ class TeamConfig
     own = note_rules(id)
     others = (roles.keys - [id]).flat_map { |r| note_rules(r) }
     tri = triage_rules(id)
-    deny = protected_paths(id).map { |p| "Edit(/#{p})" } + others + log_read_rules(id) + memory_rules(id) + tri['deny']
+    deny = protected_paths(id).map { |p| "Edit(/#{p})" } + others + log_read_rules(id) + memory_rules(id) + tri['deny'] +
+           other_team_rules(id)
     add.call({ 'deny' => deny, 'ask' => base_push_rules, 'allow' => own + tri['allow'] }, 'factory.sh')
     out
   end
@@ -881,7 +1088,15 @@ class TeamConfig
 
   def permissions_report
     added_by = ->(e) { e[2] == 'factory.sh' }
-    out = ["permissions per seat (they add to the rules in ~/.claude/settings.json and the repo's .claude/ settings, which still apply):"]
+    out = []
+    # Other teams' state folders (#197): what was found and listed, and the links passed over.
+    teams = other_teams.map do |t|
+      obs = t['observers'].empty? ? '' : "; observers: #{t['observers'].join(', ')}"
+      "#{t['path']} (#{t['how']}#{obs})"
+    end
+    out << "other teams: #{teams.empty? ? 'none' : teams.join(', ')}"
+    other_teams_found[1].each { |p, why| out << "skipped   : #{p} (#{why})" }
+    out << "permissions per seat (they add to the rules in ~/.claude/settings.json and the repo's .claude/ settings, which still apply):"
     roles.each_key do |id|
       merged = merged_permissions(id)
       factory = permission_entries(id).select(&added_by).map(&:first)
@@ -892,11 +1107,12 @@ class TeamConfig
         out << format('    %-5s: %s', list, own.empty? ? '(none)' : own.join(', '))
       end
       notes = (roles.keys - [id]).flat_map { |r| note_rules(r) }
+      others = other_team_rules(id)
       logs = log_read_rules(id)
       mem = memory_rules(id)
       tri = triage_rules(id)
       added = merged['deny'].count do |r|
-        factory.include?(r) && !notes.include?(r) && !logs.include?(r) && !mem.include?(r) && !tri['deny'].include?(r)
+        factory.include?(r) && !notes.include?(r) && !logs.include?(r) && !mem.include?(r) && !tri['deny'].include?(r) && !others.include?(r)
       end
       asks = merged['ask'].count { |r| factory.include?(r) }
       note = merged['allow'].any? { |r| factory.include?(r) } ? ', Edit allow on its own progress note and deny on the other seats\'' : ''
@@ -906,7 +1122,13 @@ class TeamConfig
                elsif id == LOG_READER then ', Read allow and Edit deny on the triage record folder'
                else ', Edit and Read deny on the triage record folder'
                end
-      out << "    added: Edit deny on #{added} protected paths#{asks.positive? ? ", ask on #{asks} push-to-#{base_branch} patterns" : ''}#{note}#{memo}#{log}#{triage}"
+      watched = other_teams.select { |t| t['observers'].include?(id) }.map { |t| t['path'] }
+      teams = if other_teams.empty? then ''
+              else
+                ", Read and Edit deny on #{other_teams.size} other teams' state folders" +
+                  (watched.empty? ? '' : " (observer of #{watched.join(', ')}: may read its log and notes)")
+              end
+      out << "    added: Edit deny on #{added} protected paths#{asks.positive? ? ", ask on #{asks} push-to-#{base_branch} patterns" : ''}#{note}#{memo}#{log}#{triage}#{teams}"
       out << '    note : allow rules have no effect in bypassPermissions' if mode.start_with?('bypassPermissions') && !(merged['allow'] - factory).empty?
       out << '    note : ask rules are refused in dontAsk mode, not asked' if mode == 'dontAsk' && !merged['ask'].empty?
     end
@@ -1034,6 +1256,7 @@ class TeamConfig
     die "project.name is required" if project['name'].to_s.empty?
     die "project.url must be an https://github.com/ URL" unless project['url'].to_s.start_with?('https://github.com/')
     die "repo.path is not a directory: #{repo_path}" unless File.directory?(repo_path)
+    other_teams_listed
     die 'storage.volume is required (an absolute path such as /Volumes/MyDrive)' unless storage['volume'].to_s.start_with?('/', '~')
     die 'storage.root is required and must be relative to the volume' if storage['root'].to_s.empty? || storage['root'].to_s.start_with?('/')
     die 'storage.root must not contain ..' if storage['root'].to_s.split('/').include?('..')
@@ -1110,7 +1333,8 @@ class TeamConfig
       kickoff(id)
     end
     prompts_common
-    roles.each_key { |id| render(id) } # unknown @@placeholders fail here, not at launch
+    prompts_project
+    roles.each_key { |id| render(id) } # unknown @@placeholders and a project label fail here, not at launch
     any_mode = claude.key?('permission_mode') || roles.values.any? { |r| r.key?('permission_mode') }
     args.each do |a|
       flag = a.split('=', 2).first
@@ -1152,9 +1376,12 @@ when 'get'
   when 'state.dir' then puts cfg.state_dir
   when 'claude.config_dir' then puts cfg.claude_config_paths.first
   when 'state.generated_dirs' then puts GENERATED_DIRS
+  when 'state.hook_dirs' then puts HOOK_DIRS
   when 'state.notes_dir' then puts File.join(cfg.state_dir, NOTES_DIR)
   when 'state.triage_dir' then puts(cfg.roles.key?(TRIAGE_WRITER) ? File.join(cfg.state_dir, TRIAGE_DIR) : '')
   when 'hooks.note' then puts cfg.hooks_note.to_s
+  when 'prompts.summary' then puts cfg.prompts_summary
+  when 'prompts.warning' then puts cfg.prompts_warning
   when 'repo.bootstrap' then puts(cfg.bootstrap || '')
   when 'repo.copy' then puts cfg.copy_paths
   when 'repo.gate_summary'

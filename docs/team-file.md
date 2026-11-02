@@ -15,11 +15,19 @@ the reference for each key, and the file to copy.
 - `sessions`: tmux name prefix, an optional claude `wrapper`, `args`, and an optional default `model`,
   `effort` and `permission_mode`. Unset means the flag is omitted and the seat inherits
   `~/.claude/settings.json`. `sessions.claude.plugin` (default `true`) loads the factory plugin into
-  every seat: see [The factory plugin](../README.md#the-factory-plugin).
+  every seat: see [The factory plugin](plugin.md).
 - `permissions` (`deny`, `ask`, `allow`), at the top level and per role: see
   [Safety](../README.md#safety).
+- `other_teams`: other teams' state folders that aren't beside this team's own, each with the
+  `observers` allowed to read its log and notes: see [Safety](../README.md#safety).
 - `prompts.common` and a per-role `prompt` (file) or `prompt_text` (inline). Placeholders such as
   `@@ROSTER@@`, `@@GITHUB_REPO@@`, `@@PROJECT_URL@@` and `@@WORKTREE_ROOT@@` are filled in per seat.
+- `prompts.project` (optional): a file with your project's specifics, such as what the product is,
+  folders that are off limits, a running instance never to touch, the gate and the merge procedure.
+  Every seat's prompt is the common prompt, then this file, then the role's prompt and skills, so a
+  team can keep the shipped prompts and add only this. It takes the same placeholders, may not
+  contain a `[from ...]` label, and seats may not edit it. `check` shows it, with the longest rendered
+  prompt, and warns when a seat's prompt goes over 199 lines. Without it, prompts are unchanged.
 - `roles`: ordered; each has `title`, `workdir` (`project` folder or `worktree`), a prompt, and
   optional `model`, `effort`, `session`, `kickoff`, `summary`, `skills`.
 - `skills` (per role): skills to name in that seat's prompt, each a name (`plugin:name` for a plugin's
@@ -52,9 +60,10 @@ command ([docs](https://code.claude.com/docs/en/worktrees)):
 - `repo.bootstrap`: a command run with bash in the new worktree after the copy, with no terminal input
   and with `TEAM_ROLE` (the seat's role id) and `TEAM_REPO` (the main checkout) set, for example
   `npm ci` or `uv sync`. Its output is shown, indented, as it runs. It runs without the messaging and
-  tmux variables of a seat that runs `up` (`CLAUDE_CODE_MESSAGING_SOCKET`,
-  `CLAUDE_CODE_MESSAGING_TOKEN`, `CLAUDECODE`, `TMUX`, `TMUX_PANE`), so a seat's messaging token does
-  not reach an install script. Every other variable of the shell that runs `up` does reach it, and an
+  tmux variables of a seat that runs `up`: every variable whose name starts with
+  `CLAUDE_CODE_MESSAGING_` (today `CLAUDE_CODE_MESSAGING_SOCKET` and `CLAUDE_CODE_MESSAGING_TOKEN`,
+  and any that a later Claude Code adds), `CLAUDECODE`, `TMUX` and `TMUX_PANE`. So a seat's messaging
+  token does not reach an install script. Every other variable of the shell that runs `up` does reach it, and an
   install command runs third-party scripts (package install hooks, for example) with them. There is no
   time limit. If it fails, or `up` is interrupted meanwhile
   (Ctrl-C, TERM, HUP), `up` stops the bootstrap and stops before starting the seat; a worktree it has
