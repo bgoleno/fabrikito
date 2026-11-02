@@ -672,9 +672,15 @@ class TeamConfig
   # exist, hold team state, and have a parent whose real name, links resolved, is exactly .state: the
   # factory's own git-ignored layout. A source folder that merely holds settings/, launch/ and
   # prompts/, or one under a link named .state, does not qualify, and neither does a missing or empty
-  # folder (tl and sec on #204). A miscased .state fails closed.
+  # folder (tl and sec on #204). File.realpath keeps the case as typed on a case-insensitive disk, so
+  # the parent's name is also taken as stored on disk, from its own folder's listing: a folder named
+  # .State on disk does not qualify however the entry spells it (tl on #223). A folder that can't be
+  # listed fails closed.
   def listed_team_state?(path)
-    File.directory?(path) && team_state?(path) && File.basename(File.dirname(File.realpath(path))) == '.state'
+    return false unless File.directory?(path) && team_state?(path)
+
+    parent = File.dirname(File.realpath(path))
+    File.basename(parent) == '.state' && Dir.children(File.dirname(parent)).include?('.state')
   rescue SystemCallError
     false
   end

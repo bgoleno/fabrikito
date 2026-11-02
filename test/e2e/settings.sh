@@ -332,25 +332,33 @@ rmdir $T/repo/emptyst
 # A team pinned to a release whose repo.path is the factory checkout lists the checkout's
 # <repo>/.state/<team> (#205): a real team state folder whose real parent is named .state is exempt
 # from "sits inside" the repository, and gets every rule. Spelled through a link, the real path
-# decides. Without team state, without a real .state parent (a link named .state, or a source folder
+# decides, and the parent's name is read from the disk. Without team state, without a real .state parent (a link named .state, or a source folder
 # holding settings/, launch/ and prompts/), or the .state root itself, it is still refused.
-mkdir -p $T/pinst/pin $T/repo/srclike/like $T/repo/realdir/t
-for d in $T/repo/.state/other $T/repo/srclike/like $T/repo/realdir/t; do mkdir -p $d/settings $d/launch $d/prompts; done
+mkdir -p $T/pinst/pin $T/repo/srclike/like $T/repo/realdir/t $T/repo/mc/.State/o
+for d in $T/repo/.state/other $T/repo/srclike/like $T/repo/realdir/t $T/repo/mc/.State/o; do mkdir -p $d/settings $d/launch $d/prompts; done
 ln -s $T/repo/.state $T/repo/alias && mkdir -p $T/repo/lnk && ln -s $T/repo/realdir $T/repo/lnk/.state
 mk "" "other_teams: [{ state: $T/repo/.state/other }, { state: $T/repo/alias/other }]"
 pchk=$(TEAM_STATE_DIR=$T/pinst/pin $S -c $T/v.yaml check 2>&1); rc=$?
 pdn=$(TEAM_STATE_DIR=$T/pinst/pin ruby $SRC/lib/team_config.rb $T/v.yaml settings em 2>&1 | ruby -rjson -e 'puts JSON.parse(STDIN.read)["permissions"]["deny"]' 2>&1)
 pr=""; for sp in "$T" "$RT"; do for rule in "Read(/$sp/repo/.state/other/triage/**)" "Read(/$sp/repo/.state/other/messages.log)" "Read(/$sp/repo/.state/other/notes/**)" "Edit(/$sp/repo/.state/other/**)"; do printf '%s\n' "$pdn" | grep -qxF "$rule" || pr="$pr lacks:$rule"; done; done
+# Listed only through the link, the rules name that spelling as well as the real one (tl on #223).
+mk "" "other_teams: [{ state: $T/repo/alias/other }]"
+adn=$(TEAM_STATE_DIR=$T/pinst/pin ruby $SRC/lib/team_config.rb $T/v.yaml settings em 2>&1 | ruby -rjson -e 'puts JSON.parse(STDIN.read)["permissions"]["deny"]' 2>&1)
+for rule in "Read(/$T/repo/alias/other/triage/**)" "Edit(/$T/repo/alias/other/**)" "Edit(/$RT/repo/.state/other/**)"; do printf '%s\n' "$adn" | grep -qxF "$rule" || pr="$pr link-lacks:$rule"; done
 [ $rc = 0 ] && [ -z "$pr" ] && echo "$pchk" | grep -qF "other teams: $T/repo/.state/other (listed)" \
-  && ok "other_teams: a pinned team whose repo is the factory lists <repo>/.state/<team>, through a link too, with every rule" || { bad "other_teams: pinned factory layout (rc=$rc)$pr"; echo "$pchk" | grep -E "^(other teams|error)|other_teams:" | head -3; }
+  && ok "other_teams: a pinned team whose repo is the factory lists <repo>/.state/<team>, with every rule, and through a link with that spelling's rules too" || { bad "other_teams: pinned factory layout (rc=$rc)$pr"; echo "$pchk" | grep -E "^(other teams|error)|other_teams:" | head -3; }
 export TEAM_STATE_DIR=$T/pinst/pin
 reject "other_teams: a missing folder in the repo's .state" "other_teams: $T/repo/.state/later is, holds or sits inside this team's repository (repo.path)" "" "other_teams: [{ state: $T/repo/.state/later }]"
 reject "other_teams: a team-state-like source folder in the repo" "other_teams: $T/repo/srclike/like is, holds or sits inside this team's repository (repo.path)" "" "other_teams: [{ state: $T/repo/srclike/like }]"
 reject "other_teams: a team folder under a link named .state" "other_teams: $T/repo/lnk/.state/t is, holds or sits inside this team's repository (repo.path)" "" "other_teams: [{ state: $T/repo/lnk/.state/t }]"
+# The parent's name as stored on disk decides, not the entry's spelling: File.realpath keeps the typed
+# case on a case-insensitive disk (tl on #223). On a case-sensitive disk .state/o does not exist, and
+# a missing folder in the repo is refused the same way.
+reject "other_teams: a team folder under .State on disk, listed as .state" "other_teams: $T/repo/mc/.state/o is, holds or sits inside this team's repository (repo.path)" "" "other_teams: [{ state: $T/repo/mc/.state/o }]"
 reject "other_teams: the repo's .state root" "other_teams: $T/repo/.state is, holds or sits inside this team's repository (repo.path)" "" "other_teams: [{ state: $T/repo/.state }]"
 reject "other_teams: the repo, for a pinned team" "other_teams: $T/repo is, holds or sits inside this team's repository (repo.path)" "" "other_teams: [{ state: $T/repo }]"
 export TEAM_STATE_DIR=$T/state
-rm $T/repo/alias $T/repo/lnk/.state && rmdir $T/repo/lnk && rm -r "$T/repo/.state" "$T/repo/srclike" "$T/repo/realdir" "$T/pinst"
+rm $T/repo/alias $T/repo/lnk/.state && rmdir $T/repo/lnk && rm -r "$T/repo/.state" "$T/repo/srclike" "$T/repo/realdir" "$T/repo/mc" "$T/pinst"
 # A state root that cannot be listed finds no other teams, without a stack trace, and check says so.
 mkdir -p $T/uroot/u/settings $T/uroot/u/launch $T/uroot/u/prompts && chmod 300 $T/uroot
 uchk=$(TEAM_STATE_DIR=$T/uroot/u $S -c $T/sec.yaml check 2>&1); rc=$?; chmod 700 $T/uroot
