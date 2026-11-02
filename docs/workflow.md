@@ -51,9 +51,9 @@ the shape of it:
 
 - **The marker.** For each point, once, its reporter posts a PR comment whose whole text is one line,
   `<role id>: one point sent to sec and the EM`, and sends `sec` and the EM the point with the
-  marker's URL. When `sec` sends a PR's author a change to make, its marker is
-  `sec: one change sent to the author and the EM`. The same words inside a longer comment are not a
-  marker.
+  marker's URL. For a point `sec` holds privately and sends the PR's author to fix, its marker is
+  `sec: one change sent to the author and the EM`; a low-rated change goes in `sec`'s verdict, with no
+  marker. The same words inside a longer comment are not a marker.
 - **The reference.** The reporter's verdict or QA report names the point only by a line of its own,
   `held point: <marker URL>`, with nothing about the point itself. A later verdict that still has the
   point repeats that line and posts no new marker.
@@ -69,7 +69,9 @@ the shape of it:
   refers to, is gone or changed. It does not yet remember markers from one run to the next
   ([#207](../../../issues/207)).
 - **Order is by id, never by time.** Where the merge train decides which comment is the latest, it
-  compares comment ids or review ids, because GitHub can give a later comment an earlier time.
+  compares comment ids or review ids, because GitHub can give a later comment an earlier time. A
+  comment id and a review id cannot be compared with each other, so where the result turns on which
+  of the two came first, the train stops and asks.
 
 Where each part lives:
 
