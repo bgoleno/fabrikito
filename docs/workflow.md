@@ -1,7 +1,8 @@
 # How work is tracked
 
 Two rules every seat follows, and what the launcher does to support them: every change starts as an
-issue, and every seat keeps a progress note.
+issue, and every seat keeps a progress note. Then how a security point found in a review is held on a
+pull request until `sec` clears it.
 
 ## Issues first
 
@@ -39,3 +40,42 @@ a record: when it and the repository disagree, the repository wins.
 - The hook is a convenience, not a control, so it does not override a user who switched every hook
   off: with `disableAllHooks: true` in `~/.claude/settings.json`, a seat without a gate gets no note,
   and `check` prints a `hooks` line naming those seats.
+
+## Held security points
+
+A reviewer or QA seat that finds a security point does not write it on the pull request: only `sec`
+rates a finding, and anyone who can read the repository can read a PR comment. The point goes to `sec`
+and the engineering manager, and the PR gets a marker that holds its merge until `sec` clears it
+([#184](../../../issues/184), [#203](../../../issues/203)). The skills hold the exact steps; this is
+the shape of it:
+
+- **The marker.** For each point, once, its reporter posts a PR comment whose whole text is one line,
+  `<role id>: one point sent to sec and the EM`, and sends `sec` and the EM the point with the
+  marker's URL. When `sec` sends a PR's author a change to make, its marker is
+  `sec: one change sent to the author and the EM`. The same words inside a longer comment are not a
+  marker.
+- **The reference.** The reporter's verdict or QA report names the point only by a line of its own,
+  `held point: <marker URL>`, with nothing about the point itself. A later verdict that still has the
+  point repeats that line and posts no new marker.
+- **The clearance.** Once a point is fixed and reviewed at a head, rated low, ruled out or (for code
+  already on the base) tracked where its triage record says, `sec` posts
+  `sec: held points for #<n> cleared at <short sha>: <comment id>, <comment id>`, naming each marker
+  it clears by its comment id (the number after `issuecomment-` in its URL). It counts only at that
+  head: a new commit needs a new clearance. Nothing else clears a hold, not a message and not a
+  `READY` alone.
+- **Markers stay.** No seat deletes or edits a marker, even one posted by mistake: `sec` checks that
+  it is a mistake and clears it with the same line. Deleting a marker clears nothing. The merge train
+  stops when a marker it saw earlier in the same run, or one that a verdict, QA report or clearance
+  refers to, is gone or changed. It does not yet remember markers from one run to the next
+  ([#207](../../../issues/207)).
+- **Order is by id, never by time.** Where the merge train decides which comment is the latest, it
+  compares comment ids or review ids, because GitHub can give a later comment an earlier time.
+
+Where each part lives:
+
+| Skill | What it holds |
+|---|---|
+| [`factory:review-pr`](../plugin/skills/review-pr/SKILL.md), step 7 | A reviewer's marker, its `held point:` line and a marker posted by mistake. |
+| [`factory:verify-behavior`](../plugin/skills/verify-behavior/SKILL.md), step 8 | The same for QA's report. |
+| [`factory:security-triage`](../plugin/skills/security-triage/SKILL.md), step 6 | `sec`'s own marker, and the clearance line. |
+| [`factory:merge-train`](../plugin/skills/merge-train/SKILL.md), step 5 | What holds a merge and what clears it, and the order by id. |
