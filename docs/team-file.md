@@ -18,6 +18,8 @@ the reference for each key, and the file to copy.
   every seat: see [The factory plugin](plugin.md).
 - `permissions` (`deny`, `ask`, `allow`), at the top level and per role: see
   [Safety](../README.md#safety).
+- `other_teams`: other teams' state folders that aren't beside this team's own, each with the
+  `observers` allowed to read its log and notes: see [Safety](../README.md#safety).
 - `prompts.common` and a per-role `prompt` (file) or `prompt_text` (inline). Placeholders such as
   `@@ROSTER@@`, `@@GITHUB_REPO@@`, `@@PROJECT_URL@@` and `@@WORKTREE_ROOT@@` are filled in per seat.
 - `prompts.project` (optional): a file with your project's specifics, such as what the product is,

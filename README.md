@@ -21,27 +21,7 @@ Moved to [Commands: The iTerm view](docs/commands.md#the-iterm-view).
 
 ## Right-sizing
 
-Every seat is a separate Claude Code session with its own context, so token use grows with the number
-of seats that are working, and with how long each works. Coding has fewer truly parallel tasks than it
-seems: three focused seats often get more done than five scattered ones, and a team of three to five is
-a good start.
-
-- Start only the seats a task needs: `./factory.sh up em tl fs1`. Add one later with `up fs2`, and stop
-  one that is done with `down --yes fs2` (its worktree is kept).
-- An idle seat spends little (Claude Code's session recap and idle compaction can still use some
-  tokens). A message delivered to it starts a turn that sends its whole conversation again, so a seat
-  that is sent many messages keeps spending.
-- Effort is the main cost and depth control (`effort` per role, or `sessions.claude.effort` for all).
-  The example team runs the manager at `medium` and the seats that write, test and review code at
-  `high`; keep `max` for a hard problem a seat works on unattended, such as a security hunt. A `model`
-  per role works the same way. `./factory.sh check` shows each seat's model and effort, and
-  `(inherit)` where the seat takes them from `~/.claude/settings.json`.
-- To see what a team costs, run `/usage` in a seat. Its Session block counts that seat's own tokens
-  (its dollar figure is a list-price estimate, meaningful on API billing). On a subscription it also
-  shows the plan usage bars, which every seat draws on, and a breakdown (by skill, subagent, plugin
-  and MCP server, with recommendations) of recent usage computed from this machine's session history.
-  That covers all the seats together, but also every other Claude Code session on the machine, and it
-  is not split by seat. See [Manage costs](https://code.claude.com/docs/en/costs).
+Moved to [Right-sizing a team](docs/right-sizing.md).
 
 ## The team file
 
@@ -191,7 +171,9 @@ command that started it, or a command a seat runs in a new tmux session on the s
 not caught and is labelled `[from owner]` (the comment above `caller_seat` in `factory.sh` lists every such
 way). A seat cannot `say` to itself. A `TEAM_ROLE` that is set must be one of the team's role ids, or
 `live-test`: `say` refuses any other value, and the reserved `owner` and `launcher`, sending no keys and
-logging NOT-DELIVERED.
+logging NOT-DELIVERED. It refuses an empty or whitespace-only message the same way, before any tmux
+command, for one seat and for `all` ([#157](../../issues/157)); with `TEAM_ROLE` unset, that refusal is
+logged under the sender `?`.
 
 `live-test` is the driver label. `test/live-env.sh run` sets `TEAM_ROLE=live-test`, so a live test that a
 seat drives sends as `[from live-test]`, never as `[from owner]`. No role id can be `live-test`, since role
@@ -310,7 +292,32 @@ role's (team first; a role can add or tighten a rule, never loosen one), plus wh
   id is fixed: a team whose security seat has another id gets no record folder, every seat but `em`
   is denied it, and `check` warns about a role other than `sec` that lists the skill. Like the log's, these denies are an
   accident guard, not a boundary. As with any settings change, a `sec` seat that is already running
-  when `up` writes these rules keeps its old settings until it restarts.
+  when `up` writes these rules keeps its old settings until it restarts;
+- denies on **other teams' state folders** (#197), when more than one team runs on the machine. For each
+  other team's folder, every seat gets a `Read` deny on its `triage/**` and an `Edit` deny on all of
+  it, plus a `Read` deny on its `messages.log` and `notes/**` unless the seat's role observes that team.
+  All are written in both spellings. The other teams' folders come from two places:
+  - **Found:** every real folder beside this team's own in the state root (`.state/`) that holds
+    `settings/`, `launch/` and `prompts/`. A symlink there is never followed. `check` names the links
+    it skips: list one under `other_teams` if it is another team's state.
+  - **Listed:** `other_teams` in the team file, for a state folder elsewhere (a pinned team's, see
+    [Pinned releases](docs/pinned-release.md)), each with its `observers`. These are the roles of this
+    team the owner allows to read that team's log and notes, never its triage records:
+
+    ```yaml
+    other_teams:
+      - { state: /path/to/other/state, observers: [qa2] }
+    ```
+
+  A listed folder may not be, hold or sit inside this team's own state folder, its repository, its
+  worktree folder or a seat's working directory, whether or not it exists yet. If it exists, it must be
+  a team's state folder itself (holding `settings/`, `launch/` and `prompts/`), not its checkout or
+  `.state/` above it. One that doesn't exist yet is accepted, and `check` says so. `check` lists the
+  other teams found and listed, and each seat's denies. Settings are written at `up`, so a team that starts
+  after a seat does is covered from that seat's next restart. Teams on one machine still share the
+  machine user, so these denies are an accident guard, like the others: a command that reads or
+  writes another way is not stopped. They also share the tmux server and the shared `claude`
+  executable the copies come from.
 
 `permission_mode` (in `sessions.claude`, or per role) picks the mode; the example uses `auto`.
 `bypassPermissions` skips every prompt and is meant for an isolated machine only. Deny rules hold in
