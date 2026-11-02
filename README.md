@@ -21,27 +21,7 @@ Moved to [Commands: The iTerm view](docs/commands.md#the-iterm-view).
 
 ## Right-sizing
 
-Every seat is a separate Claude Code session with its own context, so token use grows with the number
-of seats that are working, and with how long each works. Coding has fewer truly parallel tasks than it
-seems: three focused seats often get more done than five scattered ones, and a team of three to five is
-a good start.
-
-- Start only the seats a task needs: `./factory.sh up em tl fs1`. Add one later with `up fs2`, and stop
-  one that is done with `down --yes fs2` (its worktree is kept).
-- An idle seat spends little (Claude Code's session recap and idle compaction can still use some
-  tokens). A message delivered to it starts a turn that sends its whole conversation again, so a seat
-  that is sent many messages keeps spending.
-- Effort is the main cost and depth control (`effort` per role, or `sessions.claude.effort` for all).
-  The example team runs the manager at `medium` and the seats that write, test and review code at
-  `high`; keep `max` for a hard problem a seat works on unattended, such as a security hunt. A `model`
-  per role works the same way. `./factory.sh check` shows each seat's model and effort, and
-  `(inherit)` where the seat takes them from `~/.claude/settings.json`.
-- To see what a team costs, run `/usage` in a seat. Its Session block counts that seat's own tokens
-  (its dollar figure is a list-price estimate, meaningful on API billing). On a subscription it also
-  shows the plan usage bars, which every seat draws on, and a breakdown (by skill, subagent, plugin
-  and MCP server, with recommendations) of recent usage computed from this machine's session history.
-  That covers all the seats together, but also every other Claude Code session on the machine, and it
-  is not split by seat. See [Manage costs](https://code.claude.com/docs/en/costs).
+Moved to [Right-sizing a team](docs/right-sizing.md).
 
 ## The team file
 
@@ -53,45 +33,11 @@ Moved to [The team file: New worktrees](docs/team-file.md#new-worktrees).
 
 ## The factory plugin
 
-`plugin/` is a Claude Code [plugin](https://code.claude.com/docs/en/plugins) (`.claude-plugin/plugin.json`
-and `skills/`) that `up` loads into every seat with `--plugin-dir <this checkout>/plugin`. Seats work in
-the target project's folders, where this repository's own `.claude/` is never read, so this is how the
-factory's skills reach them. Nothing is installed into your settings: a session the factory did not start
-does not have the plugin. Its skills are namespaced by the plugin name and show as `/factory:<skill>`.
-
-Its skills are procedures for a role (assigning an issue, for example), loaded only when used instead of
-sitting in every prompt. The skill folders under [`plugin/skills/`](plugin/skills/) are the list, and each
-skill's `description` says whom it is for and when to use it. `/factory:ping` only proves the plugin loaded.
-Every seat loads every skill. A skill reaches its role through its description and through that role's
-`skills:` in the team file (`teams/example.yaml` names each one where it belongs). A skill only the owner
-may start sets `disable-model-invocation`. A skill is the procedure. The rules it applies (a brief's
-template, the review bar) stay in the role prompt, which the skill points to rather than copies, and a
-skill stops if the prompt lacks them. `test/e2e.sh` checks every skill's frontmatter, so adding one needs no
-new test code.
-
-- It is on by default. A team file without `sessions.claude.plugin` gets the plugin at its next `up`, and
-  with it every skill (and, later, every hook or agent) added to `plugin/` after that. Set
-  `sessions.claude.plugin: false` to leave the flag out. `check` shows the plugin's path, or `off`.
-- A `--plugin-dir` of your own in `sessions.claude.args` is allowed: the flag repeats, so both load. Your
-  installed plugins load as usual alongside it.
-- Seats get an `Edit` deny on `plugin/`, like `lib/` and `roles/` (see [Safety](#safety)), since it is
-  code every seat runs at its next start, and on each plugin a team loads itself with `--plugin-dir` in
-  `args` (the folder with everything under it, or the `.zip`; a relative path is taken from the seat's
-  folder).
-- What the plugin carries runs in or steers every seat: skills, agents, commands, hooks and MCP
-  servers, including hooks and servers declared inline in `plugin.json`. So every pull request that
-  changes anything under `plugin/`, `plugin.json` included, gets a security review as well as the
-  usual one.
-- Managed settings can turn `--plugin-dir` off (Claude Code's docs say so; not tried here), and then the
-  seats have no factory skills.
+Moved to [The factory plugin](docs/plugin.md).
 
 ## Issues first
 
-Every change starts as an issue. The shared prompt (`roles/common.md`) makes this a hard rule for every
-seat: no change starts without an issue, and the engineering manager files one when it is missing. A
-pull request that completes its issue says `Closes #<n>`, and one that does not says `Refs #<n>` (see
-`.github/pull_request_template.md`), so the issue closes exactly when its change lands and the board
-stays honest.
+Moved to [How work is tracked: Issues first](docs/workflow.md#issues-first).
 
 ## How seats talk
 
@@ -221,7 +167,9 @@ command that started it, or a command a seat runs in a new tmux session on the s
 not caught and is labelled `[from owner]` (the comment above `caller_seat` in `factory.sh` lists every such
 way). A seat cannot `say` to itself. A `TEAM_ROLE` that is set must be one of the team's role ids, or
 `live-test`: `say` refuses any other value, and the reserved `owner` and `launcher`, sending no keys and
-logging NOT-DELIVERED.
+logging NOT-DELIVERED. It refuses an empty or whitespace-only message the same way, before any tmux
+command, for one seat and for `all` ([#157](../../issues/157)); with `TEAM_ROLE` unset, that refusal is
+logged under the sender `?`.
 
 `live-test` is the driver label. `test/live-env.sh run` sets `TEAM_ROLE=live-test`, so a live test that a
 seat drives sends as `[from live-test]`, never as `[from owner]`. No role id can be `live-test`, since role
@@ -328,7 +276,7 @@ role's (team first; a role can add or tighten a rule, never loosen one), plus wh
   PRs. It is an early warning for a project whose base branch has no protection. The real control is a
   ruleset on the base branch that blocks force-push and deletion and requires a PR; where one exists,
   this ask is redundant;
-- an `Edit` allow on the seat's own progress note (see [Progress notes](#progress-notes)), which is
+- an `Edit` allow on the seat's own progress note (see [Progress notes](docs/workflow.md#progress-notes)), which is
   outside its working directory and would otherwise prompt in a mode other than bypass, and an `Edit`
   deny on every other seat's note: a note is put into its seat's context at each start, so a seat
   that could write another's would have a lasting channel into it;
@@ -372,6 +320,13 @@ role's (team first; a role can add or tighten a rule, never loosen one), plus wh
   machine user, so these denies are an accident guard, like the others: a command that reads or
   writes another way is not stopped. They also share the tmux server and the shared `claude`
   executable the copies come from.
+
+  An observer may read the observed team's message log, which records that team's messages in full,
+  so it can carry the private reports its seats send to `sec` and the EM: an unfixed security point
+  among them, before it is rated ([#222](../../issues/222)). An observer treats everything in that log
+  under rule 5 of its prompt ([`roles/common.md`](roles/common.md)): it never quotes the log anywhere,
+  and sends `sec` and the EM only a pointer to what it saw: the team and the time of the log line, and
+  its line number when several lines share that time.
 
 `permission_mode` (in `sessions.claude`, or per role) picks the mode; the example uses `auto`.
 `bypassPermissions` skips every prompt and is meant for an isolated machine only. Deny rules hold in
@@ -476,82 +431,11 @@ dialog until a human answers it once; `up` reports which seats those are.
 
 ## The gate
 
-`repo.gate` is the repository's pass/fail command. A role with `gate_on_stop: true` gets a Stop hook in
-its generated settings (`lib/stop_gate.sh`): whenever the seat ends a turn with uncommitted changes in
-its working tree, the hook runs the gate there, and if it fails the seat is sent back to work with the
-command, the last 60 lines of its output and the path of the full log (`.state/<team>/gate/<role>.log`).
-Roles without the switch never run it. The example gives it to the engineers and qa.
-
-- Only uncommitted work is gated at a stop: a clean tree, including committed but unpushed work, ends
-  the turn normally. Committed work is gated again when the reviewer runs the gate on the PR. A
-  `git status` that fails (a corrupt index, say) counts as uncommitted work: the gate runs, and a
-  send-back says status failed. The hook's git calls do not run a repository's fsmonitor program;
-  clean filters stay on, because status needs them for a correct answer ([#104](../../issues/104)).
-- Only the seat's configured working tree is checked. Work left in another tree, such as a worktree
-  Claude Code made for a subagent or for `EnterWorktree` under `<repo>/.claude/worktrees/`, is not
-  gated.
-- The gate catches mistakes, not a seat that edits the gate. It runs the scripts in the seat's own tree
-  (a Makefile, test scripts), at the stop and outside Claude Code's permission rules: no prompt, no
-  deny or ask rule, no auto-mode classifier. A seat that changes those files decides whether its gate
-  passes and what runs at its next stop, so for a seat that is not in bypass mode, permission to edit
-  its tree becomes commands that run unprompted at the stop. The reviewer's own run of the gate on the
-  PR stays the real check.
-- A seat also stops on purpose: to wait for an answer or a review, or with a test red before the fix.
-  After `repo.gate_max_blocks` (default 3) failed gates in a row in one turn, the next stop in that turn
-  goes through without running the gate again, with a note that the gate is still failing. Every
-  send-back tells the seat that, if it is stopping on purpose, it should say so in its report, and
-  gives the limit (this moved here from the shared prompt, [#117](../../issues/117); the let-through's
-  note is shown to the user, not to the seat). Each new turn starts from zero, so a seat that lives
-  for days is never gated off for good. The count is in the state folder, which seats cannot edit through Claude
-  Code's tools; a passing gate or a clean tree resets it. A script can still write it, or run the hook
-  with made-up input, like every other "a script can do it" limit under [Safety](#safety). Run by hand
-  with no hook input, `lib/stop_gate.sh` runs the gate and reports but leaves the count alone. Claude
-  Code also ends such a loop itself after 8 continuations with no tool call in between (raise it with
-  `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`).
-- The hook never writes or reads its state through a link ([#194](../../issues/194)). A symlink, a
-  hard link, or anything other than a folder or a regular file, at `.state/<team>/gate/` or at the
-  role's log or count in it, is refused: no gate runs and nothing is written. The seat is sent back,
-  told to report it; in a turn the hook has already sent back, the stop goes through with a note naming
-  it. Only a seat could put one there; remove it by its exact path.
-- The gate runs with a time limit (`repo.gate_timeout`, default 600 s) in a process group of its own,
-  which is killed whole when the time is up. A program that detaches from that group (a daemon, a tmux
-  server) is not killed.
-- The hook inherits the seat's environment, which runs inside tmux: a gate that must not touch the
-  team's tmux server unsets `TMUX` itself, as this repository's does.
-- The gate runs at every such stop, so a slow gate (this repository's e2e takes over a minute) makes
-  those stops slow.
-- A gated seat's settings set `disableAllHooks: false`, so a `.claude/settings.json` in the project
-  cannot switch the gate off. That also turns the user's own hooks back on for that seat if
-  `~/.claude/settings.json` had switched them all off.
+Moved to [The gate](docs/gate.md).
 
 ## Progress notes
 
-Each seat keeps a short progress note, `.state/<team>/notes/<role>.md`: its current task, branch,
-state, next step and what it is waiting for. The shared prompt tells it to rewrite the note whenever
-a task changes state and to work on one task at a time. The note is outside the worktree, so it
-survives `down` and `up` and a recreated worktree; `up` only makes the folder, and nothing removes a
-note.
-
-Every seat's generated settings have a `SessionStart` hook (`lib/session_start.sh`, no matcher, so
-it runs at startup, on resume, after `/clear` and after a compaction). It prints the note (cut at 80
-lines or 6000 bytes), the branch, uncommitted files and the last 10 commits of the seat's working
-directory, and Claude Code adds that to the seat's context. After the note it prints what to do with
-it, on every path (no note, an unreadable note, a missing or non-git folder): name the task and next
-step in the first reply, follow the kickoff, and trust the repository over the note. That text moved
-here from the shared prompt ([#117](../../issues/117)), so a seat whose hooks are all off goes without
-it, as it goes without the note. The note is the seat's own writing, so treat it as a reminder, not
-a record: when it and the repository disagree, the repository wins.
-
-- Control characters other than tab and newline (and DEL) are dropped from everything the hook
-  prints, so a terminal escape in a note or a commit subject arrives as plain text.
-- `git status` and `git log` each have their own time limit (4s and 3s), well inside the hook's 10s,
-  and a repository's fsmonitor program is not run. Claude Code drops all of a hook's output when the
-  hook runs past its timeout, so a slow status on a cold volume costs the seat its file list, not its
-  note.
-- Each seat may edit only its own note: the others are denied (see [Safety](#safety)).
-- The hook is a convenience, not a control, so it does not override a user who switched every hook
-  off: with `disableAllHooks: true` in `~/.claude/settings.json`, a seat without a gate gets no note,
-  and `check` prints a `hooks` line naming those seats.
+Moved to [How work is tracked: Progress notes](docs/workflow.md#progress-notes).
 
 ## Updating Claude Code
 

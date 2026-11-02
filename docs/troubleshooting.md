@@ -94,14 +94,14 @@ the volume. A worktree seat should stop and tell the EM rather than work elsewhe
 
 With `disableAllHooks: true` in `~/.claude/settings.json`, seats without a gate get no session-start
 hook, so no note and no message logging. `check` prints a `hooks` line naming them. See
-[Progress notes](../README.md#progress-notes).
+[Progress notes](workflow.md#progress-notes).
 
 ### A seat keeps being sent back by the gate
 
 The gate fails at each stop while the seat has uncommitted changes. Read the full log,
 `.state/<team>/gate/<role>.log`, and fix the cause; "gate timed out" means the gate ran past
 `repo.gate_timeout`. If the seat is stopping on purpose (waiting for an answer, or with a test red
-before the fix), it should say so in its report. See [The gate](../README.md#the-gate) for the limit
+before the fix), it should say so in its report. See [The gate](gate.md) for the limit
 on send-backs.
 
 ## Messages
@@ -128,6 +128,8 @@ gives the reason when it refuses:
 - "has no claude process running (its pane is at a shell)": the text would run as a shell command.
   Start the seat again (`down --yes <role>`, then `up <role>`).
 - "is down": the seat is not running. Start it with `up <role>`.
+- "the message is empty or only whitespace": the text given to `say` was empty, often an unset
+  variable in a script. Nothing was typed. Check what the caller passes.
 - "another say is typing into <role> and did not finish within 8 seconds": try again. "is not a
   regular file: remove it": something other than a plain file sits at the seat's lock path,
   `.state/<team>/say/<role>.lock`; remove it.

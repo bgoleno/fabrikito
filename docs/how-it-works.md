@@ -101,9 +101,9 @@ tmux session and keeps the worktree, and closing the iTerm tab only detaches fro
   When a seat's permission mode is set and is not `bypassPermissions`, the file also sets
   `disableBypassPermissionsMode`, so the seat cannot be switched into bypass from inside the session.
 - **The factory plugin,** loaded with `--plugin-dir` unless `sessions.claude.plugin` is `false`. See
-  [The factory plugin](../README.md#the-factory-plugin).
+  [The factory plugin](plugin.md).
 - **A progress note,** `.state/<team>/notes/<role>.md`, outside the working directory, so it survives
-  a restart and a recreated worktree. See [Progress notes](../README.md#progress-notes).
+  a restart and a recreated worktree. See [Progress notes](workflow.md#progress-notes).
 
 ## The hooks
 
@@ -119,7 +119,7 @@ hook is installed into your own settings.
 - **`session_start.sh`** prints the seat's progress note, its branch, its uncommitted files and its
   last 10 commits, and Claude Code adds that to the seat's context. So a seat that restarts, or loses
   detail to a compaction, sees its task and next step again. See
-  [Progress notes](../README.md#progress-notes).
+  [Progress notes](workflow.md#progress-notes).
 - **`log_message.sh`** appends one line per message to `.state/<team>/messages.log`, in the same
   format `say` uses. It never blocks or changes the message, and it always exits 0. See
   [The message log](../README.md#the-message-log).
@@ -128,7 +128,7 @@ hook is installed into your own settings.
   [The gate](#the-gate) below.
 
 A user setting of `disableAllHooks: true` switches hooks off, with an exception for gated seats:
-see [Progress notes](../README.md#progress-notes) and [The gate](../README.md#the-gate).
+see [Progress notes](workflow.md#progress-notes) and [The gate](gate.md).
 
 ## How seats talk
 
@@ -164,14 +164,14 @@ roster names, which guards against mistakes, not impersonation. See
 `Stop` hook each time it ends a turn with uncommitted changes, and is sent back to work while it
 fails, up to a limit. The shared prompt also tells every seat to run the whole gate
 before new work. The reviewer's own run of the gate on the pull request is the real check. See
-[The gate](../README.md#the-gate).
+[The gate](gate.md).
 
 ## Progress notes
 
 Each seat keeps a short note of its current task, branch, state, next step and what it waits for, and
 rewrites it when the task changes state. The `SessionStart` hook shows it back at every start and
 after every compaction. A seat may edit only its own note: the generated settings allow its own note
-and deny every other seat's. See [Progress notes](../README.md#progress-notes).
+and deny every other seat's. See [Progress notes](workflow.md#progress-notes).
 
 ## The plugin skills
 
@@ -179,7 +179,7 @@ The skills under `plugin/skills/` are procedures for a role, such as assigning a
 (`factory:assign`), starting a task (`factory:start-task`) or reviewing a pull request
 (`factory:review-pr`). A skill is loaded only when it is used, instead of sitting in every prompt.
 The rules a skill applies, such as the brief's template or the review bar, stay in the role prompt,
-and the skill points to them. See [The factory plugin](../README.md#the-factory-plugin).
+and the skill points to them. See [The factory plugin](plugin.md).
 
 ## What the rules are, and are not
 
