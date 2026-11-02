@@ -217,6 +217,12 @@ kept all the same. If the line itself cannot be appended, `say` still prints its
 record could not be written and whether the message was delivered (so that a delivered message is not
 sent again), and exits with status 1.
 
+The log is never written through a link ([#194](../../issues/194)). When `messages.log` is a symlink, a
+FIFO or a hard link (a file with a second name), `say` delivers nothing and writes no line: it prints
+why, says the record could not be written, and exits with status 1. Only a seat could put one there;
+remove it by its exact path. `lib/log_message.sh` (below) opens the log without following a symlink and
+writes only to a regular file with one link, so there it costs that line.
+
 Each `SendMessage` from a seat appends one line in the same format, written by `lib/log_message.sh`, a
 `PostToolUse` and `PostToolUseFailure` hook on `SendMessage` in every seat's settings:
 

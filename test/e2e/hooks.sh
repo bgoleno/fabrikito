@@ -112,4 +112,17 @@ printf '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"comma
 o3=$(printf '{"hook_event_name":"PostToolUse","tool_name":"SendMessage","tool_input":{"to":"tt-w2","message":"m"}}' | $SRC/lib/log_message.sh $T/no-such-dir/messages.log w9 2>&1); r3=$?
 [ $r1 = 0 ] && [ $r3 = 0 ] && [ -z "$o3" ] && [ "$(wc -l < $LG)" -eq "$n" ] && [ ! -e $T/no-such-dir ] \
   && ok "another tool, and a log that cannot be written: exit 0, nothing printed, nothing logged" || { bad "log hook failure cases ($r1 $r3)"; echo "$o3"; }
+# A link at messages.log (#194): the hook appends to the same log as say, so it must not write
+# through one either. The link points at a sentinel, which must come out byte for byte as it went in.
+printf 'sentinel log\n' > $T/sent-hlog; cp $T/sent-hlog $T/sent-hlog.want; ln -s $T/sent-hlog $T/lstate/linked.log
+o4=$(printf '{"hook_event_name":"PostToolUse","tool_name":"SendMessage","tool_input":{"to":"tt-w2","message":"m"},"tool_response":{"success":true,"message":"in inbox"}}' \
+  | $SRC/lib/log_message.sh $T/lstate/linked.log w9 tt-w2=w2 2>&1); r4=$?
+[ $r4 = 0 ] && [ -z "$o4" ] && cmp -s $T/sent-hlog $T/sent-hlog.want && [ -L $T/lstate/linked.log ] \
+  && ok "SendMessage log: a link at messages.log is not written through (exit 0, nothing printed)" || { bad "SendMessage log through a link (rc=$r4)"; echo "$o4"; cat $T/sent-hlog; }
+# A hard link is a regular file to O_NOFOLLOW and to the type check (tl on #206): a second link is refused.
+ln $T/sent-hlog $T/lstate/hard.log
+o4=$(printf '{"hook_event_name":"PostToolUse","tool_name":"SendMessage","tool_input":{"to":"tt-w2","message":"m"},"tool_response":{"success":true,"message":"in inbox"}}' \
+  | $SRC/lib/log_message.sh $T/lstate/hard.log w9 tt-w2=w2 2>&1); r4=$?
+[ $r4 = 0 ] && [ -z "$o4" ] && cmp -s $T/sent-hlog $T/sent-hlog.want \
+  && ok "SendMessage log: a hard link at messages.log is not written through (exit 0, nothing printed)" || { bad "SendMessage log through a hard link (rc=$r4)"; echo "$o4"; cat $T/sent-hlog; }
 e2e_end=hooks # the last line: test/e2e.sh checks that the file ran to here

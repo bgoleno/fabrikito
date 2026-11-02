@@ -36,6 +36,11 @@ Roles without the switch never run it. The example gives it to the engineers and
   with no hook input, `lib/stop_gate.sh` runs the gate and reports but leaves the count alone. Claude
   Code also ends such a loop itself after 8 continuations with no tool call in between (raise it with
   `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`).
+- The hook never writes or reads its state through a link ([#194](../../../issues/194)). A symlink, a
+  hard link, or anything other than a folder or a regular file, at `.state/<team>/gate/` or at the
+  role's log or count in it, is refused: no gate runs and nothing is written. The seat is sent back,
+  told to report it; in a turn the hook has already sent back, the stop goes through with a note naming
+  it. Only a seat could put one there; remove it by its exact path.
 - The gate runs with a time limit (`repo.gate_timeout`, default 600 s) in a process group of its own,
   which is killed whole when the time is up. A program that detaches from that group (a daemon, a tmux
   server) is not killed.
