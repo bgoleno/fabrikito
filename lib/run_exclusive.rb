@@ -31,6 +31,13 @@ def die(msg, code = 1)
   exit code
 end
 
+# Paths, arguments and variables are bytes. Under LC_ALL=C ruby reads them as ASCII, so one that is not
+# would fail the JSON of the record, a regexp or the joining of two strings, and a run that only has to
+# wait or run a command would end in a stack trace instead. The bytes stay as they are.
+def utf8(s)
+  s.dup.force_encoding("UTF-8")
+end
+
 args = ARGV.dup
 args.shift if args.first == "--"
 die("usage: factory.sh run-exclusive -- <command> [args...]", 64) if args.empty?
@@ -43,7 +50,7 @@ if lock.empty?
   die("cannot find this user's home folder in the user database, so there is no place for the lock") if home.empty?
   lock = File.join(home, "Library", "Application Support", "software-factory", "run-exclusive.lock")
 end
-lock = File.expand_path(lock)
+lock = utf8(File.expand_path(lock))
 holder = "#{lock}.holder"
 
 def alive?(pid)
@@ -84,7 +91,7 @@ end
 # that pid is alive. The variable alone is not enough: anything the command leaves running (a tmux
 # server started under the lock) keeps it for every shell it starts later, and those would then skip
 # the lock for good (tl on #214).
-held = ENV["FACTORY_RUN_EXCLUSIVE_HELD"].to_s
+held = utf8(ENV["FACTORY_RUN_EXCLUSIVE_HELD"].to_s).scrub
 if (m = held.match(/\A(.+):(\d+)\z/)) && m[1] == lock
   rec = record(holder)
   if rec.is_a?(Hash) && rec["pid"] == m[2].to_i && alive?(m[2].to_i)
@@ -136,13 +143,23 @@ end
 
 # Until the command is about to start, a signal ends this run (130, 143, 129) without running it. From
 # then on it is passed on to the command, and the command's own end decides the exit status. A signal
-# that arrives while the command is being started is held and passed on once its pid is known.
+# that arrives while the command is being started is held and passed on once its pid is known. CONT
+# follows it: a stopped command (a background job that touched the terminal) acts on no signal until it
+# is continued, and it would keep the lock for the whole host (qa on #240).
 child = nil
 spawning = false
 pending = nil
+pass_on = lambda do |s|
+  begin
+    Process.kill(s, child)
+    Process.kill("CONT", child)
+  rescue SystemCallError
+    nil
+  end
+end
 { "INT" => 130, "TERM" => 143, "HUP" => 129 }.each do |s, code|
   trap(s) do
-    if child then (Process.kill(s, child) rescue nil)
+    if child then pass_on.call(s)
     elsif spawning then pending ||= s
     else exit(code)
     end
@@ -181,11 +198,11 @@ end
 me = Process.pid
 rec = {
   "pid" => me,
-  "who" => [ENV["TEAM_ROLE"].to_s.empty? ? "a shell" : ENV["TEAM_ROLE"],
-            (ENV["TEAM_CONFIG"].to_s.empty? ? nil : File.basename(ENV["TEAM_CONFIG"], ".*"))].compact.join(" of "),
+  "who" => utf8([ENV["TEAM_ROLE"].to_s.empty? ? "a shell" : ENV["TEAM_ROLE"],
+                 (ENV["TEAM_CONFIG"].to_s.empty? ? nil : File.basename(ENV["TEAM_CONFIG"], ".*"))].compact.join(" of ")).scrub,
   "since" => Time.now.strftime("%Y-%m-%dT%H:%M:%S"),
-  "cwd" => Dir.pwd,
-  "cmd" => args.join(" ")[0, 300],
+  "cwd" => utf8(Dir.pwd).scrub,
+  "cmd" => utf8(args.join(" ")).scrub[0, 300],
 }
 # Written to a temporary name and renamed: rename replaces a link at the record's name rather than
 # writing through it, and a waiter never reads half a record.
@@ -208,16 +225,22 @@ locked = f.stat
 # The command runs in this run's process group, the caller's. Whoever stops work by process group (the
 # stop gate's time limit sends TERM, then KILL, to the gate's group) then reaches the command and this
 # run alike. In a group of its own, a KILL to the caller's group would end only this run: the lock would
-# drop while the command ran on, beside the next run (tl on #240). A signal sent to this run alone is
-# passed on to the command; one sent to the whole group reaches the command twice, which ends it the
-# same way. Ctrl-C at a terminal reaches both, as for any foreground command.
+# drop while the command ran on, beside the next run (tl on #240). It also stays in the terminal's
+# foreground group, so a pager or a prompt works and Ctrl-C reaches it (qa on #240). A signal sent to this
+# run alone is passed on to the command. One sent to the whole group therefore reaches the command twice:
+# this run cannot tell the two apart. A command that cleans up on a signal must not let the second one
+# cut its cleanup short (test/e2e.sh's on_exit ignores them).
 env = { "FACTORY_RUN_EXCLUSIVE_HELD" => "#{lock}:#{me}" }
+# A background job that touches the terminal gets TTIN or TTOU sent to its whole group, and this run
+# stops with its command. It must: the shell would otherwise see a job still running, and fg would hand
+# over the terminal without continuing the command. So it stays an ordinary stopped job, and from another
+# shell it takes TERM and then CONT (docs/gate.md).
 begin
   spawning = true
   pid = Process.spawn(env, [args[0], args[0]], *args[1..-1])
   child = pid
   spawning = false
-  (Process.kill(pending, child) rescue nil) if pending
+  pass_on.call(pending) if pending
 rescue SystemCallError => e
   File.unlink(holder) rescue nil
   die("cannot run #{args[0]}: #{e.message}", 127)

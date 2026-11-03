@@ -35,6 +35,9 @@ finished=
 on_exit() {
   local rc=$?
   [ -n "$finished" ] && return
+  # Under run-exclusive a signal to the process group reaches this shell twice (lib/run_exclusive.rb
+  # passes it on as well), and the second would run the trap below inside this cleanup and end it early.
+  trap '' TERM INT
   tmux kill-server 2>/dev/null
   [ -n "${LIVE_D:-}" ] && $SRC/test/live-env.sh down "$LIVE_D" 2>/dev/null
   for w in "$VOL/$ROOT"/*; do [ -d "$w" ] && git -C $T/repo worktree remove --force "$w" 2>/dev/null; done

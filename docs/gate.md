@@ -65,19 +65,34 @@ command at a time across every seat of every team on the host, and the owner's s
   folder), since when and the command, then a reminder every 5 minutes, and "got the lock" when its
   turn comes. Ctrl-C while waiting exits 130 without running anything.
 - **The command** is an argument list, not a shell string (write a pipeline as `bash -c '...'`). It
-  runs in a process group of its own, so it cannot read the terminal. The exit status is the
-  command's, or 128 plus the signal that ended it. It needs no team file, so it works from any checkout.
+  runs in the caller's process group, so a pager or a prompt works at a terminal and Ctrl-C reaches it.
+  The exit status is the command's, or 128 plus the signal that ended it. It needs no team file, so it
+  works from any checkout. Waiting runs do not queue in order of arrival: each tries the lock every 2
+  seconds, so one can be passed by another.
 - **The lock** is one file per user, `~/Library/Application Support/software-factory/run-exclusive.lock`,
   outside every team's state and checkout. Teams on one machine share the user, so they share the lock.
-  `FACTORY_RUN_LOCK` names another file (the e2e uses its own). The folder is owner-only, and a lock
-  file that is a symlink or a hard link is refused. Never remove the lock file while a run holds it: a
-  run that starts after that does not wait for the one holding it, and the holder can only say so when
-  it ends.
+  `FACTORY_RUN_LOCK` names another file, by an absolute path (the e2e uses its own). The folder is made
+  owner-only when it is created, and a lock file or folder that is a symlink, or a lock file that is a
+  hard link, is refused. Never remove the lock file while a run holds it: a run that starts after that
+  does not wait for the one holding it, and the holder can only say so when it ends. If the holder
+  record next to the lock (`run-exclusive.lock.holder`) cannot be written (a full disk), nothing runs:
+  the run exits 1 and says why, since a nested run could not otherwise see that its parent holds the lock.
 - **The lock ends with the command.** It is released when the command ends or when its run is killed:
-  TERM, INT or HUP is passed on to the command's group, and a run killed with SIGKILL has its lock
-  dropped by the system. A command whose run was killed with SIGKILL is not stopped and can overlap
-  the next run. The lock is never handed to the command, so a daemon it leaves running (a tmux server)
-  does not hold it.
+  - A kill of the caller's process group (the stop gate's time limit, or closing the terminal) reaches
+    the run and the command alike.
+  - TERM, INT or HUP sent to the run alone is passed on to the command, and continues it if it had
+    stopped. A signal sent to the whole group therefore reaches the command twice: a command that
+    cleans up on a signal should not let the second cut that short.
+  - A run killed with SIGKILL has its lock dropped by the system. If the SIGKILL went to the run alone,
+    its command is not stopped and can overlap the next run.
+  - A stopped run keeps the lock: one suspended with Ctrl-Z, or a background job (`... &`) whose command
+    touched the terminal. Use `fg` or `kill %1` in its shell, or close that terminal. From another
+    shell, a stopped run acts on TERM only once continued: `kill -TERM <pid>; kill -CONT <pid>`, with the
+    pid the waiting message shows.
+  - The lock is never handed to the command, so a daemon it leaves running (a tmux server) does not
+    hold it.
+- **No allow rule for it.** `factory.sh` adds none, and a team file should not: Claude Code's allow rules
+  match the start of a command, so a rule for `run-exclusive` would also allow whatever command it wraps.
 - **Nested runs** (a gate script that calls `run-exclusive` again) run at once instead of waiting for
   themselves, but only while the run that holds the lock is alive. A program left running from an
   earlier run keeps its variable, and that alone does not skip the lock.
