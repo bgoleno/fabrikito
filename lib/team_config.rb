@@ -72,7 +72,7 @@ PROMPT_KEYS = %w[common project].freeze
 # The #117 budget for one seat's rendered prompt: every line is loaded on every task.
 PROMPT_MAX_LINES = 199
 ROLE_KEYS = %w[title summary workdir prompt prompt_text kickoff session model effort permission_mode permissions
-               gate_on_stop skills may_merge auto_memory].freeze
+               gate_on_stop skills may_merge auto_memory tmpdir].freeze
 WORKDIR_KEYS = %w[type path name].freeze
 ID_RE = /\A[a-z][a-z0-9]*\z/.freeze
 PREFIX_RE = /\A[a-z0-9][a-z0-9-]*\z/.freeze
@@ -373,6 +373,28 @@ class TeamConfig
   def workdir(id)
     w = workdir_spec(id)
     w['type'] == 'project' ? expand(w['path']) : File.join(worktree_root, worktree_name(id))
+  end
+
+  # The role's temp folder (roles.<id>.tmpdir) as an absolute path; nil means the seat inherits its temp
+  # settings. Never relative to the team file: it is a place on the volume, like storage.volume.
+  def tmpdir(id)
+    t = role(id)['tmpdir']
+    t && File.expand_path(t.to_s.sub(/\A~(?=\/|\z)/, home_utf8))
+  end
+
+  # The path as written. factory.sh proves where it really leads (a symlink, another mount), and only
+  # with the volume mounted, so an unmounted volume does not stop say or down here.
+  def validate_tmpdir(id)
+    t = role(id)['tmpdir']
+    die "roles.#{id}.tmpdir must be an absolute path" unless t.is_a?(String) && t.start_with?('/', '~/')
+    t = tmpdir(id)
+    die "roles.#{id}.tmpdir (#{t}) must be a folder inside storage.volume (#{volume})" unless t.start_with?(File.join(volume, ''))
+    # Two teams on one host share role names, and one team's tl has written into the other's folder
+    # (#241), so a folder that does not name both is refused rather than left to the author's care.
+    parts = t[volume.length..-1].split('/')
+    return if parts.include?(@c['team']) && parts.include?(id)
+
+    die "roles.#{id}.tmpdir (#{t}) must name the team and the role as folders, for example #{File.join(volume, 'tmp', @c['team'], id)}"
   end
 
   def read_prompt_file(rel)
@@ -1323,6 +1345,7 @@ class TeamConfig
       # A YAML boolean: the system ruby's YAML 1.1 also reads an unquoted yes or on as true.
       die "roles.#{id}.may_merge must be true or false" if r.key?('may_merge') && ![true, false].include?(r['may_merge'])
       die "roles.#{id}.auto_memory must be true or false" if r.key?('auto_memory') && ![true, false].include?(r['auto_memory'])
+      validate_tmpdir(id) if r.key?('tmpdir')
       if r.key?('permission_mode') && !PERMISSION_MODES.include?(r['permission_mode'].to_s)
         die "roles.#{id}.permission_mode must be one of #{PERMISSION_MODES.join(', ')}"
       end
@@ -1400,6 +1423,7 @@ when 'role'
   when 'permission_mode' then puts cfg.mode_label(id)
   when 'gate' then puts(cfg.gate_on_stop?(id) ? 'on-stop' : '-')
   when 'auto_memory' then puts(cfg.auto_memory?(id) ? '(inherit)' : 'off')
+  when 'tmpdir' then puts cfg.tmpdir(id).to_s
   else die "unknown role key '#{key}'"
   end
 when 'workdir' then puts cfg.workdir(args.fetch(0) { die 'workdir needs a role id' })

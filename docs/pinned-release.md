@@ -162,6 +162,11 @@ safe only while the two releases agree on two things:
 
 A full restart: handoffs, `down --yes` from the old checkout, then `up` from the new one.
 
+A pinned team gets a new team-file key by moving to a release that has it. `check` on an older release
+rejects the key as unknown, `roles.<id>.tmpdir` ([Temp files](team-file.md#temp-files)) for one. So add it
+only to the new checkout's copy of the team file. That key changes no roster and an old seat never reads it
+from the new copy, so a rolling upgrade is enough, and each seat picks it up when it restarts.
+
 ## Remove an old release checkout
 
 Once no seat runs it, remove the state link and the team file by their exact paths, then the checkout:
