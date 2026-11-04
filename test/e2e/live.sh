@@ -154,4 +154,12 @@ rm -f $T/le4link; [ -e "$le4" ] && $LE down "$le4" >/dev/null 2>&1
 srvsock="$(cd "$le/tmux" && pwd -P)/tmux-$(id -u)/default"
 out=$($LE down "$le" 2>&1); rc=$?
 [ $rc = 0 ] && [ ! -e "$le" ] && [ ! -e "$le2" ] && ! tmux -S "$srvsock" has-session 2>/dev/null && ok "live-env down stops the private server and removes the folder" || { bad "live-env down (rc=$rc)"; echo "$out"; ls -la "$le" 2>&1 | head -3; }
+# test/e2e.sh refuses a TMPDIR too long for tmux's socket, before it makes anything (#249). The stand-in
+# mktemp first on PATH fails and logs: without the refusal, this nested run stops at once instead of
+# running the whole test again, and the log shows it got past the check.
+E2L=$T/$(printf 'x%.0s' $(seq 1 110)); mkdir -p $E2L $T/nomktemp
+printf '#!/bin/sh\necho "$*" >> %s/nomktemp.log\nexit 1\n' $T > $T/nomktemp/mktemp; chmod +x $T/nomktemp/mktemp
+out=$(PATH=$T/nomktemp:$PATH TMPDIR=$E2L TEST_VOLUME=$VOL $SRC/test/e2e.sh 2>&1); rc=$?
+[ $rc = 64 ] && echo "$out" | grep -qF "TMPDIR is too long" && echo "$out" | grep -qF "takes at most $e2e_max" && [ ! -e $T/nomktemp.log ] && [ -z "$(ls -A $E2L)" ] \
+  && ok "test/e2e.sh refuses a TMPDIR too long for tmux's socket, says the longest it takes, and makes nothing" || { bad "test/e2e.sh with a TMPDIR too long (rc=$rc)"; echo "$out" | tail -3; }
 e2e_end=live # the last line: test/e2e.sh checks that the file ran to here

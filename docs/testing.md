@@ -30,6 +30,19 @@ exist. A throwaway team's worktrees on the volume are not removed by `down`; rem
 `TEST_VOLUME=/Volumes/YourDrive test/e2e.sh` runs the launcher against a throwaway repo with a stand-in
 `claude` on a private tmux server.
 
+### Its temp folder
+
+The run works in a scratch folder under `TMPDIR`, and removes it at the end. `TMPDIR` can be directly on a
+volume, or the default temp folder. It needs no symlink: the run makes its own, `<scratch>/l -> r`, because
+the launcher's rules cover a path both as configured and as its real path, and the cases that check both
+need two spellings to differ wherever the run is ([#249](../../../issues/249)). A case that removes the
+scratch folder by hand removes `$T_TOP`, since `$T` is the link.
+
+A `TMPDIR` can be at most 65 characters, in the spelling you give and as its real path, with a user id of
+three digits: tmux refuses a socket path over 103 characters, and the run adds 38. A longer one is refused
+at once, with the limit for your user id, and makes nothing. Folders outside `TMPDIR` are `TEST_VOLUME`'s
+throwaway folder, and `test/live-env.sh`'s own under `/tmp`; the run removes both.
+
 ### Where the cases live
 
 The cases live in `test/e2e/`, one file per area, and `test/e2e.sh` sources them in the order of its

@@ -22,8 +22,9 @@ disable=disable'
 [ "$(perms $T/state/settings/w1.json)" = "$want_w1" ] && ok "w1.json: team + role merged, duplicate dropped, team ask shadowed by the role deny dropped, bypass disabled for a non-bypass mode" || { bad "w1.json rules"; perms $T/state/settings/w1.json; }
 [ "$(stat -f %Lp $T/state/settings/em.json)" = 444 ] && ok "settings file is read-only (0444)" || bad "settings file mode $(stat -f %Lp $T/state/settings/em.json)"
 # Edit denies the launcher adds for files that change a seat's next start or its live rules. Paths
-# are real paths (the temp folder is under a symlink on macOS).
+# are real paths: $T runs through a link that test/e2e.sh makes, so its real path $RT always differs (#249).
 RT=$(cd $T && pwd -P); RSRC=$(cd $SRC && pwd -P); RW1=$(cd $VOL/$ROOT/team-w1 && pwd -P); RHC=$(cd ~/.claude && pwd -P); RH=$(cd ~ && pwd -P)
+case $RT in "$e2e_real"/*) [ "$T" != "$RT" ] && ok "the scratch path has two spellings, both under TMPDIR" || bad "the scratch path has one spelling: $T" ;; *) bad "the scratch folder's real path $RT is not under TMPDIR $e2e_real" ;; esac
 missing=""
 for p in "$RT/state/settings/**" "$RT/state/launch/**" "$RT/state/prompts/**" "$RT/state/messages.log" "$RT/team.yaml" \
   "$RSRC/roles/common.md" "$RSRC/factory.sh" "$RSRC/lib/**" "$RSRC/roles/**" "$RSRC/plugin/**" "$RT/bin/wrap" \
@@ -35,7 +36,7 @@ for p in "$RT/state/settings/**" "$RT/state/launch/**" "$RT/state/prompts/**" "$
 done
 [ -z "$missing" ] && ok "w1.json: Edit deny on every protected path" || { bad "protected paths missing:$missing"; rules $T/state/settings/w1.json deny; }
 # The repository's auto-memory folder, which the owner's own sessions load (#108): denied for every
-# seat with auto memory off (em, w1), in both spellings of the repo path ($T is under a symlink, and
+# seat with auto memory off (em, w1), in both spellings of the repo path ($T runs through a link, and
 # Claude Code names the folder after the path), and not for w2 (auto_memory: true).
 MEMA="$RHC/projects/$(enc "$T/repo")/memory/**"; MEMB="$RHC/projects/$(enc "$RT/repo")/memory/**"
 missing=""; for r in em w1; do for p in "$MEMA" "$MEMB"; do rules $T/state/settings/$r.json deny | grep -qxF "Edit(/$p)" || missing="$missing $r:$p"; done; done
@@ -45,7 +46,7 @@ w2mem=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml settin
 rules $T/state/settings/w1.json deny | grep -qE "state/notes/\*\*|state/notes/w1\.md|Edit\(//$RT/state/\*\*\)|Edit\(//$RHC/\*\*\)" && bad "protected paths are too wide (all notes or the seat's own, whole state dir or whole ~/.claude)" || ok "protected paths leave the seat's own note and the rest of ~/.claude writable"
 # Claude Code puts the worktrees it makes (--worktree, subagents with isolation: worktree) under
 # <repo>/.claude/worktrees/, so no deny may cover that folder.
-# $T is the path as configured; on macOS it runs through the /var symlink, so its real path ($RT)
+# $T is the path as configured; it runs through the link test/e2e.sh makes, so its real path ($RT)
 # differs. Both spellings of a protected path are denied.
 missing=""
 for p in "$T/repo/.mcp.json" "$T/repo/.claude/settings.json" "$T/state/settings/**" "$T/team.yaml" "$T/bin/wrap"; do
@@ -117,7 +118,7 @@ echo "$chk" | grep -qF "updates   : Claude Code's auto-updater is off in every s
 echo "$chk" | grep -qF "add to" && ok "check: says the rules add to the user's and the repo's own settings" || bad "check: add-to note"
 # The gate runs as a Stop hook for roles with gate_on_stop (w1) and for no other role.
 hook=$(ruby -rjson -e 'j = JSON.parse(File.read(ARGV[0])); h = j.dig("hooks", "Stop", 0, "hooks", 0) || {}; puts [j["hooks"]["Stop"].size, h["type"], h["command"], *h["args"], h["timeout"], j["disableAllHooks"].inspect].join(" | ")' $T/state/settings/w1.json 2>&1)
-[ "$hook" = "1 | command | $SRC/lib/stop_gate.sh | $T/state | w1 | $VOL/$ROOT/team-w1 | make check | 120 | 2 | 150 | false" ] && ok "w1.json: one Stop hook running stop_gate.sh with state, role, workdir, gate, timeout, max blocks; disableAllHooks false" || { bad "w1 Stop hook"; echo "$hook"; }
+[ "$hook" = "1 | command | $RSRC/lib/stop_gate.sh | $T/state | w1 | $VOL/$ROOT/team-w1 | make check | 120 | 2 | 150 | false" ] && ok "w1.json: one Stop hook running stop_gate.sh with state, role, workdir, gate, timeout, max blocks; disableAllHooks false" || { bad "w1 Stop hook"; echo "$hook"; }
 # w2 has not started yet at this point (its legacy worktree is refused above): ask the builder.
 nostop() { ruby -rjson -e 'j = JSON.parse(STDIN.read); exit((j["hooks"] || {}).key?("Stop") ? 1 : 0)'; }
 nostop < $T/state/settings/em.json && TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml settings w2 | nostop && ok "roles without gate_on_stop (em, w2) get no Stop hook" || bad "a role without gate_on_stop got a Stop hook"
@@ -128,9 +129,9 @@ sshook() { ruby -rjson -e 'j = JSON.parse(STDIN.read); a = (j["hooks"] || {})["S
 ss_em=$(sshook < $T/state/settings/em.json); ss_w1=$(sshook < $T/state/settings/w1.json); ss_w2=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml settings w2 | sshook)
 # disableAllHooks: false only for the gated seat (w1): the note is a convenience and does not
 # override a user who switched every hook off; the gate is a control and does.
-[ "$ss_em" = "1 | false | command | $SRC/lib/session_start.sh | $T/state | em | $T/proj | 10 | nil" ] \
-  && [ "$ss_w1" = "1 | false | command | $SRC/lib/session_start.sh | $T/state | w1 | $VOL/$ROOT/team-w1 | 10 | false" ] \
-  && [ "$ss_w2" = "1 | false | command | $SRC/lib/session_start.sh | $T/state | w2 | $VOL/$ROOT/team-w2 | 10 | nil" ] \
+[ "$ss_em" = "1 | false | command | $RSRC/lib/session_start.sh | $T/state | em | $T/proj | 10 | nil" ] \
+  && [ "$ss_w1" = "1 | false | command | $RSRC/lib/session_start.sh | $T/state | w1 | $VOL/$ROOT/team-w1 | 10 | false" ] \
+  && [ "$ss_w2" = "1 | false | command | $RSRC/lib/session_start.sh | $T/state | w2 | $VOL/$ROOT/team-w2 | 10 | nil" ] \
   && ok "every seat (em, w1, w2): one SessionStart hook running session_start.sh with state, role, workdir; disableAllHooks false only for gated w1" || { bad "SessionStart hook"; echo "$ss_em"; echo "$ss_w1"; echo "$ss_w2"; }
 # Every seat logs its SendMessage traffic to messages.log (#39): a PostToolUse hook for a message that
 # went out and a PostToolUseFailure hook for one that failed, both on SendMessage only, with the log,
@@ -138,7 +139,7 @@ ss_em=$(sshook < $T/state/settings/em.json); ss_w1=$(sshook < $T/state/settings/
 smhook() { ruby -rjson -e 'j = JSON.parse(STDIN.read); h = j["hooks"] || {}
   puts(%w[PostToolUse PostToolUseFailure].map { |e| a = h[e] || []; x = (a[0] || {}).fetch("hooks", [])[0] || {}
     [e, a.size, (a[0] || {})["matcher"], x["type"], x["command"], *x["args"], x["timeout"]].join(" | ") })' 2>&1; }
-smwant() { for e in PostToolUse PostToolUseFailure; do echo "$e | 1 | SendMessage | command | $SRC/lib/log_message.sh | $T/state/messages.log | $1 | tt-em=em | tt-w1=w1 | tt-w2=w2 | 5"; done; }
+smwant() { for e in PostToolUse PostToolUseFailure; do echo "$e | 1 | SendMessage | command | $RSRC/lib/log_message.sh | $T/state/messages.log | $1 | tt-em=em | tt-w1=w1 | tt-w2=w2 | 5"; done; }
 sm_em=$(smhook < $T/state/settings/em.json); sm_w1=$(smhook < $T/state/settings/w1.json); sm_w2=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml settings w2 | smhook)
 [ "$sm_em" = "$(smwant em)" ] && [ "$sm_w1" = "$(smwant w1)" ] && [ "$sm_w2" = "$(smwant w2)" ] \
   && ok "every seat (em, w1, w2): SendMessage logging hooks on PostToolUse and PostToolUseFailure, with log, role and the session map" || { bad "SendMessage logging hooks"; echo "$sm_em"; echo "$sm_w1"; }
