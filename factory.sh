@@ -185,8 +185,10 @@ tmpdir_on_volume() {
 
 # Make temp folder $1 for a seat about to start, after the proofs: `mkdir -p` under an unmounted
 # /Volumes path would quietly create it on the internal disk (require_volume). Owner-only, as the
-# per-user TMPDIR macOS gives a login is: the volume is shared with other users and other teams, and
-# temp files can hold what a seat was working on. chmod gives an existing folder the mode too.
+# per-user TMPDIR macOS gives a login is, because temp files can hold what a seat was working on. It
+# guards against other OS users, and only where the volume honours ownership: seats of other teams run
+# as the same user, and on a volume mounted noowners (Finder's "ignore ownership") it keeps out nobody.
+# What separates two teams is that their folders differ. chmod gives an existing folder the mode too.
 prepare_tmpdir() {
   local t=$1 p
   mount | grep -qF " on $VOLUME (" || die "storage volume $VOLUME is not mounted; refusing to put temp files on another disk"

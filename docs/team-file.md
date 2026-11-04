@@ -76,6 +76,11 @@ to start. It refuses if the volume is not mounted, the same as for a worktree, a
 under an unmounted `/Volumes` path would land on the internal disk. It also refuses a symlink at either
 folder. A running seat keeps what it started with and picks up a change at its next start.
 
+Owner-only (mode 700) guards against other OS users, and only on a volume that honours ownership. It
+keeps out nobody on a volume mounted `noowners` (Finder's "ignore ownership on this volume"), and every
+seat runs as the same user in any case. Separate folders keep two teams' temp files apart by accident
+guard only, as with the other rules in [Safety](../README.md#safety): this is not a security boundary.
+
 A role with no `tmpdir` behaves as before: the seat takes `TMPDIR` and `CLAUDE_CODE_TMPDIR` from whatever
 started it, and `check` shows `(inherit)`. There is no default folder, because the choice is explicit per role.
 
