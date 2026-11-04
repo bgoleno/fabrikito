@@ -177,6 +177,13 @@ permissions:
 # role's prompt with a note that a skill may not be installed, so naming one installs nothing and
 # a seat without it works on. The ones below come from the superpowers plugin and Claude Code's own
 # bundled skills: keep the ones you have, add your own.
+# tmpdir: the folder for this seat's temp files, for example /Volumes/YourDrive/tmp/example/fs1. The
+# launch script sets TMPDIR to it and CLAUDE_CODE_TMPDIR to <tmpdir>/claude (where Claude's
+# scratchpads and task output go), whatever the tmux server's environment holds. It must be inside
+# storage.volume and name the team and the role as folders, because two teams on one host share role
+# names. `up` makes it owner-only, and refuses when the volume is not mounted; a symlink that leads
+# off the volume is refused by `check` and `up`. Without the key, the seat inherits its temp settings
+# from whatever started it, and `check` shows (inherit). See docs/team-file.md, "Temp files".
 #   workdir.type: project   an existing folder: path: ...
 #   workdir.type: worktree  a git worktree under storage (optional: name: folder-name)
 roles:

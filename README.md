@@ -31,6 +31,11 @@ Moved to [The team file](docs/team-file.md).
 
 Moved to [The team file: New worktrees](docs/team-file.md#new-worktrees).
 
+## Temp files
+
+`roles.<id>.tmpdir` in the team file puts a seat's temp files on the team's storage volume, in a folder of
+its own. See [The team file: Temp files](docs/team-file.md#temp-files).
+
 ## The factory plugin
 
 Moved to [The factory plugin](docs/plugin.md).

@@ -151,6 +151,9 @@ refuse_default_tmux() {
   die "refusing to $what for $CONFIG on the default tmux server ($(default_tmux_socket)), where your real team runs: the team file is outside $HERE/teams/, so it looks like a throwaway team. Run it on a private server: d=\$($HERE/test/live-env.sh new); $HERE/test/live-env.sh run \"\$d\" $SELF -c $CONFIG $cmd (or unset TMUX and point TMUX_TMPDIR at a folder that exists). If this team is meant to run on the default server, pass $cmd --default-socket."
 }
 
+# The mount point of the volume folder $1 is on. df follows links, so this is where the path really leads.
+mount_of() { df -P "$1" | awk 'NR==2 { $1=$2=$3=$4=$5=""; sub(/^ +/, ""); print }'; }
+
 # The worktree volume is proven from the mount table, at the moment a worktree is created, and
 # the target folder is proven to be on it. `mkdir -p` under an unmounted /Volumes path would
 # quietly create the folder on the internal disk, so nothing is created before this passes.
@@ -158,10 +161,40 @@ require_volume() {
   mount | grep -qF " on $VOLUME (" || die "storage volume $VOLUME is not mounted; refusing to put worktrees on another disk"
   mkdir -p "$WT_ROOT" || die "cannot create $WT_ROOT"
   local on t
-  on=$(df -P "$WT_ROOT" | awk 'NR==2 { $1=$2=$3=$4=$5=""; sub(/^ +/, ""); print }')
+  on=$(mount_of "$WT_ROOT")
   [ "$on" = "$VOLUME" ] || die "$WT_ROOT is on '$on', not on the storage volume $VOLUME"
   t=$(mktemp "$WT_ROOT/.write-test.XXXXXX") || die "cannot write to $WT_ROOT"
   rm -f "$t"
+}
+
+# A role's temp folder $1 (roles.<id>.tmpdir). team_config.rb checked the path as written; this proves,
+# with the volume mounted, where it leads: a symlink in the path, or another volume mounted under it,
+# would put the seat's temp files on another disk. A link at the folder or at its claude/ is refused
+# wherever it points, because mkdir -p and chmod follow it, and a seat can put one there (as in #168,
+# hardening: the check is not atomic with the mkdir).
+tmpdir_on_volume() {
+  local t=$1 d on
+  for d in "$t" "$t/claude"; do
+    if [ -L "$d" ] || { [ -e "$d" ] && [ ! -d "$d" ]; }; then
+      die "$d is not a real folder (a symlink, or not a folder): remove it, then run again"
+    fi
+  done
+  on=$(mount_of "$(deepest_real_dir "$t")")
+  [ "$on" = "$VOLUME" ] || die "temp folder $t is on '$on', not on the storage volume $VOLUME"
+}
+
+# Make temp folder $1 for a seat about to start, after the proofs: `mkdir -p` under an unmounted
+# /Volumes path would quietly create it on the internal disk (require_volume). Owner-only, as the
+# per-user TMPDIR macOS gives a login is: the volume is shared with other users and other teams, and
+# temp files can hold what a seat was working on. chmod gives an existing folder the mode too.
+prepare_tmpdir() {
+  local t=$1 p
+  mount | grep -qF " on $VOLUME (" || die "storage volume $VOLUME is not mounted; refusing to put temp files on another disk"
+  tmpdir_on_volume "$t"
+  mkdir -p "$t/claude" || die "cannot create $t/claude"
+  chmod 700 "$t" "$t/claude" || die "cannot make $t owner-only"
+  p=$(mktemp "$t/.write-test.XXXXXX") || die "cannot write to $t"
+  rm -f "$p"
 }
 
 # The paths of the repo's registered worktrees, each ended by a NUL. Read with -z, which ends every
@@ -346,7 +379,7 @@ install_line() {
 }
 
 cmd_check() {
-  local r on="not mounted" d real users
+  local r on="not mounted" d real users t
   mount | grep -qF " on $VOLUME (" && on="mounted"
   install_line
   echo "team file : $CONFIG"
@@ -393,6 +426,14 @@ cmd_check() {
   echo "(inherit = flag omitted; the seat uses model, effortLevel and permissions.defaultMode from ~/.claude/settings.json)"
   echo "(MEMORY off = Claude Code's auto memory is off in that seat; (inherit) = auto_memory: true, Claude Code's own settings decide)"
   echo
+  echo "temp files (TMPDIR; Claude's scratchpads and task output go under <folder>/claude):"
+  for r in $ROLES; do
+    t=$(cfg role "$r" tmpdir)
+    printf '  %-5s %s\n' "$r" "${t:-(inherit)}"
+    if [ -n "$t" ] && [ "$on" = mounted ]; then tmpdir_on_volume "$t"; fi
+  done
+  echo "(inherit = no roles.<id>.tmpdir: the seat takes TMPDIR and CLAUDE_CODE_TMPDIR from whatever started it)"
+  echo
   echo "kickoff (each seat's first message; the label marks it as team configuration, not the owner's voice):"
   for r in $ROLES; do
     TEAM_SCRIPT=$SELF TEAM_LOG=$LOG cfg kickoff "$r" | sed "1s/^/  [$r] /; 2,\$s/^/    /"
@@ -404,7 +445,7 @@ cmd_check() {
 }
 
 cmd_up() {
-  local want_view=1 started=0 args="" roles r sess dir launch a args_q settings default_ok=0 tdir ndir d gdirs hdirs
+  local want_view=1 started=0 args="" roles r sess dir launch a args_q settings default_ok=0 tdir ndir d gdirs hdirs t
   for a in "$@"; do
     case $a in
       --no-view) want_view=0 ;;
@@ -418,6 +459,12 @@ cmd_up() {
   command -v tmux >/dev/null || die "tmux not found"
   resolve_claude || die "$CLAUDE_ERR"
   for r in $roles; do check_role "$r"; done
+  # Before anything is made or started, so a refusal leaves no part of the team running.
+  for r in $roles; do
+    if alive "$r"; then continue; fi
+    t=$(cfg role "$r" tmpdir)
+    [ -z "$t" ] || prepare_tmpdir "$t"
+  done
   # Assignments, so a cfg failure stops up here (set -e) rather than leaving the list below short.
   ndir=$(cfg get state.notes_dir)
   tdir=$(cfg get state.triage_dir)
@@ -504,6 +551,13 @@ cmd_up() {
         # On: the seat must not inherit the variable from the tmux server's environment (a team
         # started from inside a seat, where it is set), or check's (inherit) would not be true.
         echo 'unset CLAUDE_CODE_DISABLE_AUTO_MEMORY'
+      fi
+      t=$(cfg role "$r" tmpdir)
+      if [ -n "$t" ]; then
+        echo '# Set per seat: the tmux server environment holds one value for every team on the server (#241).'
+        echo '# TMPDIR alone would leave the scratchpads and task output of Claude Code on the internal disk.'
+        printf 'export TMPDIR=%q\n' "$t"
+        printf 'export CLAUDE_CODE_TMPDIR=%q\n' "$t/claude"
       fi
       printf 'claude_bin=%q\n' "$CLAUDE_COPY"
       echo 'if [ -n "$wrapper" ] && [ -x "$wrapper" ]; then run=("$wrapper" "$claude_bin"); else run=("$claude_bin"); fi'

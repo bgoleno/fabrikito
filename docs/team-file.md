@@ -31,7 +31,8 @@ the reference for each key, and the file to copy.
   contain a `[from ...]` label, and seats may not edit it. `check` shows it, with the longest rendered
   prompt, and warns when a seat's prompt goes over 199 lines. Without it, prompts are unchanged.
 - `roles`: ordered; each has `title`, `workdir` (`project` folder or `worktree`), a prompt, and
-  optional `model`, `effort`, `session`, `kickoff`, `summary`, `skills`.
+  optional `model`, `effort`, `session`, `kickoff`, `summary`, `skills`, `tmpdir`
+  (see [Temp files](#temp-files)).
 - `skills` (per role): skills to name in that seat's prompt, each a name (`plugin:name` for a plugin's
   skill) with an optional note on when to use it. They are listed after the role's prompt with a note
   that a skill may not be installed; naming one installs nothing. The example team lists commonly
@@ -46,6 +47,40 @@ Text is UTF-8 whatever the locale (`LC_ALL=C`, cron, `env -i`): the team and pro
 values the launcher fills in from outside them (`TEAM_SCRIPT`, `TEAM_LOG`, `TEAM_STATE_DIR`,
 `CLAUDE_CONFIG_DIR`, the home folder, the team file's own path), so non-ASCII paths and names work in
 prompts, kickoffs and settings. Invalid UTF-8 in any of them is an error that names where it came from.
+
+## Temp files
+
+`roles.<id>.tmpdir` sets where a seat's temp files go. The launch script exports two variables from it,
+so the setting belongs to the seat and not to the tmux server, whose environment holds one value for
+every team on it:
+
+```yaml
+storage: { volume: /Volumes/<drive>, root: Projects/myteam-worktrees }
+roles:
+  fs1:
+    tmpdir: /Volumes/<drive>/tmp/myteam/fs1
+```
+
+- `TMPDIR=<tmpdir>`. `mktemp "$TMPDIR/name.XXXXXX"` creates its file there. Give `mktemp` that explicit
+  template: a bare `mktemp` was seen to ignore `TMPDIR` on macOS.
+- `CLAUDE_CODE_TMPDIR=<tmpdir>/claude`. Claude's scratchpads and task output go under it. Setting `TMPDIR`
+  alone leaves them on the internal disk.
+
+The folder must be inside `storage.volume` and name both the team and the role as folders. Two teams on
+one host share role names, so a folder without the team can collide, and every command refuses it when
+it loads the team file. `check` shows each role's folder and also refuses, while the volume is mounted, a
+path that a symlink or another mount leads off the volume.
+
+`up` makes the folder and its `claude/`, owner-only, before it starts anything, for each seat it is about
+to start. It refuses if the volume is not mounted, the same as for a worktree, and creates nothing: `mkdir`
+under an unmounted `/Volumes` path would land on the internal disk. It also refuses a symlink at either
+folder. A running seat keeps what it started with and picks up a change at its next start.
+
+A role with no `tmpdir` behaves as before: the seat takes `TMPDIR` and `CLAUDE_CODE_TMPDIR` from whatever
+started it, and `check` shows `(inherit)`. There is no default folder, because the choice is explicit per role.
+
+A team pinned to a release gets the key by moving to a release that has it: see
+[Running a team from a pinned release](pinned-release.md).
 
 ## New worktrees
 
