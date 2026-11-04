@@ -108,7 +108,10 @@ CP=$T/state/bin/claude-9.9.9/claude
 ! grep -qF -e "$T/bin/claude" -e "$RT/bin/claude" $T/state/launch/em.sh $T/state/launch/w1.sh && grep -qF "$CP" $T/state/launch/em.sh && ok "the launch script names the copy, never the shared install" || { bad "launch script claude path"; grep claude_bin $T/state/launch/em.sh; }
 echo "$chk" | grep -qF "claude    : $RT/bin/claude, version 9.9.9" && echo "$chk" | grep -qF "$T/state/bin/claude-9.9.9 (clone): em w1" && ok "check: the shared claude, its version, and each copy with the seats running it" || { bad "check: claude lines"; echo "$chk" | grep -A3 "^claude"; }
 # The shared install is replaced the way npm does it (a new file in its place): the seats keep theirs.
-cc -o $T/bin/claude.new $T/c.c && mv $T/bin/claude.new $T/bin/claude
+# The new file is built under the name claude, so its bytes are the old one's, as a reinstall of the
+# same version brings: cc writes the output's name into the binary's ad hoc signature, and up refuses a
+# copy that differs from the shared file (#208).
+mkdir -p $T/cc && cc -o $T/cc/claude $T/c.c && mv $T/cc/claude $T/bin/claude
 $S -c $T/team.yaml status | grep -E "^em " | grep -qF "$RT/state/bin/claude-9.9.9/claude" && ok "status: after the shared claude is replaced, em still runs its intact copy" || { bad "status after shared replace"; $S -c $T/team.yaml status; }
 echo "$chk" | grep -qF "updates   : Claude Code's auto-updater is off in every seat (DISABLE_AUTOUPDATER=1)" && ok "check: says the auto-updater is off in seats" || bad "check: updater line"
 echo "$chk" | grep -qF "add to" && ok "check: says the rules add to the user's and the repo's own settings" || bad "check: add-to note"

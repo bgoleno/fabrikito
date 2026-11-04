@@ -799,12 +799,30 @@ resolve_claude() {
   CLAUDE_COPY="$STATE/bin/claude-$CLAUDE_VERSION/claude"
 }
 
+# A file already at the copy's path is the copy only if it is the shared file byte for byte (#208).
+# Otherwise any runnable file there is what every seat runs, one put at the next version's path before
+# an update included. The size is compared first, then the bytes (cmp reads both; nothing is copied).
+# One that differs is refused, not replaced: seats may be running it, and replacing a running seat's
+# file is what the copy exists to avoid (see resolve_claude). A reinstall of the same version brings
+# the same bytes, so an update does not trip this; a new version gets a path of its own. The copy also
+# has one name (sec on #234): up makes it with cp, so a second name means it was put there, and a hard
+# link to the shared file itself would change under the seats when that file is written in place.
+copy_same_or_die() {
+  if [ -f "$CLAUDE_COPY" ] && [ "$(stat -f %l "$CLAUDE_COPY")" = 1 ] &&
+    [ "$(stat -f %z "$CLAUDE_COPY")" = "$(stat -f %z "$CLAUDE_SRC")" ] && cmp -s "$CLAUDE_COPY" "$CLAUDE_SRC"; then
+    return 0
+  fi
+  # Not only a planted file: the shared claude can also change without a new version, as a reinstall
+  # under way can (tl on #234). The message names both.
+  die "$CLAUDE_COPY is not a copy of $CLAUDE_SRC (claude $CLAUDE_VERSION): its bytes differ, or it has a second name (a hard link). So up starts no seat on it: it was refused, not replaced. Either it was put there (report it), or the shared claude changed without a new version (if a reinstall is under way, retry up when it is done). Once no seat runs it ($SELF status), remove that exact file, then run up again"
+}
+
 # Make the copy if it is not there yet: an APFS clone (cp -c: a file of its own that shares the
 # original's blocks) where the state folder is on the same file system, else a plain copy. It is
 # checked before it is moved into place, so a seat never runs a partial copy. Any failure stops up:
 # falling back to the shared file would bring the problem back without a sign.
 copy_link() {
-  [ ! -L "$CLAUDE_COPY" ] || die "$CLAUDE_COPY is a symlink, not the team's copy of claude: remove that exact link, then run up again"
+  [ ! -L "$CLAUDE_COPY" ] || die "$CLAUDE_COPY is a symlink, not a copy of claude, so up starts no seat on it: it was refused, not removed. Once no seat runs it ($SELF status), remove that exact link, then run up again"
 }
 ensure_claude_copy() {
   local dir tmp how
@@ -812,7 +830,7 @@ ensure_claude_copy() {
   # link is refused, before and after the move below (#194, sec on #174). Only a seat could put one
   # there. The copy's folder is checked to be a real one by cmd_up (#174).
   copy_link
-  [ -x "$CLAUDE_COPY" ] && return 0
+  [ -x "$CLAUDE_COPY" ] && { copy_same_or_die; return 0; }
   dir=$(dirname "$CLAUDE_COPY")
   tmp="$dir/.claude.partial.$$"
   mkdir -p "$dir" 2>/dev/null || die "could not copy claude to $dir (cannot create the folder)"
@@ -837,6 +855,8 @@ ensure_claude_copy() {
     rm -f "$tmp"
     copy_link
     [ -x "$CLAUDE_COPY" ] || die "$CLAUDE_COPY exists but is not a runnable copy of claude; remove that exact file, then retry up"
+    # Made by another up, which checked it against the same shared file, unless it was put there.
+    copy_same_or_die
     return 0
   fi
   rm -f "$dir/.how"

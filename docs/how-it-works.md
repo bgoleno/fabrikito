@@ -41,8 +41,9 @@ session names, unknown placeholders and invalid UTF-8 stop the command before an
    if `.state/<team>/bin/claude-<version>/claude` is missing, clones or copies the executable there
    and checks the copy. Seats run this copy, so a Claude Code update in another session does not
    replace the file under them. A symlink at the copy's path is refused, naming it: the seats would
-   run whatever it points at ([#194](../../../issues/194)). See
-   [Updating Claude Code](../README.md#updating-claude-code).
+   run whatever it points at ([#194](../../../issues/194)). A copy already there must be the executable
+   byte for byte, with one name, or `up` refuses it, without replacing it ([#208](../../../issues/208)).
+   See [Updating Claude Code](../README.md#updating-claude-code).
 4. **Starts each role in turn,** in file order or in the order given on the command line, and stops
    at the first role it cannot start. A role whose tmux session already exists is skipped and left
    alone; if the claude file it runs was replaced under it, `up` prints an `ATTENTION` line saying
