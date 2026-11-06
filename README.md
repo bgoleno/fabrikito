@@ -1,48 +1,87 @@
 # software-factory
 
-Starts a team of Claude Code sessions for a software project. Each seat (engineering manager, tech
-lead, engineers, QA, security, or whatever you define) runs in its own persistent tmux session, is
-told its role, works in its own git worktree, and can message the other seats.
+Run a team of Claude Code sessions on one project: an engineering manager, a tech lead, engineers, QA,
+security, or whatever roles you define. `factory.sh` starts each one as a persistent tmux session in a git
+worktree of its own, tells it its role, lets it message the other seats, and shows them all together in one
+iTerm tab.
 
-The team is defined in one YAML file per project, so different projects can have different teams,
-prompts, models and storage.
+- **One YAML file defines the team.** Roles, prompts, models, effort, permissions and where each seat's
+  files live are in a team file per project, so different projects get different teams. Every key is
+  documented in [`teams/example.yaml`](teams/example.yaml).
+- **No server, no background service.** `factory.sh` is a bash script (with the system `ruby` to read the
+  YAML, no gems). It generates each seat's prompt, settings and launch script and starts the seat; tmux
+  keeps it running and Claude Code's own cross-session messaging carries the messages. See
+  [How it works](docs/how-it-works.md).
+- **Seats work in separate worktrees.** Each seat has its own working directory, so engineers do not
+  overwrite each other's files, and the team's work lands through pull requests.
+- **Rules are generated into each seat's settings.** Deny rules on the files that would change a seat's own
+  rules, and an ask on any push to the base branch, are written into its settings file at every `up`. They
+  guard against accidents, not against a determined seat or user: read [Safety](#safety) for what they
+  cover and what they do not.
+- **A seat can be held to your gate.** With `gate_on_stop`, a seat that stops with uncommitted work is held
+  until the repository's checks pass. See [The gate](docs/gate.md).
 
-## Requirements
+## Quick start
 
-Moved to [Commands: Requirements](docs/commands.md#requirements).
+You need macOS, `tmux`, `claude` (Claude Code), `git` 2.36 or later, `gh` and the system `ruby`. See
+[Requirements](docs/commands.md#requirements) for the details.
 
-## Use
+```
+git clone https://github.com/bgoleno/software-factory.git
+cd software-factory
+cp teams/example.yaml teams/team.yaml     # edit it: your repository, project, storage and roles
+./factory.sh check                        # validate the team file and show where everything lives
+./factory.sh up                           # start the team
+./factory.sh view                         # open an iTerm tab with every running seat
+./factory.sh say em "What is the plan for today?"
+./factory.sh down --yes                   # stop the seats (worktrees are kept)
+```
 
-Moved to [Commands](docs/commands.md): [the commands](docs/commands.md#the-commands), [which team file](docs/commands.md#which-team-file) and [throwaway teams](docs/commands.md#throwaway-teams).
+Run `check` first. Your own team files in `teams/`, and anything under `projects/`, are git-ignored, so a
+project's specifics stay out of this repository. Every command and option is in
+[Commands](docs/commands.md). To decide how many seats to run and what they cost, see
+[Right-sizing a team](docs/right-sizing.md).
 
-## The iTerm view
+## Documentation
 
-Moved to [Commands: The iTerm view](docs/commands.md#the-iterm-view).
+| Read | To |
+|---|---|
+| [How it works](docs/how-it-works.md) | See how the parts fit together: what `up` does, what a seat is made of, hooks, messaging. |
+| [Commands](docs/commands.md) | Install and run a team: every command and option, which team file is used, throwaway teams, the iTerm view. |
+| [The team file](docs/team-file.md) | Set up a team: what each part does, what is checked, how a new worktree is prepared, and temp files. |
+| [Right-sizing a team](docs/right-sizing.md) | Choose the number of seats, effort and model per seat, and see the cost. |
+| [The factory plugin](docs/plugin.md) | See how the factory's skills reach every seat. |
+| [How work is tracked](docs/workflow.md) | The issues-first rule and the seats' progress notes. |
+| [The gate](docs/gate.md) | How a seat is held to the repository's checks when it stops. |
+| [Pinned releases](docs/pinned-release.md) | Run a team from a checkout fixed at a release. |
+| [Testing](docs/testing.md) | Run a live test on a private tmux server, and the end-to-end test. |
+| [Troubleshooting](docs/troubleshooting.md) | Find what you see (an error, a refused message, a silent seat) and what to do. |
 
-## Right-sizing
+The full index is [docs/README.md](docs/README.md). Messaging (how seats talk, `say`, the message log),
+[Safety](#safety) and [Updating Claude Code](#updating-claude-code) are still on this page, below.
 
-Moved to [Right-sizing a team](docs/right-sizing.md).
+## Reporting a vulnerability
 
-## The team file
+Report a vulnerability through GitHub's private vulnerability reporting:
+<https://github.com/bgoleno/software-factory/security/advisories/new>. Do not open a public issue for it.
+See [SECURITY.md](SECURITY.md).
 
-Moved to [The team file](docs/team-file.md).
+## Contributing
 
-## New worktrees
+Every change starts as a GitHub issue, and its pull request links the issue and fills in the pull request
+template. Nothing tracked may name a specific project, person, drive or path. Before a pull request, run
+the gate: `bash -n factory.sh test/e2e.sh lib/stop_gate.sh lib/session_start.sh lib/log_message.sh`,
+`ruby -c lib/team_config.rb`, and `env -u TMUX TEST_VOLUME=/Volumes/<a mounted, writable volume> test/e2e.sh`.
+See [Testing](docs/testing.md).
 
-Moved to [The team file: New worktrees](docs/team-file.md#new-worktrees).
+## License
 
-## Temp files
+Apache License 2.0. See LICENSE.
 
-`roles.<id>.tmpdir` in the team file puts a seat's temp files on the team's storage volume, in a folder of
-its own. See [The team file: Temp files](docs/team-file.md#temp-files).
+## Messaging, safety and updating
 
-## The factory plugin
-
-Moved to [The factory plugin](docs/plugin.md).
-
-## Issues first
-
-Moved to [How work is tracked: Issues first](docs/workflow.md#issues-first).
+The sections below hold the reference for messaging, safety and updating Claude Code. They are moving to
+pages under `docs/`.
 
 ## How seats talk
 
@@ -434,14 +473,6 @@ that apply to them enable it. The hard rules in the shared prompt (`roles/common
 read them before changing them. A seat started in a folder Claude Code has not seen stops at a trust
 dialog until a human answers it once; `up` reports which seats those are.
 
-## The gate
-
-Moved to [The gate](docs/gate.md).
-
-## Progress notes
-
-Moved to [How work is tracked: Progress notes](docs/workflow.md#progress-notes).
-
 ## Updating Claude Code
 
 Claude Code's updater replaces its shared executable (the npm package's `bin/claude.exe`), even with
@@ -471,7 +502,3 @@ starts on it.
 Old copies are never removed automatically. Once the shared file has moved on, each one holds about
 310 MB. When `check` lists a copy with no running seat, remove that folder by its exact path, for
 example `rm -r .state/<team>/bin/claude-2.1.314`.
-
-## Tests
-
-Moved to [Testing](docs/testing.md): [live tests](docs/testing.md#live-tests) and [the end-to-end test](docs/testing.md#the-end-to-end-test).
