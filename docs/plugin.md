@@ -14,11 +14,11 @@ Its skills are procedures for a role (assigning an issue, for example), loaded o
 sitting in every prompt. The skill folders under [`plugin/skills/`](../plugin/skills/) are the list, and each
 skill's `description` says whom it is for and when to use it. `/fabrikito:ping` only proves the plugin loaded.
 Every seat loads every skill. A skill reaches its role through its description and through that role's
-`skills:` in the team file (`teams/example.yaml` names each one where it belongs). A skill only the owner
-may start sets `disable-model-invocation`. A skill is the procedure. The rules it applies (a brief's
-fields, the review bar) stay in the role prompt, which the skill points to rather than copies, and a
-skill stops if the prompt lacks them. `test/e2e/launch.sh` checks every skill's frontmatter, so adding
-one needs no new test code.
+`skills:` in the team file (`teams/example.yaml` names each one where it belongs). Two skills run only
+when typed: see [Skills started by typing them](#skills-started-by-typing-them). A skill is the
+procedure. The rules it applies (a brief's fields, the review bar) stay in the role prompt, which the
+skill points to rather than copies, and a skill stops if the prompt lacks them. `test/e2e/launch.sh`
+checks every skill's frontmatter, so adding one needs no new test code.
 
 ### Skills started by typing them
 
