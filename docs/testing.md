@@ -10,12 +10,12 @@ private tmux server through `test/live-env.sh`, never on the server you work in:
 
 ```
 d=$(test/live-env.sh new)                                  a private folder: tmux/, state/
-test/live-env.sh run "$d" ./factory.sh -c /path/to/throwaway.yaml up
+test/live-env.sh run "$d" ./fabrikito -c /path/to/throwaway.yaml up
 test/live-env.sh run "$d" tmux ls                          any command, with TMUX_TMPDIR=$d/tmux and
                                                            TEAM_STATE_DIR=$d/state (absolute), TEAM_VIEW=0,
                                                            TEAM_ROLE=live-test (the driver label), and TMUX
                                                            and a seat's TEAM_CONFIG and TEAM_SCRIPT unset (so
-                                                           factory.sh without -c never finds the seat's real
+                                                           fabrikito without -c never finds the seat's real
                                                            team)
 test/live-env.sh down "$d"                                 stop its tmux server, remove the folder
 ```
@@ -77,9 +77,9 @@ early (a setup error, a signal). A run that stops early still removes what it ma
 
 One failure is not ours to fix ([#101](../../../issues/101)). Under heavy load (a load average of about
 40, many seats gating at once), a run can fail one assertion, and its output then shows
-`factory.sh: line <n>: echo: write error: Interrupted system call`. macOS's own bash (3.2) does not
+`fabrikito: line <n>: echo: write error: Interrupted system call`. macOS's own bash (3.2) does not
 restart a write into a pipe that a child's exit (SIGCHLD) interrupts, and its `echo` does not retry.
 Under `set -e` the failed write then ends the command with exit 1. The same can happen to any
-factory.sh output into a pipe, such as a seat's Bash tool. Rerun when that exact message is in the
+fabrikito output into a pipe, such as a seat's Bash tool. Rerun when that exact message is in the
 output. It is the only failure where a green rerun is the right answer. For any other failure, a
 green rerun is not evidence.

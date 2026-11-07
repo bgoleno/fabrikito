@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Stop hook that factory.sh puts in the generated settings of a role with gate_on_stop. When the
+# Stop hook that fabrikito puts in the generated settings of a role with gate_on_stop. When the
 # seat ends a turn with uncommitted changes in its working tree, it runs the repo's gate. If the
 # gate fails, it exits 2, and Claude Code sends the seat back to work with stderr as the reason.
 #

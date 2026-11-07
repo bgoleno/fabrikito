@@ -23,7 +23,7 @@ reject "a skill note over two lines" "roles.em.skills: the note for 'a' must be 
 reject "a skill note with a carriage return" "roles.em.skills: the note for 'a' must be one line of text" "" "" ', skills: [{ a: "x\ry" }]'
 reject "a skill note with an escape character" "roles.em.skills: the note for 'a' must be one line of text" "" "" ', skills: [{ a: "x\ey" }]'
 reject "a skill note with a tab" "roles.em.skills: the note for 'a' must be one line of text" "" "" ', skills: [{ a: "x\ty" }]'
-# The wrapper claude runs through is protected like factory.sh: a file, or its whole .app bundle.
+# The wrapper claude runs through is protected like fabrikito: a file, or its whole .app bundle.
 mk; ws=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml settings em)
 echo "$ws" | grep -q "wrap\|\.app" && bad "no wrapper configured, but a wrapper deny was added" || ok "no wrapper configured: no wrapper deny"
 # With CLAUDE_CONFIG_DIR set, Claude Code keeps the user's config there, .claude.json included

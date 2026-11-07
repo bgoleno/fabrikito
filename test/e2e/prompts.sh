@@ -35,7 +35,7 @@ echo "--- prompts render the same whatever the locale"
 # first non-ASCII byte in a prompt would stop the render (#72). The output must not depend on it.
 # env -i drops TEAM_SCRIPT, TEAM_LOG and TEAM_STATE_DIR, which the prompts name (the state folder
 # through @@NOTE@@), so every run gets the same values.
-pin="TEAM_SCRIPT=factory.sh TEAM_LOG=messages.log TEAM_STATE_DIR=$T/state"
+pin="TEAM_SCRIPT=fabrikito TEAM_LOG=messages.log TEAM_STATE_DIR=$T/state"
 for r in $(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml ids); do
   want=$(env $pin LC_ALL=en_US.UTF-8 ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render "$r" 2>&1)
   c=$(env $pin LC_ALL=C ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render "$r" 2>&1); rc=$?

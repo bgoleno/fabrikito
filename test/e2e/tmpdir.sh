@@ -125,9 +125,9 @@ out=$($S -c $T/td-ta.yaml check 2>&1); rc=$?
 rm $TL/claude; rm -rf "$TD"; ! tmux has-session -t '=ta-w1' 2>/dev/null || tmux kill-session -t '=ta-w1'
 
 echo "--- temp folders: the rest of the issue"
-# A bare mktemp was seen to ignore TMPDIR on macOS: each one in factory.sh that makes a file has a template.
+# A bare mktemp was seen to ignore TMPDIR on macOS: each one in fabrikito that makes a file has a template.
 m=$(grep -n '\$(mktemp' $S | grep -vE '\$\(mktemp "[^"]*\.X{6,}"')
-[ -z "$m" ] && grep -q '\$(mktemp' $S && ok "every mktemp in factory.sh has an explicit template" || { bad "a mktemp in factory.sh with no template"; echo "$m"; }
+[ -z "$m" ] && grep -q '\$(mktemp' $S && ok "every mktemp in fabrikito has an explicit template" || { bad "a mktemp in fabrikito with no template"; echo "$m"; }
 tp=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml render em)
 echo "$tp" | grep -qF 'mktemp "$TMPDIR/name.XXXXXX"' && echo "$tp" | grep -qF "EPERM there" && echo "$tp" | grep -qF "never work" && ok "a seat's prompt says where temp files go and that EPERM is reported, not worked around" || { bad "the prompt on temp files"; echo "$tp" | grep -n -i "temp\|EPERM"; }
 e2e_end=tmpdir # the last line: test/e2e.sh checks that the file ran to here

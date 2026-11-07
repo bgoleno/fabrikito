@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# End-to-end test of factory.sh in isolation: a private tmux server, a throwaway git repo,
+# End-to-end test of fabrikito in isolation: a private tmux server, a throwaway git repo,
 # and a stand-in `claude` compiled as a real binary named claude (the launcher's process check
 # looks at the process name). Worktrees go to a scratch folder on a REAL mounted volume
 # (TEST_VOLUME, required, e.g. /Volumes/MyDrive) so the mount check is exercised for real; the
@@ -7,7 +7,7 @@
 set -u
 [ -n "${TEST_VOLUME:-}" ] || { echo "set TEST_VOLUME to a mounted volume that can be written to, e.g. /Volumes/MyDrive" >&2; exit 64; }
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-S=$SRC/factory.sh
+S=$SRC/fabrikito
 # The scratch folder. Cases in settings.sh and skills.sh check that a rule is written for a path both as
 # configured ($T) and as its real path ($RT), so the two spellings must differ wherever TMPDIR is. They
 # used to differ only by luck, through the /var and /tmp symlinks on macOS, and a TMPDIR on a volume has
