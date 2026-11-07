@@ -1,11 +1,11 @@
 # Documentation
 
-Reference documentation for software-factory. The [README](../README.md) introduces the project.
+Reference documentation for fabrikito. The [README](../README.md) introduces the project.
 
 | Page | Read it to |
 |---|---|
 | [How it works](how-it-works.md) | See how the parts fit together: what `up` does, what a seat is made of, the hooks, how seats talk, the gate, progress notes and the plugin skills. |
-| [Commands](commands.md) | Install and run a team: requirements, every `factory.sh` command and option, which team file is used, throwaway teams, and the iTerm view. |
+| [Commands](commands.md) | Install and run a team: requirements, every `fabrikito` command and option, which team file is used, throwaway teams, and the iTerm view. |
 | [The team file](team-file.md) | Set up a team: what each part of the team file does, what is checked when it loads, and how a new worktree is prepared (`repo.copy`, `repo.bootstrap`). Every key is documented in [`teams/example.yaml`](../teams/example.yaml). |
 | [Right-sizing a team](right-sizing.md) | Decide how many seats to run, set effort and model per seat, and see what a team costs. |
 | [The factory plugin](plugin.md) | See how the factory's skills reach every seat, which skills run only when typed, and how the plugin is loaded and protected. |

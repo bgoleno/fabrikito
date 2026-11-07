@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# End-to-end test of factory.sh in isolation: a private tmux server, a throwaway git repo,
+# End-to-end test of fabrikito in isolation: a private tmux server, a throwaway git repo,
 # and a stand-in `claude` compiled as a real binary named claude (the launcher's process check
 # looks at the process name). Worktrees go to a scratch folder on a REAL mounted volume
 # (TEST_VOLUME, required, e.g. /Volumes/MyDrive) so the mount check is exercised for real; the
@@ -7,8 +7,24 @@
 set -u
 [ -n "${TEST_VOLUME:-}" ] || { echo "set TEST_VOLUME to a mounted volume that can be written to, e.g. /Volumes/MyDrive" >&2; exit 64; }
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-S=$SRC/factory.sh
-T=$(mktemp -d "${TMPDIR:-/tmp}/team-e2e.XXXX"); T=$(cd "$T" && pwd); mkdir -p $T/bin $T/tmux $T/local
+S=$SRC/fabrikito
+# The scratch folder. Cases in settings.sh and skills.sh check that a rule is written for a path both as
+# configured ($T) and as its real path ($RT), so the two spellings must differ wherever TMPDIR is. They
+# used to differ only by luck, through the /var and /tmp symlinks on macOS, and a TMPDIR on a volume has
+# none (#249). So $T always runs through a link of its own, made here: <scratch>/l -> r. Both stay under
+# TMPDIR and go when the scratch folder does. Remove $T_TOP, never $T: removing $T removes only the link.
+# tmux's socket is $T/tmux/tmux-<uid>/default in either spelling, and tmux 3.7b on macOS refuses a path
+# over 103 characters (File name too long, measured), which shows up as failures deep in the run. So a
+# TMPDIR too long for it, in either of its own spellings, is refused here, before anything is made.
+e2e_tmp=${TMPDIR:-/tmp}; e2e_tmp=${e2e_tmp%/}
+e2e_sock=/team-e2e.XXXX/l/tmux/tmux-$(id -u)/default; e2e_max=$((103 - ${#e2e_sock}))
+e2e_real=$(cd "$e2e_tmp" && pwd -P) || { echo "TMPDIR ($e2e_tmp) is not a folder this test can enter" >&2; exit 64; }
+for e2e_p in "$e2e_tmp" "$e2e_real"; do
+  [ ${#e2e_p} -le $e2e_max ] || { echo "TMPDIR is too long: $e2e_p has ${#e2e_p} characters and this test takes at most $e2e_max, because tmux's socket goes $e2e_sock below it (see docs/testing.md)" >&2; exit 64; }
+done
+T_TOP=$(mktemp -d "$e2e_tmp/team-e2e.XXXX") || { echo "cannot make a scratch folder under $e2e_tmp" >&2; exit 2; }
+mkdir "$T_TOP/r" && ln -s r "$T_TOP/l" && T=$(cd "$T_TOP/l" && pwd) || { echo "cannot make the scratch link under $T_TOP" >&2; exit 2; }
+T_TOP=${T%/l}; mkdir -p $T/bin $T/tmux $T/local
 ROOT="Projects/_teamtest-$$"; VOL=${TEST_VOLUME:-}
 # Start from a clean environment. Run from a seat, this shell inherits what the seat's launcher
 # and claude set there (DISABLE_AUTOUPDATER, TEAM_*, CLAUDE* including CLAUDE_CONFIG_DIR, TMUX*), and the test's tmux server
@@ -36,7 +52,7 @@ on_exit() {
   tmux kill-server 2>/dev/null
   [ -n "${LIVE_D:-}" ] && $SRC/test/live-env.sh down "$LIVE_D" 2>/dev/null
   for w in "$VOL/$ROOT"/*; do [ -d "$w" ] && git -C $T/repo worktree remove --force "$w" 2>/dev/null; done
-  rmdir "$VOL/$ROOT" 2>/dev/null; rm -rf "$T"
+  [ -n "${TD:-}" ] && rm -rf "$TD"; rmdir "$VOL/$ROOT" 2>/dev/null; rm -rf "$T_TOP"
   echo "ABORTED before the end (exit $rc): pass=${pass:-0} fail=${fail:-0}" >&2
   [ "$rc" -eq 0 ] && rc=1; exit "$rc"
 }
@@ -62,7 +78,7 @@ bad(){ echo "FAIL $1"; fail=$((fail+1)); e2e_blank "$1" || e2e_names="$e2e_names
 # return, continue or break ends the file (continue and break also act on the loop that sources it).
 # So each file's last line is e2e_end=<its name>, checked after it is sourced, and the list of files
 # that got there is checked after the loop, which catches the continue and break that skip the check.
-AREAS="launch settings say say-sender worktrees view delivery config skills warnings gate hooks claude-copy prompts live"
+AREAS="launch settings say say-sender worktrees tmpdir view delivery config skills warnings gate hooks claude-copy prompts live"
 E2E_DIR=$SRC/test/e2e
 for e2e_f in "$E2E_DIR"/*.sh; do e2e_a=${e2e_f##*/}; e2e_a=${e2e_a%.sh}; [ "$e2e_a" = lib ] && continue
   case " $AREAS " in *" $e2e_a "*) ;; *) echo "test/e2e/$e2e_a.sh is not in AREAS in test/e2e.sh: add it there, or it never runs" >&2; exit 2 ;; esac
@@ -147,7 +163,7 @@ echo "--- cleanup"
 $S -c $T/team.yaml down --yes >/dev/null 2>&1; tmux kill-server 2>/dev/null
 for w in team-w1 team-w2; do git -C $T/repo worktree remove --force $VOL/$ROOT/$w 2>/dev/null; git -C $T/repo worktree remove --force $T/repo/.claude/worktrees/$w 2>/dev/null; done
 rmdir $VOL/$ROOT 2>/dev/null; [ ! -e $VOL/$ROOT ] && ok "test folder removed from the volume" || bad "test folder removed from the volume ($(ls -A $VOL/$ROOT 2>&1 | head -3))"
-rm -rf "$T"
+rm -rf "$T_TOP"; [ ! -e "$T_TOP" ] && ok "the scratch folder under TMPDIR is removed, and the link in it" || bad "the scratch folder is still there: $T_TOP"
 # No two assertions may print the same name (#163). This is not an assertion itself, so the count stays
 # the number of assertions; each name printed more than once is one more failure.
 e2e_dup=$(printf '%s' "$e2e_names" | LC_ALL=C sort | LC_ALL=C uniq -d)

@@ -18,7 +18,7 @@ Where the two differ, the role prompt wins.
 ## When to use
 - After an incident is finished: a defect that shipped and was fixed, a day lost to something a rule
   would have saved, a review that passed what it should have caught (and was caught later).
-- Not while a fix is pending, not for a security finding (`factory:security-triage`), and not to
+- Not while a fix is pending, not for a security finding (`fabrikito:security-triage`), and not to
   write a rule nobody paid for.
 
 ## Steps

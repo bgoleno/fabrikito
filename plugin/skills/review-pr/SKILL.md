@@ -69,7 +69,7 @@ differ, the role prompt wins.
      hand: undo the fix in your detached worktree and run the test, then put each file you changed
      back with `git restore <path>` and check that `git status --porcelain` is empty.
    - A security engineer reviews per their role prompt instead: reachability first, then severity,
-     and each finding goes through `factory:security-triage` (step 7).
+     and each finding goes through `fabrikito:security-triage` (step 7).
    - For a change your role prompt calls risky, get the second opinion it describes. Give the
      reviewer the diff and the issue, not your conclusions, and check each of its findings yourself
      before you post it.
@@ -88,7 +88,7 @@ differ, the role prompt wins.
      waits for (another reviewer, qa, a merge with its base, the owner);
    - if the PR needs a reviewer its assignment record does not name, a line of its own
      `Requires: <role ids>`, naming only your roster's tech lead, QA and security roles.
-     `factory:merge-train` reads only that line to add a reviewer, never the prose. A request
+     `fabrikito:merge-train` reads only that line to add a reviewer, never the prose. A request
      with a condition ("sec, if ...") goes to the EM to record instead.
 
    A security finding held back as below goes in neither the file nor the PR, and nothing you
@@ -100,18 +100,18 @@ differ, the role prompt wins.
      prompt's fallback). Tell the author nothing about it: sec's triage decides who is told. Do
      not post READY while it is open. For each such point, once, post a marker: a PR comment
      whose whole text is the one line `<your role id>: one point sent to sec and the EM`
-     (`gh pr comment --body-file`), which `factory:merge-train` holds a merge on. A blocking point
+     (`gh pr comment --body-file`), which `fabrikito:merge-train` holds a merge on. A blocking point
      in your verdict gives only that marker's URL, on a line of its own,
-     `held point: <marker URL>`, with no class, file, line or severity: `factory:merge-train`
+     `held point: <marker URL>`, with no class, file, line or severity: `fabrikito:merge-train`
      reads that line. A later verdict that still has the point gives the same line and posts no
      new marker. Send `sec` and the EM the marker's URL with the point, so sec can match them.
    - **A marker posted by mistake** (a repeat, the wrong PR, or a point you now think is not a
      security finding) stays: tell `sec` and the EM it was a mistake, and why, with its URL. sec
      checks that it is one before clearing it with its clearance line
-     (`factory:security-triage` step 6). A marker on the wrong PR leaves the right PR without
+     (`fabrikito:security-triage` step 6). A marker on the wrong PR leaves the right PR without
      one: post one there too. Never delete or edit a marker: a train may already have seen its
      hold, and one that vanishes or changes reads as no hold.
-   - **The security engineer:** triage it with `factory:security-triage`. A low or ruled-out
+   - **The security engineer:** triage it with `fabrikito:security-triage`. A low or ruled-out
      finding may go in the verdict as that skill's step 6 says. A medium or higher (what your role
      prompt's rule 5 keeps out of public trackers) is held back, and the skill says who is told
      and when: the EM at once, privately, for the owner; the author privately when the fix
@@ -127,7 +127,7 @@ differ, the role prompt wins.
 10. **Leave your worktree clean:** nothing staged, and back where it was before the review
     (for example `git switch --detach origin/<base>`). Update your progress note if you keep one.
     Other seats read it and the session start shows it, so name a finding held back in step 7 only
-    as "one point sent to sec and the EM" (sec: the neutral label of `factory:security-triage`
+    as "one point sent to sec and the EM" (sec: the neutral label of `fabrikito:security-triage`
     step 9), never by its class, file or severity.
 
 ## What to report

@@ -1,18 +1,18 @@
-# The factory plugin
+# The fabrikito plugin
 
-The Claude Code plugin that carries the factory's skills into every seat, and how it is loaded.
+The Claude Code plugin that carries fabrikito's skills into every seat, and how it is loaded.
 
 `plugin/` is a Claude Code [plugin](https://code.claude.com/docs/en/plugins) (`.claude-plugin/plugin.json`
 and `skills/`) that `up` loads into every seat with `--plugin-dir <this checkout>/plugin`. Seats work in
 the target project's folders, where this repository's own `.claude/` is never read, so this is how the
-factory's skills reach them. Nothing is installed into your settings: a session the factory did not start
-does not have the plugin. Its skills are namespaced by the plugin name and show as `/factory:<skill>`.
+factory's skills reach them. Nothing is installed into your settings: a session fabrikito did not start
+does not have the plugin. Its skills are namespaced by the plugin name and show as `/fabrikito:<skill>`.
 
 ## Its skills
 
 Its skills are procedures for a role (assigning an issue, for example), loaded only when used instead of
 sitting in every prompt. The skill folders under [`plugin/skills/`](../plugin/skills/) are the list, and each
-skill's `description` says whom it is for and when to use it. `/factory:ping` only proves the plugin loaded.
+skill's `description` says whom it is for and when to use it. `/fabrikito:ping` only proves the plugin loaded.
 Every seat loads every skill. A skill reaches its role through its description and through that role's
 `skills:` in the team file (`teams/example.yaml` names each one where it belongs). Two skills run only
 when typed: see [Skills started by typing them](#skills-started-by-typing-them). A skill is the
@@ -22,17 +22,17 @@ checks every skill's frontmatter, so adding one needs no new test code.
 
 ### Skills started by typing them
 
-Two skills set `disable-model-invocation`: `/factory:ping` and `/factory:merge-train`. A seat cannot
+Two skills set `disable-model-invocation`: `/fabrikito:ping` and `/fabrikito:merge-train`. A seat cannot
 start them with its Skill tool; they run when typed as the session's own input. That is not a boundary:
 any process running as you can type into a seat's pane (see [Safety](../README.md#safety)). For
 `merge-train` the e2e fails if the flag is missing, and the skill's step 1 checks for itself that the
 command arrived as the session's own input, with no `[from ...]` label.
 
-The owner types `/factory:merge-train <PR> [<PR>...] [--dry-run]` in the engineering manager's pane, and
+The owner types `/fabrikito:merge-train <PR> [<PR>...] [--dry-run]` in the engineering manager's pane, and
 the EM merges those PRs in order, each at one pinned head, after gating it stacked on the ones before it,
 and stops at the first failure. The EM's prompt, [`roles/em.md`](../roles/em.md), also lets the EM follow
 the skill's steps under a standing instruction from the owner. When the EM may merge at all, and what a
-typed `/factory:merge-train` covers, are rules in that prompt; the skill is the procedure.
+typed `/fabrikito:merge-train` covers, are rules in that prompt; the skill is the procedure.
 
 ## Loading it
 
@@ -50,4 +50,4 @@ typed `/factory:merge-train` covers, are rules in that prompt; the skill is the 
   changes anything under `plugin/`, `plugin.json` included, gets a security review as well as the
   usual one.
 - Managed settings can turn `--plugin-dir` off (Claude Code's docs say so; not tried here), and then the
-  seats have no factory skills.
+  seats have no fabrikito skills.
