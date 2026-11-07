@@ -27,7 +27,7 @@ RT=$(cd $T && pwd -P); RSRC=$(cd $SRC && pwd -P); RW1=$(cd $VOL/$ROOT/team-w1 &&
 case $RT in "$e2e_real"/*) [ "$T" != "$RT" ] && ok "the scratch path has two spellings, both under TMPDIR" || bad "the scratch path has one spelling: $T" ;; *) bad "the scratch folder's real path $RT is not under TMPDIR $e2e_real" ;; esac
 missing=""
 for p in "$RT/state/settings/**" "$RT/state/launch/**" "$RT/state/prompts/**" "$RT/state/messages.log" "$RT/team.yaml" \
-  "$RSRC/roles/common.md" "$RSRC/factory.sh" "$RSRC/lib/**" "$RSRC/roles/**" "$RSRC/plugin/**" "$RT/bin/wrap" \
+  "$RSRC/roles/common.md" "$RSRC/fabrikito" "$RSRC/factory.sh" "$RSRC/lib/**" "$RSRC/roles/**" "$RSRC/plugin/**" "$RT/bin/wrap" \
   "$RT/repo/.claude/settings.json" "$RT/repo/.claude/settings.local.json" "$RT/repo/.claude/skills/**" "$RT/repo/.claude/agents/**" "$RT/repo/.claude/commands/**" \
   "$RT/repo/.mcp.json" "$RT/repo/.claude/hooks/**" "$RT/repo/.claude/CLAUDE.md" "$RT/repo/.claude/rules/**" \
   "$RW1/.claude/settings.json" "$RW1/.claude/settings.local.json" "$RHC/settings.json" "$RH/.claude.json" "$RHC/CLAUDE.md" \
@@ -71,16 +71,16 @@ chk=$($S -c $T/team.yaml check 2>&1)
 # release runs from its own checkout. Not read from $SRC, which may be an export with no .git (tl on
 # #191): a throwaway git checkout of copied files, with a lightweight tag (plain describe skips one),
 # then a change to a tracked file (-dirty). The team file in teams/ is untracked, so not dirty.
-mkdir -p $T/ginst/teams && cp -R $SRC/factory.sh $SRC/lib $SRC/roles $SRC/plugin $T/ginst/ && echo tracked > $T/ginst/VERSION
+mkdir -p $T/ginst/teams && cp -R $SRC/fabrikito $SRC/lib $SRC/roles $SRC/plugin $T/ginst/ && echo tracked > $T/ginst/VERSION
 gq() { git -C $T/ginst -c user.name=e2e -c user.email=e2e@example.invalid -c commit.gpgsign=false "$@" >/dev/null 2>&1; }
 gq init -q && gq add -A && gq commit -q -m release && gq tag v9.8.7 && cp $T/team.yaml $T/ginst/teams/team.yaml
-gl=$($T/ginst/factory.sh -c $T/ginst/teams/team.yaml check 2>&1 | grep "^install ")
+gl=$($T/ginst/fabrikito -c $T/ginst/teams/team.yaml check 2>&1 | grep "^install ")
 echo changed >> $T/ginst/VERSION
-gd=$($T/ginst/factory.sh -c $T/ginst/teams/team.yaml check 2>&1 | grep "^install ")
+gd=$($T/ginst/fabrikito -c $T/ginst/teams/team.yaml check 2>&1 | grep "^install ")
 [ "$gl" = "install   : $T/ginst at v9.8.7" ] && [ "$gd" = "install   : $T/ginst at v9.8.7-dirty" ] \
   && ok "check: the install line names the factory checkout and its tag (lightweight), with -dirty after a change" || { bad "check: install line in a git checkout"; echo "clean: $gl"; echo "dirty: $gd"; }
-mkdir -p $T/linst/teams; for p in factory.sh lib roles plugin; do ln -s $SRC/$p $T/linst/$p; done; cp $T/team.yaml $T/linst/teams/team.yaml
-$T/linst/factory.sh -c $T/linst/teams/team.yaml check 2>&1 | grep -qxF "install   : $T/linst (not a git checkout)" && ok "check: an install outside any git checkout says so" || { bad "check: install line outside git"; $T/linst/factory.sh -c $T/linst/teams/team.yaml check 2>&1 | grep -E "^(install|error)"; }
+mkdir -p $T/linst/teams; for p in fabrikito lib roles plugin; do ln -s $SRC/$p $T/linst/$p; done; cp $T/team.yaml $T/linst/teams/team.yaml
+$T/linst/fabrikito -c $T/linst/teams/team.yaml check 2>&1 | grep -qxF "install   : $T/linst (not a git checkout)" && ok "check: an install outside any git checkout says so" || { bad "check: install line outside git"; $T/linst/fabrikito -c $T/linst/teams/team.yaml check 2>&1 | grep -E "^(install|error)"; }
 echo "$chk" | grep -qxF "bootstrap : $T/bin/boot (run in each new worktree before its seat starts)" && echo "$chk" | grep -qxF "copy      : .env.local, conf/dev.json, missing.txt (from the main checkout into each new worktree)" && ok "check: bootstrap and copy lines" || { bad "check: bootstrap and copy lines"; echo "$chk" | grep -E "^(bootstrap|copy) "; }
 echo "$chk" | grep -qE "^em +Manager .* bypassPermissions " && echo "$chk" | grep -qE "^w1 +Worker One .* default " && ok "check: MODE column per role" || { bad "check MODE column"; echo "$chk"; }
 echo "$chk" | grep -qE "^w1 +Worker One +tt-w1 +sonnet +low " && echo "$chk" | grep -qE "^em +Manager +tt-em +\(inherit\) +\(inherit\) " \
@@ -178,7 +178,7 @@ echo "--- security-triage record folder (#138)"
 # folder (outside its working directory, so it would prompt otherwise), em may read it, and every
 # other seat is denied both, in both spellings. This team is the test team plus a sec role, and w2
 # lists the security-triage skill, which check warns about.
-sed 's/^  w2: { title: Worker Two, /  w2: { title: Worker Two, skills: ["factory:security-triage"], /' $T/team.yaml > $T/sec.yaml
+sed 's/^  w2: { title: Worker Two, /  w2: { title: Worker Two, skills: ["fabrikito:security-triage"], /' $T/team.yaml > $T/sec.yaml
 echo '  sec: { title: Security, workdir: { type: worktree }, prompt_text: "sec prompt" }' >> $T/sec.yaml
 # tset <team file> <role> <list>: that list of the role's generated settings, one rule a line.
 tset() { TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb "$1" settings "$2" | ruby -rjson -e 'puts((JSON.parse(STDIN.read)["permissions"] || {})[ARGV[0]] || [])' "$3"; }
@@ -230,8 +230,8 @@ tr '\n' ' ' < $SRC/plugin/skills/security-triage/SKILL.md | tr -s ' ' | grep -qF
 schk=$($S -c $T/sec.yaml check 2>&1); ssect() { echo "$schk" | sed -n "/^\[$1\]/,/^\[/p"; }
 ssect sec | grep -F "added: " | grep -qF ", Edit and Read allow on the triage record folder" && ssect em | grep -F "added: " | grep -qF ", Read allow and Edit deny on the triage record folder" \
   && ssect w1 | grep -F "added: " | grep -qF ", Edit and Read deny on the triage record folder" \
-  && echo "$schk" | grep -qxF "warning: w2 lists factory:security-triage, but only a role with id sec may write triage records ($T/state/triage/): every other seat may not write there." \
-  && ! echo "$schk" | grep -q "warning: sec lists factory:security-triage" \
+  && echo "$schk" | grep -qxF "warning: w2 lists fabrikito:security-triage, but only a role with id sec may write triage records ($T/state/triage/): every other seat may not write there." \
+  && ! echo "$schk" | grep -q "warning: sec lists fabrikito:security-triage" \
   && ok "check: the triage folder rules on each seat's added line, and a warning for w2, which lists the skill and is not sec" || { bad "check: triage folder"; ssect sec; ssect em; echo "$schk" | grep warning; }
 echo "--- other teams' state folders (#197)"
 # Two teams on one factory checkout, their state folders side by side in one state root ($X): each
@@ -274,7 +274,7 @@ echo "$xchk" | grep -qxF "other teams: $X/xb (found), $T/far/xc (listed; observe
   && xsect em | grep -F "added: " | grep -qF ", Read and Edit deny on 2 other teams' state folders" \
   && xsect w1 | grep -F "added: " | grep -qF ", Read and Edit deny on 2 other teams' state folders (observer of $T/far/xc: may read its log and notes)" \
   && ok "check: lists the other teams found and listed, the links it skipped and why (not a folder without team state), and the denies on each seat's added line" || { bad "check: other teams"; echo "$xchk" | grep -E "^(other teams|skipped)"; xsect w1 | grep added; }
-# A state root inside the team's own repository (a team working on software-factory keeps .state/ in
+# A state root inside the team's own repository (a team working on fabrikito keeps .state/ in
 # its checkout, tl on #200): a team found there, or listed there before it exists, is not "inside the
 # repository", so it still gets its denies.
 mkdir -p $T/repo/.state/me $T/repo/.state/other/settings $T/repo/.state/other/launch $T/repo/.state/other/prompts

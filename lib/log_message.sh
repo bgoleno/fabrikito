@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# PostToolUse and PostToolUseFailure hook on SendMessage that factory.sh puts in every seat's
+# PostToolUse and PostToolUseFailure hook on SendMessage that fabrikito puts in every seat's
 # generated settings (#39). It appends one line per native message to the team's messages.log in
 # say's format (README, "The message log"): time, sender role, recipient, outcome, message.
 #
