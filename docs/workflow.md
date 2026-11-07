@@ -77,7 +77,7 @@ Where each part lives:
 
 | Skill | What it holds |
 |---|---|
-| [`factory:review-pr`](../plugin/skills/review-pr/SKILL.md), step 7 | A reviewer's marker, its `held point:` line and a marker posted by mistake. |
-| [`factory:verify-behavior`](../plugin/skills/verify-behavior/SKILL.md), step 8 | The same for QA's report. |
-| [`factory:security-triage`](../plugin/skills/security-triage/SKILL.md), step 6 | `sec`'s own marker, and the clearance line. |
-| [`factory:merge-train`](../plugin/skills/merge-train/SKILL.md), step 5 | What holds a merge and what clears it, and the order by id. |
+| [`fabrikito:review-pr`](../plugin/skills/review-pr/SKILL.md), step 7 | A reviewer's marker, its `held point:` line and a marker posted by mistake. |
+| [`fabrikito:verify-behavior`](../plugin/skills/verify-behavior/SKILL.md), step 8 | The same for QA's report. |
+| [`fabrikito:security-triage`](../plugin/skills/security-triage/SKILL.md), step 6 | `sec`'s own marker, and the clearance line. |
+| [`fabrikito:merge-train`](../plugin/skills/merge-train/SKILL.md), step 5 | What holds a merge and what clears it, and the order by id. |
