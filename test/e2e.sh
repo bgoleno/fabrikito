@@ -78,7 +78,7 @@ bad(){ echo "FAIL $1"; fail=$((fail+1)); e2e_blank "$1" || e2e_names="$e2e_names
 # return, continue or break ends the file (continue and break also act on the loop that sources it).
 # So each file's last line is e2e_end=<its name>, checked after it is sourced, and the list of files
 # that got there is checked after the loop, which catches the continue and break that skip the check.
-AREAS="launch settings say say-sender worktrees tmpdir view delivery config skills warnings gate hooks claude-copy prompts live"
+AREAS="launch settings say say-sender worktrees tmpdir view delivery config skills warnings gate hooks claude-copy prompts audit live"
 E2E_DIR=$SRC/test/e2e
 for e2e_f in "$E2E_DIR"/*.sh; do e2e_a=${e2e_f##*/}; e2e_a=${e2e_a%.sh}; [ "$e2e_a" = lib ] && continue
   case " $AREAS " in *" $e2e_a "*) ;; *) echo "test/e2e/$e2e_a.sh is not in AREAS in test/e2e.sh: add it there, or it never runs" >&2; exit 2 ;; esac
