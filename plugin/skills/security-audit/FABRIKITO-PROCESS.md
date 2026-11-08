@@ -18,9 +18,13 @@ so. A seat that finds something sends it to `sec` and the EM; it does not run th
    that holds `notes/` and `triage/` (step 8), outside every worktree. Only `sec` writes it.
 2. The upstream default under the home directory, and the option of a directory inside the target, do not
    apply here.
-3. Pre-flight, before anything is written. Resolve the path to an absolute one. Run
-   `git -C <dir> rev-parse --show-toplevel` on the directory and on each parent of it that exists. If any
-   answer succeeds (the path is inside a work tree), stop: choose another path or ask the EM.
+3. Pre-flight, before anything is written. Resolve the run path to a real path (symlinks resolved, so a
+   link into a worktree is caught). Stop, and choose another path or ask the EM, if it is inside the
+   target's work tree or inside any worktree of the target: compare it with
+   `git -C <target> rev-parse --show-toplevel` and with each `worktree` path from
+   `git -C <target> worktree list --porcelain`, all as real paths. This includes a target that is this
+   repository while the state folder is inside it. A git-ignored state folder that belongs to an unrelated
+   checkout is fine: being inside some repository is not the test, being inside the target is.
 4. Scratch directories stay under the run folder, as the upstream text says. Never `/tmp` or the home
    directory.
 5. Take the target from a pinned commit read with `git show` or `git archive` into a throwaway folder
@@ -37,7 +41,9 @@ so. A seat that finds something sends it to `sec` and the EM; it does not run th
    step 3. The audit's severity is an input; step 5 re-rates it for this deployment.
 4. Then send one message to the EM for each finding rated medium or higher, with the path of its triage
    record (step 6). Lows go by step 6 as well. The audit's own `REPORT.md` is never what you send.
-5. An unfixed medium or higher is never disclosed by this skill. The private fix path and the condition
+5. The agents are briefed from the methodology files, which do not mention these rules. The parent copies
+   rules 1.4, 2.2 and 4.1 into every hunter and verifier brief.
+6. An unfixed medium or higher is never disclosed by this skill. The private fix path and the condition
    for disclosure are step 7's.
 
 ## Rule 3. When a full audit may run
