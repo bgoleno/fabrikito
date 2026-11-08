@@ -1,7 +1,7 @@
 ---
 name: security-audit
 # fabrikito change: see UPSTREAM.md (the description below)
-description: "For sec only: security guidance and vulnerability review for codebases, APIs, services, CLI tools, libraries, and daemons. Guidance mode by default; the complete audit only with the owner's say-so through the EM, as FABRIKITO-PROCESS.md says. Other seats do not use this skill: send a finding to sec and the EM."
+description: "For sec only: security guidance and vulnerability review of source code. Guidance mode by default; the complete audit only with the owner's say-so through the EM (see FABRIKITO-PROCESS.md). Other seats send a finding to sec and the EM."
 ---
 
 # Security Audit
