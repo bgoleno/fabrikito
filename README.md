@@ -78,6 +78,10 @@ See [Testing](docs/testing.md).
 
 Apache License 2.0. See LICENSE.
 
+The `security-audit` plugin skill is a modified copy of Cloudflare's
+[security-audit-skill](https://github.com/cloudflare/security-audit-skill) (MIT); see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 ## Messaging, safety and updating
 
 The sections below hold the reference for messaging, safety and updating Claude Code. They are moving to
