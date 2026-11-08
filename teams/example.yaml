@@ -315,6 +315,7 @@ roles:
       - "fabrikito:review-pr": to review a PR at its exact head and post one verdict
       - "fabrikito:security-triage": when a finding, alert or report reaches you, before it is written anywhere
       - "security-review": to review a branch's pending changes for security issues
+      - "fabrikito:security-audit": for a security audit, pen test or focused vulnerability review of a codebase; use its guidance mode unless the owner asks for a full audit
     permissions:
       deny:
         - Bash(gh pr merge *)
