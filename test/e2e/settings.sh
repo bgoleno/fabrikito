@@ -329,6 +329,10 @@ edn=$(ruby $SRC/lib/team_config.rb $T/v.yaml settings em 2>&1 | ruby -rjson -e '
   && ! printf '%s\n' "$est" "$esay" | grep -qF "other_teams:" && printf '%s\n' "$edn" | grep -qxF "Edit(/$T/far/empty/**)" && printf '%s\n' "$edn" | grep -qxF "Read(/$T/far/dsonly/messages.log)" \
   && ok "other_teams: an empty folder (or one with only .DS_Store) is accepted like a missing one; check names it, and status and say still load" || { bad "other_teams: an empty folder (rc=$rc status=$erc)"; printf '%s\n' "$echk" "$est" "$esay" | grep -E "^(other teams|error)|other_teams:" | head -4; }
 reject "other_teams: a folder holding only a hidden file other than .DS_Store" "other_teams: $T/far/hidden is not a team's state folder" "" "other_teams: [{ state: $T/far/hidden }]"
+# .DS_Store is ignored only as a regular file (#229): a sub-folder or a link of that name is content.
+mkdir -p $T/far/dsdir/.DS_Store $T/far/dslink && : > $T/far/dslink-target && ln -s ../dslink-target $T/far/dslink/.DS_Store
+reject "other_teams: a folder whose only entry is a sub-folder named .DS_Store" "other_teams: $T/far/dsdir is not a team's state folder" "" "other_teams: [{ state: $T/far/dsdir }]"
+reject "other_teams: a folder whose only entry is a link named .DS_Store" "other_teams: $T/far/dslink is not a team's state folder" "" "other_teams: [{ state: $T/far/dslink }]"
 # An empty folder inside this team's own work is still refused, as a missing one is (tl on #204).
 mkdir -p $T/repo/emptyst
 reject "other_teams: an empty folder in the repo" "other_teams: $T/repo/emptyst is, holds or sits inside this team's repository (repo.path)" "" "other_teams: [{ state: $T/repo/emptyst }]"

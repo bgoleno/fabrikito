@@ -744,8 +744,10 @@ class TeamConfig
   end
 
   # An existing folder with nothing in it but a lone .DS_Store (#204): that team has not run up yet.
+  # The .DS_Store is ignored only as a regular file: a sub-folder or a link of that name is content
+  # (#229), and a link could lead anywhere (lstat does not follow it).
   def empty_dir?(path)
-    File.directory?(path) && (Dir.children(path) - ['.DS_Store']).empty?
+    File.directory?(path) && Dir.children(path).all? { |n| n == '.DS_Store' && File.lstat(File.join(path, n)).file? }
   rescue SystemCallError
     false
   end
