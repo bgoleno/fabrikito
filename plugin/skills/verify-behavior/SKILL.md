@@ -119,6 +119,27 @@ them in for one PR, and does not restate them. Where the two differ, the role pr
     `to` set to the seat's session name; use the role prompt's `say` fallback only where it says
     to. Update your progress note if you keep one.
 
+## A follow-up about a head you already checked
+A note after your report (an answer, a clarification, an extra observation) can stop a merge:
+`fabrikito:merge-train` step 5 stops and asks when a required reviewer posts a comment that names the
+head after that reviewer's latest verdict and the comment is not itself a verdict. A QA report is a
+verdict only by its first line, so post the note in one of these two forms, and in no other:
+- **Without the head.** Name no commit of the PR (no SHA of 7 or more characters, in any spelling),
+  and point at your report by its comment URL. This is for a note that changes nothing about its
+  result.
+- **As a new report.** Post a whole report as step 8 gives it: first line
+  `## QA check of #<n> at <short sha>: pass` (or `fail`, or `could not check`) for the head you now
+  judge, then the line that starts with your role id, then what changed since your earlier report
+  and what you relied on from it. It becomes your latest check for that head, so say `pass` only if
+  you would still say it with the note taken into account. A follow-up that finds a blocker is
+  `fail`, and that stops the train: `fabrikito:merge-train` lets a later pass at the same head by the
+  same seat supersede it, and nothing else. Repeat any `held point:` line your earlier report had.
+
+This changes nothing about what stops a merge. A follow-up in neither form is still a stop, and the
+EM reports it to the owner plainly; do not reword a comment to slip past the check. Never edit or
+delete a comment you posted before (a train may already have read it): post a new one. A follow-up
+about a different head than the one you checked needs the whole skill at that head.
+
 ## What to report
 In your session: the PR, the head, the result line, the comment's URL, and what you cleaned up.
 

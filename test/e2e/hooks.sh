@@ -102,6 +102,27 @@ smraw '{"hook_event_name":"PostToolUse","tool_name":"SendMessage","tool_input":{
 # A message that is not a string is logged as its JSON text.
 smraw '{"hook_event_name":"PostToolUse","tool_name":"SendMessage","tool_input":{"to":"tt-w2","message":{"a":[1,"b"]}},"tool_response":{"success":true}}'
 [ $rc = 0 ] && [ "$(printf '%s\n' "$line" | cut -f5)" = '{"a":[1,"b"]}' ] && ok "SendMessage log: a message that is not a string is logged as JSON" || { bad "non-string message"; echo "$line"; }
+# A call with notify_when_idle and no message sends nothing (#247): it is logged as a subscription,
+# not as an empty message sent. Every other call keeps its line byte for byte.
+swatch() { printf '%s' "{\"hook_event_name\":\"${2:-PostToolUse}\",\"tool_name\":\"SendMessage\",\"tool_input\":$1,\"tool_response\":{\"success\":true},\"error\":\"boom\"}" ; }
+smraw "$(swatch '{"to":"tt-w2","notify_when_idle":true}')"
+[ $rc = 0 ] && [ -z "$out" ] && [ "$(printf '%s\n' "$line" | cut -f2-5)" = $'w9\tw2\tNOTIFY-WHEN-IDLE\t<no message: notify when idle>' ] \
+  && ok "SendMessage log: notify_when_idle with no message is logged as a subscription, not an empty message sent" || { bad "notify-only subscription (rc=$rc)"; echo "$line"; }
+smraw "$(swatch '{"to":"tt-w2","message":"","notify_when_idle":true}')"
+[ $rc = 0 ] && [ "$(printf '%s\n' "$line" | cut -f2-5)" = $'w9\tw2\tNOTIFY-WHEN-IDLE\t<no message: notify when idle>' ] \
+  && ok "SendMessage log: notify_when_idle with an empty message is logged as a subscription too" || { bad "notify with empty message"; echo "$line"; }
+smraw "$(swatch '{"to":"tt-w2","notify_when_idle":true}' PostToolUseFailure)"
+[ $rc = 0 ] && [ "$(printf '%s\n' "$line" | cut -f2-5)" = $'w9\tw2\tNOT-SENT\t<no message: notify when idle>' ] \
+  && ok "SendMessage log: a failed notify-only call is NOT-SENT, with the placeholder" || { bad "failed notify-only"; echo "$line"; }
+smraw "$(swatch '{"to":"tt-w2","message":"real text","notify_when_idle":true}')"
+[ $rc = 0 ] && [ "$(printf '%s\n' "$line" | cut -f2-5)" = $'w9\tw2\tsent\treal text' ] \
+  && ok "SendMessage log: a message sent with notify_when_idle is logged as before" || { bad "message with notify"; echo "$line"; }
+smraw "$(swatch '{"to":"tt-w2"}')"
+[ $rc = 0 ] && [ "$(printf '%s\n' "$line" | cut -f2-5)" = $'w9\tw2\tsent\t' ] \
+  && ok "SendMessage log: a call with no message and no notify_when_idle is logged as before (empty)" || { bad "no message, no notify"; echo "$line"; }
+smraw "$(swatch '{"to":"tt-w2","message":"<no message: notify when idle>"}')"
+[ $rc = 0 ] && [ "$(printf '%s\n' "$line" | cut -f2-5)" = $'w9\tw2\tsent\t<no message: notify when idle>' ] \
+  && ok "SendMessage log: a message that spells the placeholder is still outcome sent, not a subscription" || { bad "placeholder spelled by a message"; echo "$line"; }
 # Input that still cannot be read is logged as a placeholder line, so a message never goes unrecorded.
 smraw 'not json'
 [ $rc = 0 ] && [ -z "$out" ] && [ "$(printf '%s\n' "$line" | cut -f2-5)" = $'w9\t?\tUNREADABLE\t<hook input could not be read>' ] \
