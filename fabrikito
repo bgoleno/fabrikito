@@ -54,7 +54,7 @@ src=${BASH_SOURCE[0]} hops=0
 while [ -L "$src" ]; do
   hops=$((hops + 1))
   [ "$hops" -le 40 ] || { echo "error: too many symbolic links (a loop?) resolving $0" >&2; exit 1; }
-  d=$(cd "$(dirname "$src")" && pwd)
+  d=$(cd -P "$(dirname "$src")" && pwd -P) # physical, so a target with .. resolves as the kernel does
   src=$(readlink "$src")
   case $src in /*) ;; *) src=$d/$src ;; esac
 done
