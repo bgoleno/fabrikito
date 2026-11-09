@@ -4,7 +4,7 @@ The Claude Code plugin that carries fabrikito's skills into every seat, and how 
 
 `plugin/` is a Claude Code [plugin](https://code.claude.com/docs/en/plugins) (`.claude-plugin/plugin.json`
 and `skills/`) that `up` loads into every seat with `--plugin-dir <this checkout>/plugin`. Seats work in
-the target project's folders, where this repository's own `.claude/` is never read, so this is how the
+the target project's folders, where this repository's own `.claude/` is never read, so this is how
 fabrikito's skills reach them. Nothing is installed into your settings: a session fabrikito did not start
 does not have the plugin. Its skills are namespaced by the plugin name and show as `/fabrikito:<skill>`.
 
