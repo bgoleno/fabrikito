@@ -7,7 +7,7 @@ of seats that are working, and with how long each works. Coding has fewer truly 
 seems: three focused seats often get more done than five scattered ones, and a team of three to five is
 a good start.
 
-- Start only the seats a task needs: `./factory.sh up em tl fs1`. Add one later with `up fs2`, and stop
+- Start only the seats a task needs: `./fabrikito up em tl fs1`. Add one later with `up fs2`, and stop
   one that is done with `down --yes fs2` (its worktree is kept).
 - An idle seat spends little (Claude Code's session recap and idle compaction can still use some
   tokens). A message delivered to it starts a turn that sends its whole conversation again, so a seat
@@ -15,7 +15,7 @@ a good start.
 - Effort is the main cost and depth control (`effort` per role, or `sessions.claude.effort` for all).
   The example team runs the manager at `medium` and the seats that write, test and review code at
   `high`; keep `max` for a hard problem a seat works on unattended, such as a security hunt. A `model`
-  per role works the same way. `./factory.sh check` shows each seat's model and effort, and
+  per role works the same way. `./fabrikito check` shows each seat's model and effort, and
   `(inherit)` where the seat takes them from `~/.claude/settings.json`.
 - To see what a team costs, run `/usage` in a seat. Its Session block counts that seat's own tokens
   (its dollar figure is a list-price estimate, meaningful on API billing). On a subscription it also

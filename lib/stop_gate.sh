@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Stop hook that factory.sh puts in the generated settings of a role with gate_on_stop. When the
+# Stop hook that fabrikito puts in the generated settings of a role with gate_on_stop. When the
 # seat ends a turn with uncommitted changes in its working tree, it runs the repo's gate. If the
 # gate fails, it exits 2, and Claude Code sends the seat back to work with stderr as the reason.
 #
@@ -55,6 +55,34 @@ unreadable=""
 if ! git_err=$(g rev-parse --is-inside-work-tree 2>&1 >/dev/null); then
   repo=$(dotgit) || exit 0
   unreadable="git cannot read the repository at $repo: $(printf '%s\n' "$git_err" | head -n 1)"
+fi
+# The hook writes gate/, the log and the count, and trusts the count: a planted one could let a stop
+# through without the gate. up refuses a link at gate/ (#174), but a seat could put one there, or at
+# either file, after up, and mkdir -p, > and read all follow it (#194, sec on #174). So a link, or
+# anything other than a folder or a regular file, at any of them is refused: no gate runs and
+# nothing is written. Fail closed: the seat is sent back, told to report it. In a turn the hook has
+# already sent back, the stop goes through with a stopReason instead, as without its count the hook
+# cannot end that loop itself. Not atomic with the writes below; only a seat could make the link.
+unsafe=""
+if [ -L "$dir" ] || { [ -e "$dir" ] && [ ! -d "$dir" ]; }; then
+  unsafe=$dir
+else
+  for p in "$log" "$count"; do
+    # A hard link is a regular file that shares its data with another name: the real log and count
+    # never have a second link (tl and sec on #206).
+    if [ -L "$p" ] || { [ -e "$p" ] && [ ! -f "$p" ]; } || { [ -f "$p" ] && [ "$(stat -f %l "$p" 2>/dev/null || echo 1)" -gt 1 ]; }; then
+      unsafe=$p && break
+    fi
+  done
+fi
+if [ -n "$unsafe" ]; then
+  why="The stop gate did not run: $unsafe is a symlink, a hard link, or not a regular file or folder, and the hook does not write or read its state through one (#194). Report it to the EM: only a seat could have put it there, and it is removed by its exact path."
+  if [ "$active" = true ]; then
+    ruby -rjson -e 'puts JSON.generate("continue" => false, "stopReason" => ARGV[0])' "$why"
+    exit 0
+  fi
+  echo "$why" >&2
+  exit 2
 fi
 mkdir -p "$dir"
 # Only uncommitted work is gated (untracked files count; ignored ones do not). Committed work is

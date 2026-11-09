@@ -46,9 +46,9 @@ lt CDPATH=/ TMUX_TMPDIR=tmp sh -c 'cd / && exec "$@"' sh $S -c $T/lt.yaml up --n
 refused_default && ok "up refuses a relative TMUX_TMPDIR that resolves to /tmp, with CDPATH set" || { bad "up with CDPATH and a relative TMUX_TMPDIR (rc=$rc, calls=$calls)"; echo "$out"; }
 lt $S -c $T/lt.yaml up --no-view --default-socket
 [ "$calls" -gt 0 ] && ! echo "$out" | grep -qF "default tmux server" && ok "up --default-socket goes ahead on the default server" || { bad "up --default-socket (rc=$rc, calls=$calls)"; echo "$out"; }
-# a team file in teams/ next to factory.sh: an install of links under $T, so nothing is written in the checkout
-mkdir -p $T/inst/teams; for p in factory.sh lib roles plugin; do ln -s $SRC/$p $T/inst/$p; done; cp $T/lt.yaml $T/inst/teams/lt.yaml
-lt $T/inst/factory.sh -c $T/inst/teams/lt.yaml up --no-view
+# a team file in teams/ next to fabrikito: an install of links under $T, so nothing is written in the checkout
+mkdir -p $T/inst/teams; for p in fabrikito lib roles plugin; do ln -s $SRC/$p $T/inst/$p; done; cp $T/lt.yaml $T/inst/teams/lt.yaml
+lt $T/inst/fabrikito -c $T/inst/teams/lt.yaml up --no-view
 [ "$calls" -gt 0 ] && ! echo "$out" | grep -qF "default tmux server" && ok "up goes ahead on the default server for a team file in teams/" || { bad "up for a team file in teams/ (rc=$rc, calls=$calls)"; echo "$out"; }
 # The same rule for down (with and without --yes), say, attach and view (#105). A team of two
 # stand-in seats (fw-fa, fw-fb) runs on the e2e's private server. A copy of its team file outside
@@ -80,9 +80,9 @@ done
 # The owner's real team file (in teams/) works on the default server as before, and --default-socket
 # lets a team that is meant to run there through. None of these kills a seat or opens iTerm.
 cp $T/fw.yaml $T/inst/teams/fw.yaml
-fw $T/inst/factory.sh -c $T/inst/teams/fw.yaml down
+fw $T/inst/fabrikito -c $T/inst/teams/fw.yaml down
 [ "$calls" -gt 0 ] && echo "$out" | grep -qF "would kill fa (fw-fa)" && [ "$(seats)" = "$before" ] && ok "down for a team file in teams/ goes ahead on the default server (would kill, nothing killed)" || { bad "down for a team file in teams/ (rc=$rc, calls=$calls)"; echo "$out"; }
-fw $T/inst/factory.sh -c $T/inst/teams/fw.yaml attach fa
+fw $T/inst/fabrikito -c $T/inst/teams/fw.yaml attach fa
 [ "$calls" -gt 0 ] && ! echo "$out" | grep -qF "default tmux server" && ok "attach for a team file in teams/ goes ahead on the default server" || { bad "attach for a team file in teams/ (rc=$rc, calls=$calls)"; echo "$out"; }
 fw $S -c $T/copy.yaml down --default-socket
 [ "$calls" -gt 0 ] && echo "$out" | grep -qF "would kill fa (fw-fa)" && [ "$(seats)" = "$before" ] && ok "down --default-socket goes ahead on the default server" || { bad "down --default-socket (rc=$rc, calls=$calls)"; echo "$out"; }
@@ -92,7 +92,7 @@ fw $S -c $T/copy.yaml view --print --default-socket
 [ $rc = 0 ] && echo "$out" | grep -qF "fw-fa" && ok "view --print --default-socket goes ahead on the default server" || { bad "view --print --default-socket (rc=$rc)"; echo "$out" | head -3; }
 fw $S -c $T/copy.yaml say --default-socket fb hello-from-the-default-socket
 ! echo "$out" | grep -qF "default tmux server" && [ "$calls" -gt 0 ] && ok "say --default-socket goes ahead on the default server" || { bad "say --default-socket (rc=$rc, calls=$calls)"; echo "$out"; }
-fw $T/inst/factory.sh -c $T/inst/teams/fw.yaml titles
+fw $T/inst/fabrikito -c $T/inst/teams/fw.yaml titles
 [ $rc = 0 ] && echo "$out" | grep -qF "set the terminal title of 2 running seat(s)" && [ "$(ttl)" = "$tb" ] && ok "titles for a team file in teams/ goes ahead on the default server" || { bad "titles for a team file in teams/ (rc=$rc, calls=$calls)"; echo "$out"; }
 fw $S -c $T/copy.yaml titles --default-socket
 [ $rc = 0 ] && ttl | grep -qxF "fa | COPY-A | fw-fa" && ok "titles --default-socket goes ahead on the default server (the copy's titles are set)" || { bad "titles --default-socket (rc=$rc, calls=$calls)"; echo "$out"; ttl; }
@@ -104,7 +104,7 @@ le=$(env -u TMUX $LE new 2>&1); rc=$?
 lereal=$(cd "$le" 2>/dev/null && pwd -P)
 got=$(TMUX=$DEFSOCK,1,0 TMUX_TMPDIR=/tmp TEAM_STATE_DIR=/somewhere $LE run "$le" sh -c 'printf "%s|%s|%s|%s" "${TMUX-unset}" "$TMUX_TMPDIR" "$TEAM_STATE_DIR" "$TEAM_VIEW"' 2>&1)
 [ "$got" = "unset|$lereal/tmux|$lereal/state|0" ] && ok "live-env run: TMUX unset, TMUX_TMPDIR and TEAM_STATE_DIR (resolved) in the environment, TEAM_VIEW=0, whatever the caller had" || bad "live-env run environment: $got"
-# A seat has its real team in TEAM_CONFIG, which factory.sh uses when -c is missing: run must drop it.
+# A seat has its real team in TEAM_CONFIG, which fabrikito uses when -c is missing: run must drop it.
 # Its role gives way to the driver label live-test (#115).
 got=$(TEAM_CONFIG=$T/team.yaml TEAM_ROLE=em TEAM_SCRIPT=$S $LE run "$le" sh -c 'printf "%s|%s|%s" "${TEAM_CONFIG-unset}" "${TEAM_ROLE-unset}" "${TEAM_SCRIPT-unset}"' 2>&1)
 [ "$got" = "unset|live-test|unset" ] && ok "live-env run: TEAM_CONFIG and TEAM_SCRIPT of the calling seat are unset, and TEAM_ROLE is live-test" || bad "live-env run seat variables: $got"
@@ -154,4 +154,12 @@ rm -f $T/le4link; [ -e "$le4" ] && $LE down "$le4" >/dev/null 2>&1
 srvsock="$(cd "$le/tmux" && pwd -P)/tmux-$(id -u)/default"
 out=$($LE down "$le" 2>&1); rc=$?
 [ $rc = 0 ] && [ ! -e "$le" ] && [ ! -e "$le2" ] && ! tmux -S "$srvsock" has-session 2>/dev/null && ok "live-env down stops the private server and removes the folder" || { bad "live-env down (rc=$rc)"; echo "$out"; ls -la "$le" 2>&1 | head -3; }
+# test/e2e.sh refuses a TMPDIR too long for tmux's socket, before it makes anything (#249). The stand-in
+# mktemp first on PATH fails and logs: without the refusal, this nested run stops at once instead of
+# running the whole test again, and the log shows it got past the check.
+E2L=$T/$(printf 'x%.0s' $(seq 1 110)); mkdir -p $E2L $T/nomktemp
+printf '#!/bin/sh\necho "$*" >> %s/nomktemp.log\nexit 1\n' $T > $T/nomktemp/mktemp; chmod +x $T/nomktemp/mktemp
+out=$(PATH=$T/nomktemp:$PATH TMPDIR=$E2L TEST_VOLUME=$VOL $SRC/test/e2e.sh 2>&1); rc=$?
+[ $rc = 64 ] && echo "$out" | grep -qF "TMPDIR is too long" && echo "$out" | grep -qF "takes at most $e2e_max" && [ ! -e $T/nomktemp.log ] && [ -z "$(ls -A $E2L)" ] \
+  && ok "test/e2e.sh refuses a TMPDIR too long for tmux's socket, says the longest it takes, and makes nothing" || { bad "test/e2e.sh with a TMPDIR too long (rc=$rc)"; echo "$out" | tail -3; }
 e2e_end=live # the last line: test/e2e.sh checks that the file ran to here

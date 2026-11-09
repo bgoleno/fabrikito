@@ -97,13 +97,13 @@ E=$E P="$T/proj$E" ruby -pe '$_ = "owner: \"Zo#{ENV["E"]}\"\n" + $_ if $_.start_
 # rn <C | none> <command> [VAR=value ...]: team_config.rb on that team under LC_ALL=C, or with no
 # locale at all (env -i: no LANG, no LC_*), with non-ASCII values for the variables it reads.
 rn() { local l=$1 c=$2; shift 2
-  set -- HOME="$T/home$E" TEAM_STATE_DIR="$T/state$E" TEAM_SCRIPT="$T/dir$E/factory.sh" TEAM_LOG="$T/state$E/messages.log" \
+  set -- HOME="$T/home$E" TEAM_STATE_DIR="$T/state$E" TEAM_SCRIPT="$T/dir$E/fabrikito" TEAM_LOG="$T/state$E/messages.log" \
     CLAUDE_CONFIG_DIR="$T/home$E/.claude" "$@"
   # PATH is passed as one word: it can hold spaces.
   if [ $l = C ]; then env LC_ALL=C "$@" ruby $SRC/lib/team_config.rb "$NT" $c em 2>&1
   else env -i PATH="$PATH" "$@" ruby $SRC/lib/team_config.rb "$NT" $c em 2>&1; fi; }
 for l in C none; do
-  out=$(rn $l render); echo "$out" | grep -qxF "em Zo$E $T/proj$E $T/dir$E/factory.sh $T/state$E/messages.log" \
+  out=$(rn $l render); echo "$out" | grep -qxF "em Zo$E $T/proj$E $T/dir$E/fabrikito $T/state$E/messages.log" \
     && ok "non-ASCII owner, workdir, TEAM_SCRIPT and TEAM_LOG render byte for byte ($l)" || { bad "non-ASCII render ($l)"; echo "$out" | tail -2; }
   out=$(rn $l kickoff); echo "$out" | grep -qF "or Zo$E." && ok "the kickoff names the non-ASCII owner ($l)" || { bad "non-ASCII kickoff ($l)"; echo "$out" | tail -2; }
   out=$(rn $l settings); echo "$out" | ruby -rjson -e 'd = JSON.parse(STDIN.read)["permissions"]["deny"]; exit(ARGV.all? { |w| d.include?(w) } ? 0 : 1)' \
@@ -112,7 +112,7 @@ for l in C none; do
   out=$(rn $l permissions_report); [ $? = 0 ] && echo "$out" | grep -qF "[em]" && ok "check's permission report with a non-ASCII home ($l)" || { bad "non-ASCII permissions_report ($l)"; echo "$out" | tail -2; }
 done
 # Invalid UTF-8 from outside is an error that names where it came from, not a Ruby backtrace.
-out=$(rn C render TEAM_SCRIPT=$'/x/\xff/factory.sh'); [ $? != 0 ] && echo "$out" | grep -qF "the environment variable TEAM_SCRIPT is not valid UTF-8" && ! echo "$out" | grep -q "Error)" \
+out=$(rn C render TEAM_SCRIPT=$'/x/\xff/fabrikito'); [ $? != 0 ] && echo "$out" | grep -qF "the environment variable TEAM_SCRIPT is not valid UTF-8" && ! echo "$out" | grep -q "Error)" \
   && ok "an environment value that is not UTF-8 is refused, naming the variable" || { bad "invalid TEAM_SCRIPT"; echo "$out" | tail -2; }
 out=$(rn none settings HOME=$'/tmp/x\xff'); [ $? != 0 ] && echo "$out" | grep -qF "the home folder (HOME) is not valid UTF-8" && ! echo "$out" | grep -q "Error)" \
   && ok "a home folder that is not UTF-8 is refused, naming HOME" || { bad "invalid HOME"; echo "$out" | tail -2; }
@@ -129,4 +129,22 @@ n=$(wc -l < $T/state/messages.log)
 TEAM_ROLE=$'e\tm\nx' $S -c $T/team.yaml say w2 "from an odd sender" >/dev/null 2>&1
 [ "$(wc -l < $T/state/messages.log)" -eq $((n + 1)) ] && [ "$(tail -1 $T/state/messages.log | cut -f2-5)" = 'e\tm\nx	w2	NOT-DELIVERED	from an odd sender' ] &&
   ok "log: a TEAM_ROLE with a tab and a newline is escaped, one line" || { bad "log: odd TEAM_ROLE"; tail -2 $T/state/messages.log | od -c | head -6; }
+echo "--- say never writes messages.log through a link (#194)"
+# A seat could put a link at messages.log after up; every say's line would then be appended
+# wherever it points. say refuses before it delivers (fail closed) and says the line was not
+# written. The link points at a sentinel, which must come out byte for byte as it went in.
+printf 'sentinel log\n' > $T/sent-log; cp $T/sent-log $T/sent-log.want
+mv $T/state/messages.log $T/msglog.real && ln -s $T/sent-log $T/state/messages.log
+lout=$(TEAM_ROLE=em $S -c $T/team.yaml say w1 "through a linked log" 2>&1); rc=$?; sleep 1
+rm $T/state/messages.log && mv $T/msglog.real $T/state/messages.log
+[ $rc != 0 ] && cmp -s $T/sent-log $T/sent-log.want && echo "$lout" | grep -qF "$T/state/messages.log is a symlink" && echo "$lout" | grep -qF "could not be written" \
+  && tmux has-session -t '=tt-w1' 2>/dev/null && ! tmux capture-pane -p -t '=tt-w1:' | grep -q "through a linked log" \
+  && ok "say: a link at messages.log is refused, nothing is delivered or written through it, and say says the line was not written" || { bad "say through a linked log (rc=$rc)"; echo "$lout"; cat $T/sent-log; }
+# A hard link is a regular file to [ -L ], [ -p ] and [ -f ] (tl on #206): say refuses a second link.
+mv $T/state/messages.log $T/msglog.real && ln $T/sent-log $T/state/messages.log
+lout=$(TEAM_ROLE=em $S -c $T/team.yaml say w1 "through a hard-linked log" 2>&1); rc=$?; sleep 1
+rm $T/state/messages.log && mv $T/msglog.real $T/state/messages.log
+[ $rc != 0 ] && cmp -s $T/sent-log $T/sent-log.want && echo "$lout" | grep -qF "$T/state/messages.log is a symlink, a FIFO or a hard link" && echo "$lout" | grep -qF "could not be written" \
+  && tmux has-session -t '=tt-w1' 2>/dev/null && ! tmux capture-pane -p -t '=tt-w1:' | grep -q "through a hard-linked log" \
+  && ok "say: a hard link at messages.log is refused, nothing is delivered or written through it, and say says the line was not written" || { bad "say through a hard-linked log (rc=$rc)"; echo "$lout"; cat $T/sent-log; }
 e2e_end=say # the last line: test/e2e.sh checks that the file ran to here

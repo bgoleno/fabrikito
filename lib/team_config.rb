@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Answers the questions factory.sh asks about a team definition file.
+# Answers the questions fabrikito asks about a team definition file.
 #
 #   team_config.rb <team.yaml> validate
 #   team_config.rb <team.yaml> ids                 role ids, in file order (start order)
@@ -72,18 +72,18 @@ PROMPT_KEYS = %w[common project].freeze
 # The #117 budget for one seat's rendered prompt: every line is loaded on every task.
 PROMPT_MAX_LINES = 199
 ROLE_KEYS = %w[title summary workdir prompt prompt_text kickoff session model effort permission_mode permissions
-               gate_on_stop skills may_merge auto_memory].freeze
+               gate_on_stop skills may_merge auto_memory tmpdir].freeze
 WORKDIR_KEYS = %w[type path name].freeze
 ID_RE = /\A[a-z][a-z0-9]*\z/.freeze
 PREFIX_RE = /\A[a-z0-9][a-z0-9-]*\z/.freeze
 # A skill as the Skill tool names it: a bare name, or plugin:name.
 SKILL_RE = /\A[A-Za-z0-9][A-Za-z0-9._-]*(:[A-Za-z0-9][A-Za-z0-9._-]*)?\z/.freeze
 
-# The folder factory.sh and this file are installed in.
+# The folder fabrikito and this file are installed in.
 INSTALL = utf8(File.expand_path('..', __dir__), 'the install folder')
 
 # The factory's own plugin (skills, later agents and hooks). Each seat loads it with --plugin-dir, so it
-# reaches exactly the sessions factory.sh starts: seats work in the target project's folders, where this
+# reaches exactly the sessions fabrikito starts: seats work in the target project's folders, where this
 # repository's .claude/ is never read, and nothing is installed into the user's settings.
 PLUGIN_DIR = File.join(INSTALL, 'plugin')
 
@@ -118,10 +118,10 @@ MERGE_PATTERNS = [
   'Bash(gh api graphql*mergeBranch*)'
 ].freeze
 
-# Flags factory.sh sets itself, or that would undo this file's permission keys. :always, or
+# Flags fabrikito sets itself, or that would undo this file's permission keys. :always, or
 # :with_mode (only when a seat has a permission_mode; a legacy file may still pass them in args).
 RESERVED_FLAGS = {
-  '--settings' => [:always, 'factory.sh passes each seat its generated settings file'],
+  '--settings' => [:always, 'fabrikito passes each seat its generated settings file'],
   '--setting-sources' => [:always, "it changes which settings files load, and can drop the user's own deny rules"],
   '--permission-prompt-tool' => [:always, 'it hands ask decisions to a program'],
   '--permission-mode' => [:with_mode, 'use permission_mode'],
@@ -129,7 +129,7 @@ RESERVED_FLAGS = {
   '--allow-dangerously-skip-permissions' => [:with_mode, 'use permission_mode']
 }.freeze
 
-# Folders factory.sh owns under the state folder: settings, launch and prompts are rewritten for every
+# Folders fabrikito owns under the state folder: settings, launch and prompts are rewritten for every
 # start; bin holds the copies of claude the seats run, made by up when missing (#50); setup holds the
 # mark up writes once a new worktree's repo.copy and repo.bootstrap have finished (#10). Seats may not
 # edit them (see protected_paths), so a folder added here is protected without further changes.
@@ -375,6 +375,28 @@ class TeamConfig
     w['type'] == 'project' ? expand(w['path']) : File.join(worktree_root, worktree_name(id))
   end
 
+  # The role's temp folder (roles.<id>.tmpdir) as an absolute path; nil means the seat inherits its temp
+  # settings. Never relative to the team file: it is a place on the volume, like storage.volume.
+  def tmpdir(id)
+    t = role(id)['tmpdir']
+    t && File.expand_path(t.to_s.sub(/\A~(?=\/|\z)/, home_utf8))
+  end
+
+  # The path as written. fabrikito proves where it really leads (a symlink, another mount), and only
+  # with the volume mounted, so an unmounted volume does not stop say or down here.
+  def validate_tmpdir(id)
+    t = role(id)['tmpdir']
+    die "roles.#{id}.tmpdir must be an absolute path" unless t.is_a?(String) && t.start_with?('/', '~/')
+    t = tmpdir(id)
+    die "roles.#{id}.tmpdir (#{t}) must be a folder inside storage.volume (#{volume})" unless t.start_with?(File.join(volume, ''))
+    # Two teams on one host share role names, and one team's tl has written into the other's folder
+    # (#241), so a folder that does not name both is refused rather than left to the author's care.
+    parts = t[volume.length..-1].split('/')
+    return if parts.include?(@c['team']) && parts.include?(id)
+
+    die "roles.#{id}.tmpdir (#{t}) must name the team and the role as folders, for example #{File.join(volume, 'tmp', @c['team'], id)}"
+  end
+
   def read_prompt_file(rel)
     f = expand(rel)
     die "prompt file not found: #{f}" unless File.file?(f)
@@ -396,7 +418,7 @@ class TeamConfig
   def vars(id)
     {
       'TITLE' => title(id), 'ROLE' => id, 'SESSION' => session(id), 'PREFIX' => prefix,
-      'SCRIPT' => env_utf8('TEAM_SCRIPT', 'factory.sh'), 'LOG' => env_utf8('TEAM_LOG', 'messages.log'),
+      'SCRIPT' => env_utf8('TEAM_SCRIPT', 'fabrikito'), 'LOG' => env_utf8('TEAM_LOG', 'messages.log'),
       'REPO' => repo_path, 'WORKDIR' => workdir(id), 'WORKTREE_ROOT' => worktree_root,
       'VOLUME' => volume, 'GITHUB_REPO' => github, 'GITHUB_URL' => "https://github.com/#{github}",
       'PROJECT_NAME' => project['name'].to_s, 'PROJECT_URL' => project['url'].to_s, 'TEAM' => @c['team'].to_s, 'OWNER' => owner, 'ROSTER' => roster,
@@ -640,7 +662,7 @@ class TeamConfig
   # How path overlaps this team's own work, or nil: it is, holds or sits inside the repository, the
   # worktree folder or a seat's working directory, or it is or holds the home folder or this factory
   # checkout. When the repository or a working directory holds this team's own state root (a team
-  # working on software-factory keeps .state/ in its own checkout, tl on #200), a folder inside that
+  # working on fabrikito keeps .state/ in its own checkout, tl on #200), a folder inside that
   # state root is exempt from "sits inside" it: the other teams' folders are there. So is a listed
   # folder that is a team's state folder in a factory checkout's .state (listed_team_state?, #205).
   def own_work_overlap(path, listed: false)
@@ -844,14 +866,14 @@ class TeamConfig
   # a boundary: a script can still write them (see README, Safety, and #29).
   def protected_paths(id)
     [
-      # what factory.sh regenerates for each start (settings, launchers, prompts) and the message log
+      # what fabrikito regenerates for each start (settings, launchers, prompts) and the message log
       *(GENERATED_DIRS + HOOK_DIRS).map { |d| File.join(state_dir, d, '**') },
       File.join(state_dir, 'messages.log'),
       # the team file and the prompts it loads into every seat
       @path,
       *([prompts_common_path, prompts_project_path] + roles.values.map { |r| r['prompt'] && expand(r['prompt']) }).compact,
       # the launcher itself, and the wrapper it runs claude through
-      File.join(INSTALL, 'factory.sh'), File.join(INSTALL, 'lib', '**'), File.join(INSTALL, 'roles', '**'),
+      File.join(INSTALL, 'fabrikito'), File.join(INSTALL, 'factory.sh'), File.join(INSTALL, 'lib', '**'), File.join(INSTALL, 'roles', '**'),
       # the factory's plugin, which every seat loads at its next start
       File.join(PLUGIN_DIR, '**'),
       # and any plugin the team loads itself with --plugin-dir in args
@@ -917,7 +939,7 @@ class TeamConfig
   # Where Claude Code keeps the user's config: ~/.claude and ~/.claude.json, or, with
   # CLAUDE_CONFIG_DIR set, that folder and the .claude.json inside it ("every ~/.claude path lives
   # under that directory instead. The same applies to .claude.json":
-  # https://code.claude.com/docs/en/claude-directory). Read from the environment factory.sh runs in;
+  # https://code.claude.com/docs/en/claude-directory). Read from the environment fabrikito runs in;
   # each seat's launch script pins the same value (or unsets it), so a seat uses the folder its rules
   # protect, whatever the tmux server's own environment holds.
   def claude_config_paths
@@ -969,7 +991,7 @@ class TeamConfig
   end
 
   # Every rule for a seat as [rule, list, source]: the team's, then the role's, then the ones
-  # factory.sh adds itself.
+  # fabrikito adds itself.
   def permission_entries(id)
     out = []
     add = lambda do |h, source|
@@ -987,7 +1009,7 @@ class TeamConfig
     tri = triage_rules(id)
     deny = protected_paths(id).map { |p| "Edit(/#{p})" } + others + log_read_rules(id) + memory_rules(id) + tri['deny'] +
            other_team_rules(id)
-    add.call({ 'deny' => deny, 'ask' => base_push_rules, 'allow' => own + tri['allow'] }, 'factory.sh')
+    add.call({ 'deny' => deny, 'ask' => base_push_rules, 'allow' => own + tri['allow'] }, 'fabrikito')
     out
   end
 
@@ -999,9 +1021,9 @@ class TeamConfig
   def merged_permissions(id)
     entries = permission_entries(id)
     rank = ->(list) { PERMISSION_LISTS.index(list) }
-    above = ->(source) { source.start_with?('roles.') ? [source, 'team', 'factory.sh'] : ['team', 'factory.sh'] }
+    above = ->(source) { source.start_with?('roles.') ? [source, 'team', 'fabrikito'] : ['team', 'fabrikito'] }
     entries.each do |rule, list, source|
-      next if source == 'factory.sh'
+      next if source == 'fabrikito'
 
       stronger = entries.find { |r, l, s| r == rule && rank.call(l) < rank.call(list) && above.call(source).include?(s) }
       next unless stronger
@@ -1120,7 +1142,7 @@ class TeamConfig
   end
 
   def permissions_report
-    added_by = ->(e) { e[2] == 'factory.sh' }
+    added_by = ->(e) { e[2] == 'fabrikito' }
     out = []
     # Other teams' state folders (#197): what was found and listed, and the links passed over.
     teams = other_teams.map do |t|
@@ -1239,8 +1261,8 @@ class TeamConfig
   # A role other than TRIAGE_WRITER that lists the security-triage skill would write its records
   # where its settings deny it (#138), so check says so before the seat meets the deny.
   def triage_warnings
-    roles.keys.reject { |id| id == TRIAGE_WRITER }.select { |id| skills(id).any? { |n, _| n == 'factory:security-triage' } }.map do |id|
-      "warning: #{id} lists factory:security-triage, but only a role with id #{TRIAGE_WRITER} may write triage " \
+    roles.keys.reject { |id| id == TRIAGE_WRITER }.select { |id| skills(id).any? { |n, _| n == 'fabrikito:security-triage' } }.map do |id|
+      "warning: #{id} lists fabrikito:security-triage, but only a role with id #{TRIAGE_WRITER} may write triage " \
         "records (#{File.join(state_dir, TRIAGE_DIR)}/): every other seat may not write there."
     end
   end
@@ -1304,7 +1326,7 @@ class TeamConfig
     if repo.key?('copy')
       die 'repo.copy must be a list of paths (relative to the main checkout)' unless repo['copy'].is_a?(Array)
       repo['copy'].each do |p|
-        # Inside the main checkout only, and one path per line for factory.sh.
+        # Inside the main checkout only, and one path per line for fabrikito.
         ok = p.is_a?(String) && !p.empty? && !p.start_with?('/', '~') && !p.include?("\n") && !p.split('/').include?('..')
         die "repo.copy: '#{p}' must be a relative path inside the main checkout" unless ok
       end
@@ -1356,6 +1378,7 @@ class TeamConfig
       # A YAML boolean: the system ruby's YAML 1.1 also reads an unquoted yes or on as true.
       die "roles.#{id}.may_merge must be true or false" if r.key?('may_merge') && ![true, false].include?(r['may_merge'])
       die "roles.#{id}.auto_memory must be true or false" if r.key?('auto_memory') && ![true, false].include?(r['auto_memory'])
+      validate_tmpdir(id) if r.key?('tmpdir')
       if r.key?('permission_mode') && !PERMISSION_MODES.include?(r['permission_mode'].to_s)
         die "roles.#{id}.permission_mode must be one of #{PERMISSION_MODES.join(', ')}"
       end
@@ -1433,6 +1456,7 @@ when 'role'
   when 'permission_mode' then puts cfg.mode_label(id)
   when 'gate' then puts(cfg.gate_on_stop?(id) ? 'on-stop' : '-')
   when 'auto_memory' then puts(cfg.auto_memory?(id) ? '(inherit)' : 'off')
+  when 'tmpdir' then puts cfg.tmpdir(id).to_s
   else die "unknown role key '#{key}'"
   end
 when 'workdir' then puts cfg.workdir(args.fetch(0) { die 'workdir needs a role id' })

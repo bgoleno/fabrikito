@@ -8,7 +8,7 @@ the reference for each key, and the file to copy.
 
 - `repo`, `project`, `owner`: the local checkout, its GitHub repo (`owner/name`), the GitHub Project the
   team tracks work on, and the human it works for. The prompts name them, so this is the only edit to
-  retarget a team. `repo.gate` is the repo's pass/fail command: see [The gate](../README.md#the-gate).
+  retarget a team. `repo.gate` is the repo's pass/fail command: see [The gate](gate.md).
 - `storage`: `volume` and `root`. Every worktree is created under `<volume>/<root>/`. The volume must be
   mounted, checked from the mount table when a worktree is created; the launcher never falls back to
   another disk.
@@ -19,7 +19,9 @@ the reference for each key, and the file to copy.
 - `permissions` (`deny`, `ask`, `allow`), at the top level and per role: see
   [Safety](../README.md#safety).
 - `other_teams`: other teams' state folders that aren't beside this team's own, each with the
-  `observers` allowed to read its log and notes: see [Safety](../README.md#safety).
+  `observers` allowed to read its log and notes. That log can carry private security reports, so an
+  observer treats it under rule 5 and sends `sec` and the EM only a pointer: see
+  [Safety](../README.md#safety).
 - `prompts.common` and a per-role `prompt` (file) or `prompt_text` (inline). Placeholders such as
   `@@ROSTER@@`, `@@GITHUB_REPO@@`, `@@PROJECT_URL@@` and `@@WORKTREE_ROOT@@` are filled in per seat.
 - `prompts.project` (optional): a file with your project's specifics, such as what the product is,
@@ -29,7 +31,8 @@ the reference for each key, and the file to copy.
   contain a `[from ...]` label, and seats may not edit it. `check` shows it, with the longest rendered
   prompt, and warns when a seat's prompt goes over 199 lines. Without it, prompts are unchanged.
 - `roles`: ordered; each has `title`, `workdir` (`project` folder or `worktree`), a prompt, and
-  optional `model`, `effort`, `session`, `kickoff`, `summary`, `skills`.
+  optional `model`, `effort`, `session`, `kickoff`, `summary`, `skills`, `tmpdir`
+  (see [Temp files](#temp-files)).
 - `skills` (per role): skills to name in that seat's prompt, each a name (`plugin:name` for a plugin's
   skill) with an optional note on when to use it. They are listed after the role's prompt with a note
   that a skill may not be installed; naming one installs nothing. The example team lists commonly
@@ -44,6 +47,45 @@ Text is UTF-8 whatever the locale (`LC_ALL=C`, cron, `env -i`): the team and pro
 values the launcher fills in from outside them (`TEAM_SCRIPT`, `TEAM_LOG`, `TEAM_STATE_DIR`,
 `CLAUDE_CONFIG_DIR`, the home folder, the team file's own path), so non-ASCII paths and names work in
 prompts, kickoffs and settings. Invalid UTF-8 in any of them is an error that names where it came from.
+
+## Temp files
+
+`roles.<id>.tmpdir` sets where a seat's temp files go. The launch script exports two variables from it,
+so the setting belongs to the seat and not to the tmux server, whose environment holds one value for
+every team on it:
+
+```yaml
+storage: { volume: /Volumes/<drive>, root: Projects/myteam-worktrees }
+roles:
+  fs1:
+    tmpdir: /Volumes/<drive>/tmp/myteam/fs1
+```
+
+- `TMPDIR=<tmpdir>`. `mktemp "$TMPDIR/name.XXXXXX"` creates its file there. Give `mktemp` that explicit
+  template: a bare `mktemp` was seen to ignore `TMPDIR` on macOS.
+- `CLAUDE_CODE_TMPDIR=<tmpdir>/claude`. Claude's scratchpads and task output go under it. Setting `TMPDIR`
+  alone leaves them on the internal disk.
+
+The folder must be inside `storage.volume` and name both the team and the role as folders. Two teams on
+one host share role names, so a folder without the team can collide, and every command refuses it when
+it loads the team file. `check` shows each role's folder and also refuses, while the volume is mounted, a
+path that a symlink or another mount leads off the volume.
+
+`up` makes the folder and its `claude/`, owner-only, before it starts anything, for each seat it is about
+to start. It refuses if the volume is not mounted, the same as for a worktree, and creates nothing: `mkdir`
+under an unmounted `/Volumes` path would land on the internal disk. It also refuses a symlink at either
+folder. A running seat keeps what it started with and picks up a change at its next start.
+
+Owner-only (mode 700) guards against other OS users, and only on a volume that honours ownership. It
+keeps out nobody on a volume mounted `noowners` (Finder's "ignore ownership on this volume"), and every
+seat runs as the same user in any case. Separate folders keep two teams' temp files apart by accident
+guard only, as with the other rules in [Safety](../README.md#safety): this is not a security boundary.
+
+A role with no `tmpdir` behaves as before: the seat takes `TMPDIR` and `CLAUDE_CODE_TMPDIR` from whatever
+started it, and `check` shows `(inherit)`. There is no default folder, because the choice is explicit per role.
+
+A team pinned to a release gets the key by moving to a release that has it: see
+[Running a team from a pinned release](pinned-release.md).
 
 ## New worktrees
 

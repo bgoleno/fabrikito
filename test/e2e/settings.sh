@@ -22,11 +22,12 @@ disable=disable'
 [ "$(perms $T/state/settings/w1.json)" = "$want_w1" ] && ok "w1.json: team + role merged, duplicate dropped, team ask shadowed by the role deny dropped, bypass disabled for a non-bypass mode" || { bad "w1.json rules"; perms $T/state/settings/w1.json; }
 [ "$(stat -f %Lp $T/state/settings/em.json)" = 444 ] && ok "settings file is read-only (0444)" || bad "settings file mode $(stat -f %Lp $T/state/settings/em.json)"
 # Edit denies the launcher adds for files that change a seat's next start or its live rules. Paths
-# are real paths (the temp folder is under a symlink on macOS).
+# are real paths: $T runs through a link that test/e2e.sh makes, so its real path $RT always differs (#249).
 RT=$(cd $T && pwd -P); RSRC=$(cd $SRC && pwd -P); RW1=$(cd $VOL/$ROOT/team-w1 && pwd -P); RHC=$(cd ~/.claude && pwd -P); RH=$(cd ~ && pwd -P)
+case $RT in "$e2e_real"/*) [ "$T" != "$RT" ] && ok "the scratch path has two spellings, both under TMPDIR" || bad "the scratch path has one spelling: $T" ;; *) bad "the scratch folder's real path $RT is not under TMPDIR $e2e_real" ;; esac
 missing=""
 for p in "$RT/state/settings/**" "$RT/state/launch/**" "$RT/state/prompts/**" "$RT/state/messages.log" "$RT/team.yaml" \
-  "$RSRC/roles/common.md" "$RSRC/factory.sh" "$RSRC/lib/**" "$RSRC/roles/**" "$RSRC/plugin/**" "$RT/bin/wrap" \
+  "$RSRC/roles/common.md" "$RSRC/fabrikito" "$RSRC/factory.sh" "$RSRC/lib/**" "$RSRC/roles/**" "$RSRC/plugin/**" "$RT/bin/wrap" \
   "$RT/repo/.claude/settings.json" "$RT/repo/.claude/settings.local.json" "$RT/repo/.claude/skills/**" "$RT/repo/.claude/agents/**" "$RT/repo/.claude/commands/**" \
   "$RT/repo/.mcp.json" "$RT/repo/.claude/hooks/**" "$RT/repo/.claude/CLAUDE.md" "$RT/repo/.claude/rules/**" \
   "$RW1/.claude/settings.json" "$RW1/.claude/settings.local.json" "$RHC/settings.json" "$RH/.claude.json" "$RHC/CLAUDE.md" \
@@ -35,7 +36,7 @@ for p in "$RT/state/settings/**" "$RT/state/launch/**" "$RT/state/prompts/**" "$
 done
 [ -z "$missing" ] && ok "w1.json: Edit deny on every protected path" || { bad "protected paths missing:$missing"; rules $T/state/settings/w1.json deny; }
 # The repository's auto-memory folder, which the owner's own sessions load (#108): denied for every
-# seat with auto memory off (em, w1), in both spellings of the repo path ($T is under a symlink, and
+# seat with auto memory off (em, w1), in both spellings of the repo path ($T runs through a link, and
 # Claude Code names the folder after the path), and not for w2 (auto_memory: true).
 MEMA="$RHC/projects/$(enc "$T/repo")/memory/**"; MEMB="$RHC/projects/$(enc "$RT/repo")/memory/**"
 missing=""; for r in em w1; do for p in "$MEMA" "$MEMB"; do rules $T/state/settings/$r.json deny | grep -qxF "Edit(/$p)" || missing="$missing $r:$p"; done; done
@@ -45,7 +46,7 @@ w2mem=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml settin
 rules $T/state/settings/w1.json deny | grep -qE "state/notes/\*\*|state/notes/w1\.md|Edit\(//$RT/state/\*\*\)|Edit\(//$RHC/\*\*\)" && bad "protected paths are too wide (all notes or the seat's own, whole state dir or whole ~/.claude)" || ok "protected paths leave the seat's own note and the rest of ~/.claude writable"
 # Claude Code puts the worktrees it makes (--worktree, subagents with isolation: worktree) under
 # <repo>/.claude/worktrees/, so no deny may cover that folder.
-# $T is the path as configured; on macOS it runs through the /var symlink, so its real path ($RT)
+# $T is the path as configured; it runs through the link test/e2e.sh makes, so its real path ($RT)
 # differs. Both spellings of a protected path are denied.
 missing=""
 for p in "$T/repo/.mcp.json" "$T/repo/.claude/settings.json" "$T/state/settings/**" "$T/team.yaml" "$T/bin/wrap"; do
@@ -70,16 +71,16 @@ chk=$($S -c $T/team.yaml check 2>&1)
 # release runs from its own checkout. Not read from $SRC, which may be an export with no .git (tl on
 # #191): a throwaway git checkout of copied files, with a lightweight tag (plain describe skips one),
 # then a change to a tracked file (-dirty). The team file in teams/ is untracked, so not dirty.
-mkdir -p $T/ginst/teams && cp -R $SRC/factory.sh $SRC/lib $SRC/roles $SRC/plugin $T/ginst/ && echo tracked > $T/ginst/VERSION
+mkdir -p $T/ginst/teams && cp -R $SRC/fabrikito $SRC/lib $SRC/roles $SRC/plugin $T/ginst/ && echo tracked > $T/ginst/VERSION
 gq() { git -C $T/ginst -c user.name=e2e -c user.email=e2e@example.invalid -c commit.gpgsign=false "$@" >/dev/null 2>&1; }
 gq init -q && gq add -A && gq commit -q -m release && gq tag v9.8.7 && cp $T/team.yaml $T/ginst/teams/team.yaml
-gl=$($T/ginst/factory.sh -c $T/ginst/teams/team.yaml check 2>&1 | grep "^install ")
+gl=$($T/ginst/fabrikito -c $T/ginst/teams/team.yaml check 2>&1 | grep "^install ")
 echo changed >> $T/ginst/VERSION
-gd=$($T/ginst/factory.sh -c $T/ginst/teams/team.yaml check 2>&1 | grep "^install ")
+gd=$($T/ginst/fabrikito -c $T/ginst/teams/team.yaml check 2>&1 | grep "^install ")
 [ "$gl" = "install   : $T/ginst at v9.8.7" ] && [ "$gd" = "install   : $T/ginst at v9.8.7-dirty" ] \
   && ok "check: the install line names the factory checkout and its tag (lightweight), with -dirty after a change" || { bad "check: install line in a git checkout"; echo "clean: $gl"; echo "dirty: $gd"; }
-mkdir -p $T/linst/teams; for p in factory.sh lib roles plugin; do ln -s $SRC/$p $T/linst/$p; done; cp $T/team.yaml $T/linst/teams/team.yaml
-$T/linst/factory.sh -c $T/linst/teams/team.yaml check 2>&1 | grep -qxF "install   : $T/linst (not a git checkout)" && ok "check: an install outside any git checkout says so" || { bad "check: install line outside git"; $T/linst/factory.sh -c $T/linst/teams/team.yaml check 2>&1 | grep -E "^(install|error)"; }
+mkdir -p $T/linst/teams; for p in fabrikito lib roles plugin; do ln -s $SRC/$p $T/linst/$p; done; cp $T/team.yaml $T/linst/teams/team.yaml
+$T/linst/fabrikito -c $T/linst/teams/team.yaml check 2>&1 | grep -qxF "install   : $T/linst (not a git checkout)" && ok "check: an install outside any git checkout says so" || { bad "check: install line outside git"; $T/linst/fabrikito -c $T/linst/teams/team.yaml check 2>&1 | grep -E "^(install|error)"; }
 echo "$chk" | grep -qxF "bootstrap : $T/bin/boot (run in each new worktree before its seat starts)" && echo "$chk" | grep -qxF "copy      : .env.local, conf/dev.json, missing.txt (from the main checkout into each new worktree)" && ok "check: bootstrap and copy lines" || { bad "check: bootstrap and copy lines"; echo "$chk" | grep -E "^(bootstrap|copy) "; }
 echo "$chk" | grep -qE "^em +Manager .* bypassPermissions " && echo "$chk" | grep -qE "^w1 +Worker One .* default " && ok "check: MODE column per role" || { bad "check MODE column"; echo "$chk"; }
 echo "$chk" | grep -qE "^w1 +Worker One +tt-w1 +sonnet +low " && echo "$chk" | grep -qE "^em +Manager +tt-em +\(inherit\) +\(inherit\) " \
@@ -108,13 +109,16 @@ CP=$T/state/bin/claude-9.9.9/claude
 ! grep -qF -e "$T/bin/claude" -e "$RT/bin/claude" $T/state/launch/em.sh $T/state/launch/w1.sh && grep -qF "$CP" $T/state/launch/em.sh && ok "the launch script names the copy, never the shared install" || { bad "launch script claude path"; grep claude_bin $T/state/launch/em.sh; }
 echo "$chk" | grep -qF "claude    : $RT/bin/claude, version 9.9.9" && echo "$chk" | grep -qF "$T/state/bin/claude-9.9.9 (clone): em w1" && ok "check: the shared claude, its version, and each copy with the seats running it" || { bad "check: claude lines"; echo "$chk" | grep -A3 "^claude"; }
 # The shared install is replaced the way npm does it (a new file in its place): the seats keep theirs.
-cc -o $T/bin/claude.new $T/c.c && mv $T/bin/claude.new $T/bin/claude
+# The new file is built under the name claude, so its bytes are the old one's, as a reinstall of the
+# same version brings: cc writes the output's name into the binary's ad hoc signature, and up refuses a
+# copy that differs from the shared file (#208).
+mkdir -p $T/cc && cc -o $T/cc/claude $T/c.c && mv $T/cc/claude $T/bin/claude
 $S -c $T/team.yaml status | grep -E "^em " | grep -qF "$RT/state/bin/claude-9.9.9/claude" && ok "status: after the shared claude is replaced, em still runs its intact copy" || { bad "status after shared replace"; $S -c $T/team.yaml status; }
 echo "$chk" | grep -qF "updates   : Claude Code's auto-updater is off in every seat (DISABLE_AUTOUPDATER=1)" && ok "check: says the auto-updater is off in seats" || bad "check: updater line"
 echo "$chk" | grep -qF "add to" && ok "check: says the rules add to the user's and the repo's own settings" || bad "check: add-to note"
 # The gate runs as a Stop hook for roles with gate_on_stop (w1) and for no other role.
 hook=$(ruby -rjson -e 'j = JSON.parse(File.read(ARGV[0])); h = j.dig("hooks", "Stop", 0, "hooks", 0) || {}; puts [j["hooks"]["Stop"].size, h["type"], h["command"], *h["args"], h["timeout"], j["disableAllHooks"].inspect].join(" | ")' $T/state/settings/w1.json 2>&1)
-[ "$hook" = "1 | command | $SRC/lib/stop_gate.sh | $T/state | w1 | $VOL/$ROOT/team-w1 | make check | 120 | 2 | 150 | false" ] && ok "w1.json: one Stop hook running stop_gate.sh with state, role, workdir, gate, timeout, max blocks; disableAllHooks false" || { bad "w1 Stop hook"; echo "$hook"; }
+[ "$hook" = "1 | command | $RSRC/lib/stop_gate.sh | $T/state | w1 | $VOL/$ROOT/team-w1 | make check | 120 | 2 | 150 | false" ] && ok "w1.json: one Stop hook running stop_gate.sh with state, role, workdir, gate, timeout, max blocks; disableAllHooks false" || { bad "w1 Stop hook"; echo "$hook"; }
 # w2 has not started yet at this point (its legacy worktree is refused above): ask the builder.
 nostop() { ruby -rjson -e 'j = JSON.parse(STDIN.read); exit((j["hooks"] || {}).key?("Stop") ? 1 : 0)'; }
 nostop < $T/state/settings/em.json && TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml settings w2 | nostop && ok "roles without gate_on_stop (em, w2) get no Stop hook" || bad "a role without gate_on_stop got a Stop hook"
@@ -125,9 +129,9 @@ sshook() { ruby -rjson -e 'j = JSON.parse(STDIN.read); a = (j["hooks"] || {})["S
 ss_em=$(sshook < $T/state/settings/em.json); ss_w1=$(sshook < $T/state/settings/w1.json); ss_w2=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml settings w2 | sshook)
 # disableAllHooks: false only for the gated seat (w1): the note is a convenience and does not
 # override a user who switched every hook off; the gate is a control and does.
-[ "$ss_em" = "1 | false | command | $SRC/lib/session_start.sh | $T/state | em | $T/proj | 10 | nil" ] \
-  && [ "$ss_w1" = "1 | false | command | $SRC/lib/session_start.sh | $T/state | w1 | $VOL/$ROOT/team-w1 | 10 | false" ] \
-  && [ "$ss_w2" = "1 | false | command | $SRC/lib/session_start.sh | $T/state | w2 | $VOL/$ROOT/team-w2 | 10 | nil" ] \
+[ "$ss_em" = "1 | false | command | $RSRC/lib/session_start.sh | $T/state | em | $T/proj | 10 | nil" ] \
+  && [ "$ss_w1" = "1 | false | command | $RSRC/lib/session_start.sh | $T/state | w1 | $VOL/$ROOT/team-w1 | 10 | false" ] \
+  && [ "$ss_w2" = "1 | false | command | $RSRC/lib/session_start.sh | $T/state | w2 | $VOL/$ROOT/team-w2 | 10 | nil" ] \
   && ok "every seat (em, w1, w2): one SessionStart hook running session_start.sh with state, role, workdir; disableAllHooks false only for gated w1" || { bad "SessionStart hook"; echo "$ss_em"; echo "$ss_w1"; echo "$ss_w2"; }
 # Every seat logs its SendMessage traffic to messages.log (#39): a PostToolUse hook for a message that
 # went out and a PostToolUseFailure hook for one that failed, both on SendMessage only, with the log,
@@ -135,7 +139,7 @@ ss_em=$(sshook < $T/state/settings/em.json); ss_w1=$(sshook < $T/state/settings/
 smhook() { ruby -rjson -e 'j = JSON.parse(STDIN.read); h = j["hooks"] || {}
   puts(%w[PostToolUse PostToolUseFailure].map { |e| a = h[e] || []; x = (a[0] || {}).fetch("hooks", [])[0] || {}
     [e, a.size, (a[0] || {})["matcher"], x["type"], x["command"], *x["args"], x["timeout"]].join(" | ") })' 2>&1; }
-smwant() { for e in PostToolUse PostToolUseFailure; do echo "$e | 1 | SendMessage | command | $SRC/lib/log_message.sh | $T/state/messages.log | $1 | tt-em=em | tt-w1=w1 | tt-w2=w2 | 5"; done; }
+smwant() { for e in PostToolUse PostToolUseFailure; do echo "$e | 1 | SendMessage | command | $RSRC/lib/log_message.sh | $T/state/messages.log | $1 | tt-em=em | tt-w1=w1 | tt-w2=w2 | 5"; done; }
 sm_em=$(smhook < $T/state/settings/em.json); sm_w1=$(smhook < $T/state/settings/w1.json); sm_w2=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml settings w2 | smhook)
 [ "$sm_em" = "$(smwant em)" ] && [ "$sm_w1" = "$(smwant w1)" ] && [ "$sm_w2" = "$(smwant w2)" ] \
   && ok "every seat (em, w1, w2): SendMessage logging hooks on PostToolUse and PostToolUseFailure, with log, role and the session map" || { bad "SendMessage logging hooks"; echo "$sm_em"; echo "$sm_w1"; }
@@ -174,7 +178,7 @@ echo "--- security-triage record folder (#138)"
 # folder (outside its working directory, so it would prompt otherwise), em may read it, and every
 # other seat is denied both, in both spellings. This team is the test team plus a sec role, and w2
 # lists the security-triage skill, which check warns about.
-sed 's/^  w2: { title: Worker Two, /  w2: { title: Worker Two, skills: ["factory:security-triage"], /' $T/team.yaml > $T/sec.yaml
+sed 's/^  w2: { title: Worker Two, /  w2: { title: Worker Two, skills: ["fabrikito:security-triage"], /' $T/team.yaml > $T/sec.yaml
 echo '  sec: { title: Security, workdir: { type: worktree }, prompt_text: "sec prompt" }' >> $T/sec.yaml
 # tset <team file> <role> <list>: that list of the role's generated settings, one rule a line.
 tset() { TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb "$1" settings "$2" | ruby -rjson -e 'puts((JSON.parse(STDIN.read)["permissions"] || {})[ARGV[0]] || [])' "$3"; }
@@ -226,8 +230,8 @@ tr '\n' ' ' < $SRC/plugin/skills/security-triage/SKILL.md | tr -s ' ' | grep -qF
 schk=$($S -c $T/sec.yaml check 2>&1); ssect() { echo "$schk" | sed -n "/^\[$1\]/,/^\[/p"; }
 ssect sec | grep -F "added: " | grep -qF ", Edit and Read allow on the triage record folder" && ssect em | grep -F "added: " | grep -qF ", Read allow and Edit deny on the triage record folder" \
   && ssect w1 | grep -F "added: " | grep -qF ", Edit and Read deny on the triage record folder" \
-  && echo "$schk" | grep -qxF "warning: w2 lists factory:security-triage, but only a role with id sec may write triage records ($T/state/triage/): every other seat may not write there." \
-  && ! echo "$schk" | grep -q "warning: sec lists factory:security-triage" \
+  && echo "$schk" | grep -qxF "warning: w2 lists fabrikito:security-triage, but only a role with id sec may write triage records ($T/state/triage/): every other seat may not write there." \
+  && ! echo "$schk" | grep -q "warning: sec lists fabrikito:security-triage" \
   && ok "check: the triage folder rules on each seat's added line, and a warning for w2, which lists the skill and is not sec" || { bad "check: triage folder"; ssect sec; ssect em; echo "$schk" | grep warning; }
 echo "--- other teams' state folders (#197)"
 # Two teams on one factory checkout, their state folders side by side in one state root ($X): each
@@ -270,7 +274,7 @@ echo "$xchk" | grep -qxF "other teams: $X/xb (found), $T/far/xc (listed; observe
   && xsect em | grep -F "added: " | grep -qF ", Read and Edit deny on 2 other teams' state folders" \
   && xsect w1 | grep -F "added: " | grep -qF ", Read and Edit deny on 2 other teams' state folders (observer of $T/far/xc: may read its log and notes)" \
   && ok "check: lists the other teams found and listed, the links it skipped and why (not a folder without team state), and the denies on each seat's added line" || { bad "check: other teams"; echo "$xchk" | grep -E "^(other teams|skipped)"; xsect w1 | grep added; }
-# A state root inside the team's own repository (a team working on software-factory keeps .state/ in
+# A state root inside the team's own repository (a team working on fabrikito keeps .state/ in
 # its checkout, tl on #200): a team found there, or listed there before it exists, is not "inside the
 # repository", so it still gets its denies.
 mkdir -p $T/repo/.state/me $T/repo/.state/other/settings $T/repo/.state/other/launch $T/repo/.state/other/prompts

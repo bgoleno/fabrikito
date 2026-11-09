@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # A private environment for a live test: anything that starts tmux sessions or claude, such as a
-# throwaway team run with factory.sh. It keeps the test off the tmux server you work in, which is
+# throwaway team run with fabrikito. It keeps the test off the tmux server you work in, which is
 # where a real team runs (#66).
 #
 #   test/live-env.sh new                 make one; prints its folder (/tmp/sf-live.XXXXXX)
@@ -11,9 +11,9 @@
 #
 # For example:
 #   d=$(test/live-env.sh new)
-#   test/live-env.sh run "$d" ./factory.sh -c /path/to/throwaway.yaml up
+#   test/live-env.sh run "$d" ./fabrikito -c /path/to/throwaway.yaml up
 #   test/live-env.sh run "$d" tmux ls
-#   test/live-env.sh run "$d" ./factory.sh -c /path/to/throwaway.yaml down --yes
+#   test/live-env.sh run "$d" ./fabrikito -c /path/to/throwaway.yaml down --yes
 #   test/live-env.sh down "$d"
 #
 # Each call is checked on its own, so it works from a fresh shell each time (as a seat's tool calls
@@ -88,7 +88,7 @@ case ${1:-} in
     r=$(env_dir "$d")
     # Absolute, resolved folders: a relative one would point elsewhere once the command changes
     # directory, and tmux would then fall back to /tmp. A seat's own TEAM_CONFIG is dropped too, or
-    # factory.sh without -c would start the seat's real team (on this private server). A seat's own
+    # fabrikito without -c would start the seat's real team (on this private server). A seat's own
     # role gives way to the driver label (see the top).
     s=$(cd -P -- "$r/state" && pwd -P) || die "$r/state does not exist"
     unset TMUX TEAM_CONFIG TEAM_SCRIPT

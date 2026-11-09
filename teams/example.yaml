@@ -1,9 +1,9 @@
-# A team definition for factory.sh. Copy this file to teams/team.yaml (the default) or anywhere
+# A team definition for fabrikito. Copy this file to teams/team.yaml (the default) or anywhere
 # else and edit it, then:
 #
-#   ./factory.sh check                     validate the file and show where everything will live
-#   ./factory.sh up                        start the team
-#   ./factory.sh -c path/to/other.yaml up  use a different file (or set TEAM_CONFIG)
+#   ./fabrikito check                     validate the file and show where everything will live
+#   ./fabrikito up                        start the team
+#   ./fabrikito -c path/to/other.yaml up  use a different file (or set TEAM_CONFIG)
 #
 # To change the team dynamics: add, remove or reorder roles, change the prompts, models or
 # storage. Unknown keys are errors, so a typo cannot silently fall back to a default.
@@ -57,12 +57,12 @@ sessions:
     # called as: <wrapper> <path to claude> <args...>. Leave unset to run claude directly. If it
     # is set but the file is missing, claude runs directly.
     # wrapper: ~/Applications/SomeWrapper.app/Contents/MacOS/SomeWrapper
-    # Extra claude flags, one per list item. Flags factory.sh sets itself (--settings,
+    # Extra claude flags, one per list item. Flags fabrikito sets itself (--settings,
     # --setting-sources, --permission-prompt-tool) are refused here, and so are permission flags
     # when permission_mode is set.
     # args: []
-    # Load the factory's own plugin (plugin/ next to factory.sh) into every seat with --plugin-dir.
-    # Its skills show as /factory:<skill>, and only sessions factory.sh starts get them. Default true,
+    # Load the factory's own plugin (plugin/ next to fabrikito) into every seat with --plugin-dir.
+    # Its skills show as /fabrikito:<skill>, and only sessions fabrikito starts get them. Default true,
     # so a team file without this key gets the plugin at its next `up`, and gets every skill (and,
     # later, every hook) added to plugin/ after that. false: the flag is omitted. A --plugin-dir of
     # your own in args still loads; the flag repeats.
@@ -88,11 +88,11 @@ sessions:
     # factory sets nothing and Claude Code's own settings decide.
     # auto_memory: false
 
-# What `up` shows once the seats are running, and what `./factory.sh view` shows any time: a new
+# What `up` shows once the seats are running, and what `./fabrikito view` shows any time: a new
 # iTerm tab with every running seat in a pane. The primary seat is on the left at the full height
 # of the tab (it is the one you talk to); the others are in rows on the right, two per row, and
 # an odd last seat gets a full-width row. Needs iTerm2 and, the first time, macOS Automation
-# permission for the program running factory.sh to control iTerm.
+# permission for the program running fabrikito to control iTerm.
 display:
   iterm: true                 # false: do not open the tab (up --no-view skips it once)
   primary: em                 # role id shown on the left; default is the first role
@@ -126,12 +126,12 @@ kickoff: >-
 # tighten a rule but never loosen a team one. Syntax: https://code.claude.com/docs/en/permissions
 # - Bash rules match the command text: another spelling (`git -C . push`, a script, `sh -c`) is
 #   not caught. These rules are an accident guard, not a security boundary (#29 tracks making
-#   them one). The sandbox would hold whatever the command text, but factory.sh does not turn it on.
+#   them one). The sandbox would hold whatever the command text, but fabrikito does not turn it on.
 # - Paths: //absolute, ~/home, ./relative or a bare name. A single leading / would anchor at the
 #   state folder that holds the generated file, so it is refused.
-# factory.sh adds two sets itself: an Edit deny on the files that change a seat's next start (team
+# fabrikito adds two sets itself: an Edit deny on the files that change a seat's next start (team
 # file, prompts, launcher, generated state, Claude Code's own settings), and an ask on any push to
-# the base branch (from repo.base). `./factory.sh check` lists what each seat gets.
+# the base branch (from repo.base). `./fabrikito check` lists what each seat gets.
 permissions:
   deny:
     # Every .env on the machine, the main checkout's included. This also blocks .env.example: a
@@ -177,6 +177,13 @@ permissions:
 # role's prompt with a note that a skill may not be installed, so naming one installs nothing and
 # a seat without it works on. The ones below come from the superpowers plugin and Claude Code's own
 # bundled skills: keep the ones you have, add your own.
+# tmpdir: the folder for this seat's temp files, for example /Volumes/YourDrive/tmp/example/fs1. The
+# launch script sets TMPDIR to it and CLAUDE_CODE_TMPDIR to <tmpdir>/claude (where Claude's
+# scratchpads and task output go), whatever the tmux server's environment holds. It must be inside
+# storage.volume and name the team and the role as folders, because two teams on one host share role
+# names. `up` makes it owner-only, and refuses when the volume is not mounted; a symlink that leads
+# off the volume is refused by `check` and `up`. Without the key, the seat inherits its temp settings
+# from whatever started it, and `check` shows (inherit). See docs/team-file.md, "Temp files".
 #   workdir.type: project   an existing folder: path: ...
 #   workdir.type: worktree  a git worktree under storage (optional: name: folder-name)
 roles:
@@ -187,12 +194,12 @@ roles:
     workdir: { type: project, path: /path/to/your/checkout }
     prompt: ../roles/em.md
     skills:
-      - "factory:handoff": before /clear, /compact, a restart or the end of a session
+      - "fabrikito:handoff": before /clear, /compact, a restart or the end of a session
       - "superpowers:brainstorming": to pin down a vague request from the owner before filing issues
-      - "factory:assign": to hand one issue to one seat with a complete brief
-      - "factory:team-status": for the owner's status, or to see which PRs are ready and who owes the next move
-      - "factory:retro": once an incident is finished, to propose the principle it taught, for the owner's approval
-      - "factory:merge-train": the owner starts it by typing /factory:merge-train <PRs> [--dry-run] in your pane; you cannot start it yourself
+      - "fabrikito:assign": to hand one issue to one seat with a complete brief
+      - "fabrikito:team-status": for the owner's status, or to see which PRs are ready and who owes the next move
+      - "fabrikito:retro": once an incident is finished, to propose the principle it taught, for the owner's approval
+      - "fabrikito:merge-train": the owner starts it by typing /fabrikito:merge-train <PRs> [--dry-run] in your pane; you cannot start it yourself
     permissions:
       # Ask before a force-push. Engineers keep force-pushing their own branches unattended (they
       # rebase); "never force-push a branch you did not create" cannot be written as a pattern.
@@ -210,8 +217,8 @@ roles:
     workdir: { type: worktree }
     prompt: ../roles/tl.md
     skills:
-      - "factory:handoff": before /clear, /compact, a restart or the end of a session
-      - "factory:review-pr": to review a PR at its exact head and post one verdict
+      - "fabrikito:handoff": before /clear, /compact, a restart or the end of a session
+      - "fabrikito:review-pr": to review a PR at its exact head and post one verdict
       - "code-review": to review a PR's diff for correctness bugs
       - "superpowers:writing-plans": to turn an agreed design into steps an engineer can follow
     permissions:
@@ -232,9 +239,9 @@ roles:
     prompt: ../roles/fs.md
     gate_on_stop: true
     skills:
-      - "factory:start-task": when you take an assigned issue, before changing anything
-      - "factory:ready-for-review": when a change is done, or a new head goes back to review
-      - "factory:handoff": before /clear, /compact, a restart or the end of a session
+      - "fabrikito:start-task": when you take an assigned issue, before changing anything
+      - "fabrikito:ready-for-review": when a change is done, or a new head goes back to review
+      - "fabrikito:handoff": before /clear, /compact, a restart or the end of a session
       - "superpowers:test-driven-development": before writing implementation code
       - "superpowers:systematic-debugging": on a bug or a failing test, before proposing a fix
       - "superpowers:verification-before-completion": before saying work is done or opening a PR
@@ -257,9 +264,9 @@ roles:
     prompt: ../roles/fs.md
     gate_on_stop: true
     skills:
-      - "factory:start-task": when you take an assigned issue, before changing anything
-      - "factory:ready-for-review": when a change is done, or a new head goes back to review
-      - "factory:handoff": before /clear, /compact, a restart or the end of a session
+      - "fabrikito:start-task": when you take an assigned issue, before changing anything
+      - "fabrikito:ready-for-review": when a change is done, or a new head goes back to review
+      - "fabrikito:handoff": before /clear, /compact, a restart or the end of a session
       - "superpowers:test-driven-development": before writing implementation code
       - "superpowers:systematic-debugging": on a bug or a failing test, before proposing a fix
       - "superpowers:verification-before-completion": before saying work is done or opening a PR
@@ -282,8 +289,8 @@ roles:
     prompt: ../roles/qa.md
     gate_on_stop: true
     skills:
-      - "factory:handoff": before /clear, /compact, a restart or the end of a session
-      - "factory:verify-behavior": to verify a PR at its exact head and post one result
+      - "fabrikito:handoff": before /clear, /compact, a restart or the end of a session
+      - "fabrikito:verify-behavior": to verify a PR at its exact head and post one result
       - "superpowers:verification-before-completion": before reporting a result
       - "superpowers:systematic-debugging": when a behaviour is not what the issue says
       - "run": to start the app and see a change working
@@ -304,10 +311,11 @@ roles:
     workdir: { type: worktree }
     prompt: ../roles/sec.md
     skills:
-      - "factory:handoff": before /clear, /compact, a restart or the end of a session
-      - "factory:review-pr": to review a PR at its exact head and post one verdict
-      - "factory:security-triage": when a finding, alert or report reaches you, before it is written anywhere
+      - "fabrikito:handoff": before /clear, /compact, a restart or the end of a session
+      - "fabrikito:review-pr": to review a PR at its exact head and post one verdict
+      - "fabrikito:security-triage": when a finding, alert or report reaches you, before it is written anywhere
       - "security-review": to review a branch's pending changes for security issues
+      - "fabrikito:security-audit": for security guidance or a focused vulnerability review of a codebase; it runs a full audit (writes report files) only when the owner asks for one, with the report kept in the team's triage folder outside the repository, never in the repo, an issue or a PR
     permissions:
       deny:
         - Bash(gh pr merge *)
