@@ -124,6 +124,26 @@ out=$($S -c $T/td-ta.yaml check 2>&1); rc=$?
 [ $rc -ne 0 ] && echo "$out" | grep -qF "$TL/claude is not a real folder" && ok "check refuses a symlink at the temp folder's claude/" || { bad "check with a link at claude/ (rc=$rc)"; echo "$out" | tail -2; }
 rm $TL/claude; rm -rf "$TD"; ! tmux has-session -t '=ta-w1' 2>/dev/null || tmux kill-session -t '=ta-w1'
 
+echo "--- temp folders: repo.bootstrap runs with the role's TMPDIR"
+# An install writes temp files, and with the caller's TMPDIR they could land on the internal disk (#253).
+# A role with tmpdir gets its folder as TMPDIR for the bootstrap; a role without keeps the caller's.
+# The caller's TMPDIR here is a folder of its own, so a file in the role's folder cannot be the caller's.
+printf '#!/bin/sh\necho "tmpdir=${TMPDIR-unset}" >> "$1"\n[ -z "$TMPDIR" ] || touch "$TMPDIR/boot-made"\n' > $T/bin/boot-tmp; chmod +x $T/bin/boot-tmp
+mkdir -p $T/calltmp; rm -f $T/boot-tmp.log
+REPO_EXTRA="bootstrap: \"$T/bin/boot-tmp $T/boot-tmp.log\"" mk "wrapper: $T/bin/wrap"
+echo "  w9: { title: T, workdir: { type: worktree }, prompt_text: \"p\", tmpdir: \"$TD/tv/w9\" }" >> $T/v.yaml
+echo "  w10: { title: N, workdir: { type: worktree }, prompt_text: \"p\" }" >> $T/v.yaml
+out=$(env TMPDIR=$T/calltmp TEAM_STATE_DIR=$T/state-bt $S -c $T/v.yaml up --no-view w9 2>&1); rc=$?
+[ $rc -eq 0 ] && [ "$(cat $T/boot-tmp.log 2>/dev/null)" = "tmpdir=$TD/tv/w9" ] && [ -e $TD/tv/w9/boot-made ] && [ ! -e $T/calltmp/boot-made ] \
+  && ok "repo.bootstrap of a role with tmpdir runs with that folder as TMPDIR, and its temp file lands there" || { bad "bootstrap TMPDIR for a role with tmpdir (rc=$rc)"; cat $T/boot-tmp.log 2>&1; echo "$out" | tail -3; }
+TEAM_STATE_DIR=$T/state-bt $S -c $T/v.yaml down --yes w9 >/dev/null 2>&1; git -C $T/repo worktree remove --force $VOL/$ROOT/team-w9 2>/dev/null
+rm -f $T/boot-tmp.log
+out=$(env TMPDIR=$T/calltmp TEAM_STATE_DIR=$T/state-bt $S -c $T/v.yaml up --no-view w10 2>&1); rc=$?
+[ $rc -eq 0 ] && [ "$(cat $T/boot-tmp.log 2>/dev/null)" = "tmpdir=$T/calltmp" ] && [ -e $T/calltmp/boot-made ] \
+  && ok "repo.bootstrap of a role without tmpdir still runs with the caller's TMPDIR" || { bad "bootstrap TMPDIR for a role without tmpdir (rc=$rc)"; cat $T/boot-tmp.log 2>&1; echo "$out" | tail -3; }
+TEAM_STATE_DIR=$T/state-bt $S -c $T/v.yaml down --yes w10 >/dev/null 2>&1; git -C $T/repo worktree remove --force $VOL/$ROOT/team-w10 2>/dev/null
+rm -rf "$TD" $T/calltmp; ! tmux has-session -t '=tv-w9' 2>/dev/null || tmux kill-session -t '=tv-w9'; ! tmux has-session -t '=tv-w10' 2>/dev/null || tmux kill-session -t '=tv-w10'
+
 echo "--- temp folders: the rest of the issue"
 # A bare mktemp was seen to ignore TMPDIR on macOS: each one in fabrikito that makes a file has a template.
 m=$(grep -n '\$(mktemp' $S | grep -vE '\$\(mktemp "[^"]*\.X{6,}"')
