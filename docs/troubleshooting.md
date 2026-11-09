@@ -154,7 +154,7 @@ the update has changed how the input box is drawn, and `fabrikito` needs updatin
 The executable that seat runs was swapped under it, and macOS may stop its privacy grants (the
 worktree volume, for example). Restart the seat: `./fabrikito down --yes <role>`, then
 `./fabrikito up <role>`. To update every seat, run `claude update` in your own shell, then
-`down --yes` and `up`. See [Updating Claude Code](../README.md#updating-claude-code).
+`down --yes` and `up`. See [Updating Claude Code](updating-claude-code.md).
 
 ### `up` stops: "... is not a copy of ..."
 
@@ -171,7 +171,7 @@ way ([#194](../../../issues/194)).
 
 Each old copy of claude holds about 310 MB once the shared file has moved on, and nothing removes
 them. When `check` lists a copy with no running seat, remove that folder by its exact path. See
-[Updating Claude Code](../README.md#updating-claude-code).
+[Updating Claude Code](updating-claude-code.md).
 
 ## Tests and live tests
 

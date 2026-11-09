@@ -54,11 +54,12 @@ project's specifics stay out of this repository. Every command and option is in
 | [How work is tracked](docs/workflow.md) | The issues-first rule and the seats' progress notes. |
 | [The gate](docs/gate.md) | How a seat is held to the repository's checks when it stops. |
 | [Pinned releases](docs/pinned-release.md) | Run a team from a checkout fixed at a release. |
+| [Updating Claude Code](docs/updating-claude-code.md) | Update Claude Code on a running team, and remove old copies of claude. |
 | [Testing](docs/testing.md) | Run a live test on a private tmux server, and the end-to-end test. |
 | [Troubleshooting](docs/troubleshooting.md) | Find what you see (an error, a refused message, a silent seat) and what to do. |
 
 The full index is [docs/README.md](docs/README.md). Messaging (how seats talk, `say`, the message log),
-[Safety](#safety) and [Updating Claude Code](#updating-claude-code) are still on this page, below.
+[Safety](#safety) is still on this page, below. [Updating Claude Code](docs/updating-claude-code.md) has moved to `docs/`.
 
 ## Reporting a vulnerability
 
@@ -84,8 +85,8 @@ The `security-audit` plugin skill is a modified copy of Cloudflare's
 
 ## Messaging, safety and updating
 
-The sections below hold the reference for messaging, safety and updating Claude Code. They are moving to
-pages under `docs/`.
+The sections below hold the reference for messaging and safety. They are moving to pages under `docs/`;
+Updating Claude Code has moved.
 
 ## How seats talk
 
@@ -486,30 +487,6 @@ dialog until a human answers it once; `up` reports which seats those are.
 
 ## Updating Claude Code
 
-Claude Code's updater replaces its shared executable (the npm package's `bin/claude.exe`), even with
-the same version, and every Claude Code session on the machine runs it, not only this team's seats.
-macOS then can no longer identify a seat still running the old file, and the privacy grants it runs
-under (a removable volume holding the worktrees, for example) stop working until the seat restarts
-(#50). So:
-
-- **Each seat runs the team's own copy of claude**, `.state/<team>/bin/claude-<version>/claude`. `up`
-  makes it from the shared executable when it is missing: an APFS clone where the state folder is on
-  the same file system (it takes no space while the shared file exists), else a plain copy. It is
-  checked (size, `--version`) before use, and if it cannot be made, `up` stops instead of running the
-  shared file. A copy that is already there is used only if it is the shared executable byte for byte;
-  one that differs is refused, not replaced, and `up` starts no seat ([#208](../../issues/208)).
-  Nothing but `up` writes there, and seats cannot edit it.
-- **The seats' own updater is off** (`DISABLE_AUTOUPDATER=1`, in the launch script and the generated
-  settings), so the seats do not add reinstalls of their own.
-- `check` names the shared executable, its version and the copy seats will run, and lists every copy
-  with the running seats that use it. `status` shows each running seat's executable, or `REPLACED`
-  when the file it runs has been swapped under it; `up` prints an ATTENTION line for such a seat.
-  Restart it (`down --yes <role>`, then `up <role>`).
-
-To update: `claude update` in your own shell (a manual update works with the variable set), then
-`./fabrikito down --yes` and `./fabrikito up`. The next `up` copies the new version, and every seat
-starts on it.
-
-Old copies are never removed automatically. Once the shared file has moved on, each one holds about
-310 MB. When `check` lists a copy with no running seat, remove that folder by its exact path, for
-example `rm -r .state/<team>/bin/claude-2.1.314`.
+This section moved to [Updating Claude Code](docs/updating-claude-code.md): why an update needs care on
+a running team, the team's own copy of claude that each seat runs, how to update, and how to remove old
+copies.
