@@ -421,7 +421,7 @@ hk=$(CLAUDE_CONFIG_DIR=$T/cfgoff $S -c $T/team.yaml check 2>&1 | grep "^hooks ")
   && ! CLAUDE_CONFIG_DIR=$T/cfgon $S -c $T/team.yaml check 2>&1 | grep -q "^hooks " && ! CLAUDE_CONFIG_DIR=$T/no-such-cfg $S -c $T/team.yaml check 2>&1 | grep -q "^hooks " \
   && ok "check: a hooks line naming the ungated seats when the user's settings disable all hooks, none otherwise" || { bad "check: hooks line"; echo "$hk"; }
 [ -d $T/state/notes ] && ok "up makes the notes folder under the state folder" || bad "no $T/state/notes after up"
-grep -qF "$T/state/notes/em.md" $T/state/prompts/em.md && ok "the rendered prompt names the seat's own note" || bad "the prompt does not name $T/state/notes/em.md"
+grep -qF "$RT/state/notes/em.md" $T/state/prompts/em.md && ok "the rendered prompt names the seat's own note by its real path (#264)" || bad "the prompt does not name $RT/state/notes/em.md"
 # The allow covers Edit (and Write), not a Bash redirect, which prompts outside bypass (qa, live on #90).
 grep -qF "Write it with the Write or Edit tool, not Bash" $T/state/prompts/em.md && ok "the prompt says to write the note with Write or Edit, not Bash" || bad "the prompt does not say how to write the note"
 # Seats are told their SendMessage traffic is logged too (#39), not that only say is.
@@ -496,12 +496,12 @@ $(rule deny "\"Edit(/$RT/elsewhere/**)\", \"Read(/$RT/ks/**)\"")"; dw=$(nos $S -
 ! echo "$dw" | grep -qF "covers its own progress note" && ok "state: no warning for a deny elsewhere or on another tool" || { bad "state: a false warning"; echo "$dw" | grep -F "covers its own" | cut -c1-200; }
 # The key does not move anything: the old folder, or a link to the same one, is named by check. A throwaway install
 # folder holds the default state, which fabrikito's own checkout must not.
-IN=$T/inst; mkdir -p $IN && cp -R $SRC/lib $SRC/roles $IN/ && IC="ruby $IN/lib/team_config.rb $T/v.yaml"
+IN=$T/kinst; mkdir -p $IN && cp -R $SRC/lib $SRC/roles $IN/ && IC="ruby $IN/lib/team_config.rb $T/v.yaml"
 mk "plugin: false" "state: $T/ks"; mkdir -p $IN/.state/tv/notes && echo old > $IN/.state/tv/notes/em.md
 dw=$(nos $IC warnings 2>&1)
-echo "$dw" | grep -qF "warning: the state folder is $T/ks (from state: in the team file), but the default $RT/inst/.state/tv also exists (a folder with content) and is a different folder." && ok "state: warns when the key points away from a default folder that has content" || { bad "state: a fresh start next to old state"; echo "$dw" | grep -E "^(warning|error)" | cut -c1-200; }
+echo "$dw" | grep -qF "warning: the state folder is $T/ks (from state: in the team file), but the default $RT/kinst/.state/tv also exists (a folder with content) and is a different folder." && ok "state: warns when the key points away from a default folder that has content" || { bad "state: a fresh start next to old state"; echo "$dw" | grep -E "^(warning|error)" | cut -c1-200; }
 rm -r $IN/.state/tv; ln -s $T/ks $IN/.state/tv; dw=$(nos $IC warnings 2>&1)
-echo "$dw" | grep -qF "note: $RT/inst/.state/tv is a link to the state folder ($T/ks); state: in the team file wins, so the link is unused and can be removed." && ok "state: a default link to the same folder is named as unused" || { bad "state: unused link"; echo "$dw" | grep -E "^(note|error)" | cut -c1-200; }
+echo "$dw" | grep -qF "note: $RT/kinst/.state/tv is a link to the state folder ($T/ks); state: in the team file wins, so the link is unused and can be removed." && ok "state: a default link to the same folder is named as unused" || { bad "state: unused link"; echo "$dw" | grep -E "^(note|error)" | cut -c1-200; }
 rm $IN/.state/tv; dw=$(nos $IC warnings 2>&1)
 ! echo "$dw" | grep -qE "default .* also exists|is a link to the state folder" && ok "state: no state warning when the default folder is absent" || bad "state: warning without a default folder"
 # The .state exemption holds for a factory checkout whose .state is a real folder, and not when it is a link into the checkout (sec on #270).
@@ -513,7 +513,7 @@ rm $IN/.state
 mk "wrapper: $T/bin/wrap" "state: $T/ks3"; sed -e 's/^team: tv/team: tk/' -e 's/prefix: tv/prefix: tk/' $T/v.yaml > $T/k.yaml
 up=$(nos env TEAM_VIEW=0 $S -c $T/k.yaml up --no-view em 2>&1); rc=$?; sleep 1
 senv=$(tmux show-environment -t '=tk-em:' TEAM_STATE_DIR 2>&1)
-[ $rc = 0 ] && [ -f $T/ks3/settings/em.json ] && [ -f $T/ks3/launch/em.sh ] && [ -d $T/ks3/notes ] && [ ! -e $SRC/.state/tk ] && [ "$senv" = "-TEAM_STATE_DIR" ] \
+[ $rc = 0 ] && [ -f $T/ks3/settings/em.json ] && [ -f $T/ks3/launch/em.sh ] && [ -d $T/ks3/notes ] && [ ! -e $SRC/.state/tk ] && ! echo "$senv" | grep -q "^TEAM_STATE_DIR=" \
   && grep -qF "$RT/ks3/notes/em.md" $T/ks3/prompts/em.md \
   && ok "state: up fills the key's folder (settings, launcher, prompt with the real note path, notes), makes no default folder, and sets no TEAM_STATE_DIR in the seat" || { bad "state: up (rc=$rc env=$senv)"; echo "$up" | tail -3; ls $T/ks3 2>&1; }
 env -u TEAM_STATE_DIR TEAM_CONFIG=$T/k.yaml TEAM_ROLE=em TEAM_SCRIPT=$S TEAM_VIEW=0 $S say em "hello-from-key-state" >/dev/null 2>&1; sleep 1
