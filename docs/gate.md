@@ -40,7 +40,8 @@ Roles without the switch never run it. The example gives it to the engineers and
   hard link, or anything other than a folder or a regular file, at `.state/<team>/gate/` or at the
   role's log or count in it, is refused: no gate runs and nothing is written. The seat is sent back,
   told to report it; in a turn the hook has already sent back, the stop goes through with a note naming
-  it. Only a seat could put one there; remove it by its exact path.
+  it. Only a seat could put one there; do not delete the file (it may be the real one, with a second name
+  made elsewhere): remove the other name, or move this file aside.
 - The gate runs with a time limit (`repo.gate_timeout`, default 600 s) in a process group of its own,
   which is killed whole when the time is up. A program that detaches from that group (a daemon, a tmux
   server) is not killed.
