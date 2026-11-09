@@ -22,6 +22,15 @@ flat=$(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render fs1 2>&1 | tr
 echo "$flat" | grep -qF 'run `git push origin <branch>:<branch>` as a command of its own, never chained' && echo "$flat" | grep -qF '`gh pr create --base <base>`' \
   && echo "$flat" | grep -qF '`git switch --no-track -c <branch> origin/main`' \
   && ok "the shared prompt says to run git push origin <branch>:<branch> alone, never chained (gh pr create named), on a branch cut with --no-track" || bad "the shared prompt does not say to run git push origin <branch>:<branch> alone, or to cut with --no-track"
+# A push to a PR branch after a reviewer cleared its head, or while it is checked or merged, costs a
+# review (#235): the shared prompt says to tell the EM and the reviewers first, that a fix is a new head
+# announced as one, and that a moved base is updated by the EM or the merge procedure, not pushed unasked.
+for r in $(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml ids); do
+  flat=$(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render "$r" 2>&1 | tr '\n' ' ' | tr -s ' ')
+  echo "$flat" | grep -qF 'posted READY or PASS at your PR' && echo "$flat" | grep -qF 'do not push to that branch without first telling the EM and those reviewers why' \
+    && echo "$flat" | grep -qF 'A needed fix is a new head, announced as one' && echo "$flat" | grep -qF 'the EM or the merge procedure asks for the update: do not push it unasked' \
+    && ok "seat $r's prompt says not to push to a cleared or merging PR branch, to announce a fix as a new head, and to let the EM update a moved base" || bad "seat $r's prompt lacks the rule against pushing to a cleared or merging PR branch (#235)"
+done
 echo "--- the example team sets effort per role"
 # Effort is the main cost and depth control: the manager coordinates at medium, the seats that
 # write, test and review code run at high. Read from the flags each seat would be launched with.
