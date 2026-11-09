@@ -437,4 +437,83 @@ chmod u+w $T/state/settings/em.json && echo '{"permissions":{}}' > $T/state/sett
 $S -c $T/team.yaml down --yes em >/dev/null; TEAM_VIEW=0 $S -c $T/team.yaml up --no-view em >/dev/null 2>&1
 [ "$(perms $T/state/settings/em.json)" = "$want_em" ] && [ "$(stat -f %Lp $T/state/settings/em.json)" = 444 ] && ok "up rewrites a stale settings file" || { bad "up rewrites settings"; perms $T/state/settings/em.json; }
 [ "$(cat $T/state/notes/em.md 2>&1)" = "Task: survive a restart" ] && ok "a seat's progress note survives down and up" || { bad "progress note after down/up"; ls -la $T/state/notes 2>&1; }
+echo "--- state: key (#264)"
+# The team file names the state folder: check, up, say and the prompts agree, with no link and no
+# TEAM_STATE_DIR in a seat. This whole run exports TEAM_STATE_DIR, so each case that must not have it drops it.
+nos() { env -u TEAM_STATE_DIR "$@"; }
+TC="ruby $SRC/lib/team_config.rb $T/v.yaml"
+mkdir -p $T/ks && mk "" "state: $T/ks"
+chk=$(nos $S -c $T/v.yaml check 2>&1); rc=$?
+[ $rc = 0 ] && echo "$chk" | grep -qxF "state     : $T/ks (state: in the team file)" && [ "$(nos $TC get state.dir)" = "$T/ks" ] \
+  && ok "state: check prints the key's folder and says where it came from" || { bad "state: check output (rc=$rc)"; echo "$chk" | grep -E "^(state|error)"; }
+[ "$(TEAM_STATE_DIR=$T/envst $TC get state.dir)" = "$T/envst" ] && [ "$(TEAM_STATE_DIR=$T/envst $TC get state.source)" = "TEAM_STATE_DIR in the environment" ] \
+  && ok "state: TEAM_STATE_DIR wins over the key" || bad "state: precedence of the environment over the key"
+mk ""; [ "$(nos $TC get state.dir)" = "$SRC/.state/tv" ] && [ "$(nos $TC get state.source)" = "the default <install>/.state/<team>" ] \
+  && ok "state: a team file without the key still gets <install>/.state/<team>" || bad "state: no key, default folder"
+# The prompt tells the seat the note's real path ($RT/ks, not the link $T/ks): a deny on the way a link spells it beats the allow.
+mk "" "state: $T/ks
+prompts: { common: $SRC/roles/common.md }"; rnd=$(nos $TC render em 2>&1)
+echo "$rnd" | grep -qF "Keep a progress note at \`$RT/ks/notes/em.md\`" && ! echo "$rnd" | grep -qF "$T/ks/notes/em.md" \
+  && ok "state: the prompt prints the note's real path" || { bad "state: note path in the prompt"; echo "$rnd" | grep -F "progress note"; }
+nos $TC settings em | ruby -rjson -e 'p = JSON.parse(STDIN.read)["permissions"]; exit(1) unless p["allow"].include?("Edit(/'"$RT"'/ks/notes/em.md)") && p["allow"].include?("Edit(/'"$T"'/ks/notes/em.md)")' \
+  && ok "state: the Edit allow on the note names the real path and the configured one" || bad "state: note allow rules"
+# What check refuses, each naming the key.
+touch $T/ksfile; mkdir -p $T/far/ksx $T/ks2/other/settings $T/ks2/other/launch $T/ks2/other/prompts; ln -s $T/repo $T/kslink
+reject "state: a relative path" "state must be an absolute path" "" "state: rel/st"
+reject "state: a non-string" "state must be a path" "" "state: [a, b]"
+reject "state: a path with .." "state must not contain .." "" "state: $T/ks/../x"
+reject "state: the filesystem root" "state: / is or holds the home folder" "" "state: /"
+reject "state: the home folder" "state: $HOME is or holds the home folder" "" "state: \"~\""
+reject "state: a folder holding the home folder" "state: $(dirname $HOME) is or holds the home folder" "" "state: $(dirname $HOME)"
+reject "state: a file" "state: $T/ksfile is a file, not a folder" "" "state: $T/ksfile"
+reject "state: a volume that is not mounted" "state: /Volumes/NoSuchVolume-e2e/st is on /Volumes/NoSuchVolume-e2e, which is not mounted" "" "state: /Volumes/NoSuchVolume-e2e/st"
+reject "state: inside the repository" "state: $T/repo/st is, holds or sits inside this team's repository (repo.path)" "" "state: $T/repo/st"
+reject "state: inside the repository by a link" "state: $T/kslink/st is, holds or sits inside this team's repository (repo.path)" "" "state: $T/kslink/st"
+reject "state: a seat's working directory itself" "state: $T/proj is, holds or sits inside seat em's working directory" "" "state: $T/proj"
+reject "state: inside a seat's working directory" "state: $T/proj/st is, holds or sits inside seat em's working directory" "" "state: $T/proj/st"
+reject "state: inside the worktree folder" "state: $VOL/$ROOT/st is, holds or sits inside this team's worktree folder" "" "state: $VOL/$ROOT/st"
+reject "state: inside the factory checkout" "state: $SRC/lib/st is, holds or sits inside this factory checkout" "" "state: $SRC/lib/st"
+accept "state: a folder under <checkout>/.state/" "" "state: $SRC/.state/e2e-ks-$$"
+mk "" "state: $T/far/ksx/sub
+other_teams: [{ state: $T/far/ksx }]"; ko=$($S -c $T/v.yaml check 2>&1); rc=$?
+[ $rc != 0 ] && echo "$ko" | grep -qF "state: $T/far/ksx/sub is, holds or sits inside the state folder of another team (other_teams: $T/far/ksx)" && ok "rejects state: inside another team's listed state folder" || { bad "rejects state: inside a listed state (rc=$rc)"; echo "$ko" | tail -2; }
+mk "" "state: $T/far
+other_teams: [{ state: $T/far/ksx }]"; ko=$($S -c $T/v.yaml check 2>&1); rc=$?
+[ $rc != 0 ] && echo "$ko" | grep -qF "state: $T/far is, holds or sits inside the state folder of another team (other_teams: $T/far/ksx)" && ok "rejects state: a folder holding another team's listed state" || { bad "rejects state: holding a listed state (rc=$rc)"; echo "$ko" | tail -2; }
+reject "state: inside a team's state folder that is not listed" "state: $T/ks2/other/mine sits inside a team's state folder ($RT/ks2/other)" "" "state: $T/ks2/other/mine"
+reject "state: a folder holding a team's state folder" "state: $T/ks2 holds another team's state folder ($T/ks2/other)" "" "state: $T/ks2"
+# check warns when a deny covers a seat's own note (the allow cannot win), and says nothing otherwise.
+mk "" "state: $T/ks
+$(rule deny "\"Edit(/$RT/ks/**)\"")"; dw=$(nos $S -c $T/v.yaml check 2>&1)
+echo "$dw" | grep -qF "warning: em: the deny Edit(/$RT/ks/**) covers its own progress note ($RT/ks/notes/em.md)" && ok "state: check warns when a deny covers a seat's own note" || { bad "state: deny over the note"; echo "$dw" | grep -E "^(warning|error)" | cut -c1-200; }
+mk "" "state: $T/ks
+$(rule deny "\"Edit(/$RT/elsewhere/**)\", \"Read(/$RT/ks/**)\"")"; dw=$(nos $S -c $T/v.yaml check 2>&1)
+! echo "$dw" | grep -qF "covers its own progress note" && ok "state: no warning for a deny elsewhere or on another tool" || { bad "state: a false warning"; echo "$dw" | grep -F "covers its own" | cut -c1-200; }
+# The key does not move anything: the old folder, or a link to the same one, is named by check. A throwaway install
+# folder holds the default state, which fabrikito's own checkout must not.
+IN=$T/inst; mkdir -p $IN && cp -R $SRC/lib $SRC/roles $IN/ && IC="ruby $IN/lib/team_config.rb $T/v.yaml"
+mk "plugin: false" "state: $T/ks"; mkdir -p $IN/.state/tv/notes && echo old > $IN/.state/tv/notes/em.md
+dw=$(nos $IC warnings 2>&1)
+echo "$dw" | grep -qF "warning: the state folder is $T/ks (from state: in the team file), but the default $RT/inst/.state/tv also exists (a folder with content) and is a different folder." && ok "state: warns when the key points away from a default folder that has content" || { bad "state: a fresh start next to old state"; echo "$dw" | grep -E "^(warning|error)" | cut -c1-200; }
+rm -r $IN/.state/tv; ln -s $T/ks $IN/.state/tv; dw=$(nos $IC warnings 2>&1)
+echo "$dw" | grep -qF "note: $RT/inst/.state/tv is a link to the state folder ($T/ks); state: in the team file wins, so the link is unused and can be removed." && ok "state: a default link to the same folder is named as unused" || { bad "state: unused link"; echo "$dw" | grep -E "^(note|error)" | cut -c1-200; }
+rm $IN/.state/tv; dw=$(nos $IC warnings 2>&1)
+! echo "$dw" | grep -qE "default .* also exists|is a link to the state folder" && ok "state: no state warning when the default folder is absent" || bad "state: warning without a default folder"
+# up and the seats: no link, no TEAM_STATE_DIR in the seat, one folder for up and for the seat's say.
+mk "wrapper: $T/bin/wrap" "state: $T/ks3"; sed -e 's/^team: tv/team: tk/' -e 's/prefix: tv/prefix: tk/' $T/v.yaml > $T/k.yaml
+up=$(nos env TEAM_VIEW=0 $S -c $T/k.yaml up --no-view em 2>&1); rc=$?; sleep 1
+senv=$(tmux show-environment -t '=tk-em:' TEAM_STATE_DIR 2>&1)
+[ $rc = 0 ] && [ -f $T/ks3/settings/em.json ] && [ -f $T/ks3/launch/em.sh ] && [ -d $T/ks3/notes ] && [ ! -e $SRC/.state/tk ] && [ "$senv" = "-TEAM_STATE_DIR" ] \
+  && grep -qF "$RT/ks3/notes/em.md" $T/ks3/prompts/em.md \
+  && ok "state: up fills the key's folder (settings, launcher, prompt with the real note path, notes), makes no default folder, and sets no TEAM_STATE_DIR in the seat" || { bad "state: up (rc=$rc env=$senv)"; echo "$up" | tail -3; ls $T/ks3 2>&1; }
+env -u TEAM_STATE_DIR TEAM_CONFIG=$T/k.yaml TEAM_ROLE=em TEAM_SCRIPT=$S TEAM_VIEW=0 $S say em "hello-from-key-state" >/dev/null 2>&1; sleep 1
+grep -qF "hello-from-key-state" $T/ks3/messages.log 2>/dev/null && [ ! -e $SRC/.state/tk ] \
+  && ok "state: a seat's say (TEAM_CONFIG and TEAM_SCRIPT, no TEAM_STATE_DIR) logs in the key's folder, outside the install" || { bad "state: a seat's say"; ls $T/ks3 $SRC/.state 2>&1 | head; }
+$S -c $T/k.yaml down --yes >/dev/null 2>&1
+# up with TEAM_STATE_DIR set: the seat gets that folder (it wins over the key), so its say reads what up wrote.
+up=$(TEAM_STATE_DIR=$T/ks4 TEAM_VIEW=0 $S -c $T/k.yaml up --no-view em 2>&1); rc=$?; sleep 1
+senv=$(tmux show-environment -t '=tk-em:' TEAM_STATE_DIR 2>&1)
+[ $rc = 0 ] && [ "$senv" = "TEAM_STATE_DIR=$T/ks4" ] && [ -f $T/ks4/settings/em.json ] \
+  && ok "state: up with TEAM_STATE_DIR set passes the resolved folder to the seat's session" || { bad "state: TEAM_STATE_DIR passed to the seat (rc=$rc env=$senv)"; echo "$up" | tail -3; }
+TEAM_STATE_DIR=$T/ks4 $S -c $T/k.yaml down --yes >/dev/null 2>&1
 e2e_end=settings # the last line: test/e2e.sh checks that the file ran to here

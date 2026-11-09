@@ -28,14 +28,20 @@ until that seat restarts:
 | Hooks | The seat's settings name that checkout's `lib/session_start.sh`, `lib/log_message.sh` and `lib/stop_gate.sh`. |
 | Plugin | The seat's launch script passes `--plugin-dir` with that checkout's `plugin/`. |
 | Prompts | Rendered at `up` from that checkout's `roles/` and the team file's prompts. |
-| State | That checkout's `.state/<team>`. Here it is a symlink to `<state>`, so every release shares one state folder: progress notes, the message log, triage records, the gate's counters and the team's copies of claude. |
+| State | The team file's `state:`, here `<state>`, so every release shares one state folder: progress notes, the message log, triage records, the gate's counters and the team's copies of claude. Without `state:`, that checkout's `.state/<team>`, which can be a symlink to `<state>` (the older way, [below](#set-up-a-release-checkout)). |
 
 `./fabrikito check` prints the checkout it runs from and its `git describe`, for example
 `install   : <releases>/factory-<release> at <release>`. A checkout with uncommitted changes ends
 in `-dirty`.
 
-Do not use `TEAM_STATE_DIR` for a pinned team. `up` honours it, but the seats do not get it, so a seat's
-`say` would look for the state under its checkout's `.state/` instead.
+Name the state folder in the team file, `state: <state>` ([#264](../../../issues/264)). `up`, `check`, `say`,
+the hooks and every seat read it from there, so no link is needed and every release of the team file
+points at one folder. Do not use `TEAM_STATE_DIR` for a pinned team: it is for throwaway teams and
+tests, and wins over the key. (`up` gives the seat's session the folder it used only when it had
+`TEAM_STATE_DIR` in its own environment.) `check` prints the state folder and where it came from, and
+warns when the default `<checkout>/.state/<team>` also exists and leads somewhere else: the key moves
+nothing, so a team that adds it to a running team's state moves the old folder there first. Running
+seats keep their old settings until they restart.
 
 ## Set up a release checkout
 
@@ -66,7 +72,9 @@ Do not use `TEAM_STATE_DIR` for a pinned team. `up` honours it, but the seats do
    The team file must sit in that checkout's `teams/`, or `up` treats the team as a throwaway one
    ([Throwaway teams](commands.md#throwaway-teams)).
 
-3. Link the shared state folder into it:
+3. Point the checkout at the shared state folder. Add `state: <state>` to the team file (once; each copy
+   of the file carries it), and no link is needed. A team that runs without `state:` links the folder
+   in instead (optional, the older way, which `state:` replaces):
 
    ```
    mkdir -p <releases>/factory-<release>/.state
@@ -83,14 +91,14 @@ releases folder to every other team file's `permissions`. For a releases folder 
 that is `deny: ["Edit(//path/to/releases/**)"]` (an absolute path takes `//` in a rule). Or keep it
 where those teams never work.
 
-The releases-folder deny goes in the other teams' files only, never in the pinned team's own. Each
-seat's prompt names its progress note through its checkout's state link,
-`<releases>/factory-<release>/.state/<team>/notes/<role>.md`, which is inside the releases folder. In
-the pinned team's file, the deny covers that path, and a deny wins over the allow the seat's settings
-give its note, so every seat is refused when it writes its note by the path its prompt gives
-([#219](../../../issues/219)). For the same reason, give each pinned team a releases folder of its
-own: two pinned teams sharing one would each deny it in the other's file, and so block each other's
-notes.
+The releases-folder deny goes in the other teams' files only, never in the pinned team's own. A seat's
+prompt names its progress note by its real path, so with `state:` outside the releases folder the note
+is not under the deny. Reached through a state link inside the releases folder, a note's other spelling,
+`<releases>/factory-<release>/.state/<team>/notes/<role>.md`, is covered by it: in the pinned team's
+file the deny covers that path, and a deny wins over the allow the seat's settings give its note
+([#219](../../../issues/219), [#264](../../../issues/264)). If a deny does cover a seat's real note path, `check`
+warns, naming the seat and the rule. Give each pinned team a releases folder of its own: two pinned teams
+sharing one would each deny it in the other's file, and so block each other's notes.
 
 The shared `<state>` folder, which holds the pinned team's notes, log and records, needs the same care
 in both directions, and the factory finds neither direction itself. It finds another team's state only

@@ -60,7 +60,7 @@ def home_utf8
   utf8(Dir.home, 'the home folder (HOME)')
 end
 
-TOP_KEYS = %w[team owner repo project storage sessions display prompts kickoff permissions roles other_teams].freeze
+TOP_KEYS = %w[team owner repo project storage state sessions display prompts kickoff permissions roles other_teams].freeze
 DISPLAY_KEYS = %w[iterm primary window].freeze
 PROJECT_KEYS = %w[name url].freeze
 EFFORTS = %w[low medium high xhigh max].freeze
@@ -422,7 +422,7 @@ class TeamConfig
       'REPO' => repo_path, 'WORKDIR' => workdir(id), 'WORKTREE_ROOT' => worktree_root,
       'VOLUME' => volume, 'GITHUB_REPO' => github, 'GITHUB_URL' => "https://github.com/#{github}",
       'PROJECT_NAME' => project['name'].to_s, 'PROJECT_URL' => project['url'].to_s, 'TEAM' => @c['team'].to_s, 'OWNER' => owner, 'ROSTER' => roster,
-      'GATE_MAX_BLOCKS' => gate_max_blocks.to_s, 'NOTE' => note_path(id)
+      'GATE_MAX_BLOCKS' => gate_max_blocks.to_s, 'NOTE' => note_real_path(id)
     }
   end
 
@@ -597,14 +597,50 @@ class TeamConfig
     out
   end
 
-  # Generated prompts, launchers, settings and the message log live here.
+  # Generated prompts, launchers, settings and the message log live here. In this order: the
+  # environment (TEAM_STATE_DIR, for throwaway teams and tests), the team file's `state:` key (#264),
+  # then <install>/.state/<team>. up, check, say, the hooks and every seat read the team file, so
+  # they all name the same folder; a seat's session also gets TEAM_STATE_DIR when up had it.
   def state_dir
-    File.expand_path(env_utf8('TEAM_STATE_DIR') || File.join(INSTALL, '.state', @c['team'].to_s))
+    File.expand_path(env_utf8('TEAM_STATE_DIR') || state_key_path || File.join(INSTALL, '.state', @c['team'].to_s))
+  end
+
+  def default_state_dir
+    File.join(INSTALL, '.state', @c['team'].to_s)
+  end
+
+  # Where state_dir comes from, for `check`.
+  def state_source
+    return 'TEAM_STATE_DIR in the environment' if ENV.key?('TEAM_STATE_DIR')
+    return 'state: in the team file' if @c.key?('state')
+
+    'the default <install>/.state/<team>'
+  end
+
+  # The `state:` key as an absolute path, or nil without the key. Only its form is checked here
+  # (state_dir calls this on every use, other checks included); validate_state_key and
+  # validate_state_work hold the refusals that need the rest of the team file.
+  def state_key_path
+    return nil unless @c.key?('state')
+
+    v = @c['state']
+    die "state must be a path (absolute, or starting with ~/): the team's state folder, not #{v.inspect}" unless v.is_a?(String) && !v.strip.empty?
+    die 'state must be an absolute path (/... or ~/...), not a relative one: a relative path would mean a different folder for every seat' unless v.start_with?('/', '~/') || v == '~'
+    die "state must not contain a newline or a NUL: #{v.inspect}" if v =~ /[\n\r\0]/
+    die "state must not contain ..: #{v}" if v.split('/').include?('..')
+
+    expand(v)
   end
 
   # The seat's progress note (#5). Seats write it; up only makes its folder; nothing deletes it.
   def note_path(id)
     File.join(state_dir, NOTES_DIR, "#{id}.md")
+  end
+
+  # The note's real path: what a seat is told to write. Its allow names both spellings, but a deny on
+  # the way a link spells it (a releases folder, #264) beats the allow, and only the real path escapes it.
+  def note_real_path(id)
+    real_path(note_path(id))
   end
 
   # Edit rules for a seat's note: as configured and as its real path, glob characters escaped.
@@ -1253,9 +1289,134 @@ class TeamConfig
     %w[deny ask].flat_map { |l| merged[l].select { |r| rule_matches?(r, command) }.map { |r| "#{l} #{r}" } }
   end
 
+  # --- the `state:` key (#264) ---------------------------------------------------------------------
+  # Paths compare as other_teams' do: real paths, in NFC lower case on macOS (case-insensitive disks).
+  def fold_path(path)
+    r = real_path(path)
+    RUBY_PLATFORM.include?('darwin') ? r.unicode_normalize(:nfc).downcase : r
+  end
+
+  def path_within?(inner, outer)
+    i = fold_path(inner)
+    o = fold_path(outer)
+    i == o || i.start_with?(o.end_with?('/') ? o : "#{o}/")
+  end
+
+  # Whether /Volumes/<name> is a mounted volume (the mount table, as fabrikito proves storage.volume),
+  # or a link to the boot volume, which the mount table does not list. A path under an unmounted
+  # /Volumes/<name> would be made on the internal disk by mkdir -p.
+  def volume_mounted?(vol)
+    return true if File.symlink?(vol) && !File.realpath(vol).start_with?('/Volumes/')
+
+    IO.popen(['mount'], err: File::NULL, &:read).to_s.include?(" on #{vol} (")
+  rescue SystemCallError
+    false
+  end
+
+  # The refusals for `state:` that need only the key and the other_teams entries: validate runs this
+  # before other_teams_listed, which would otherwise refuse the same overlap naming other_teams.
+  def validate_state_key
+    return unless @c.key?('state')
+
+    p = state_key_path
+    if (m = p.match(%r{\A(/Volumes/[^/]+)}))
+      die "state: #{p} is on #{m[1]}, which is not mounted: refusing to make the state folder on another disk" unless volume_mounted?(m[1])
+    end
+    die "state: #{p} is a file, not a folder" if File.exist?(p) && !File.directory?(p)
+    die "state: #{p} is or holds the home folder (#{home_utf8}), or is the filesystem root: name a folder for this team's state" if path_within?(home_utf8, p)
+
+    Array(@c['other_teams']).each do |e|
+      next unless e.is_a?(Hash) && e['state'].is_a?(String) && !e['state'].empty?
+
+      o = expand(e['state'])
+      die "state: #{p} is, holds or sits inside the state folder of another team (other_teams: #{o})" if path_overlap?(p, o)
+    end
+    # Not a folder another team's up made (settings/, launch/, prompts/) that this team has not used
+    # yet, nor inside one, nor holding one: the other team's seats would deny each other's work.
+    own = real_path(p)
+    anc = File.dirname(own)
+    until anc == File.dirname(anc)
+      die "state: #{p} sits inside a team's state folder (#{anc})" if team_state?(anc)
+      anc = File.dirname(anc)
+    end
+    if File.directory?(p) && !team_state?(p)
+      held = (Dir.children(p).sort rescue []).map { |n| File.join(p, n) }.find { |c| File.directory?(c) && !File.symlink?(c) && team_state?(c) }
+      die "state: #{p} holds another team's state folder (#{held})" if held
+    end
+  end
+
+  # The refusals that need the team's own work (validate runs this once the roles are checked): the
+  # state folder may not be, hold or sit inside the repository, the worktree folder, a seat's working
+  # directory or this factory checkout, except under <that folder>/.state/, the factory's own
+  # git-ignored layout (a team working on this repository keeps its state in its checkout's .state/).
+  # Anything else inside a checkout is tracked or may be: a seat's own work would deny itself, and
+  # the Edit denies on the state folder would stop the seats' work there.
+  def validate_state_work
+    return unless @c.key?('state')
+
+    p = state_key_path
+    places = [["this team's repository (repo.path)", repo_path], ["this team's worktree folder (#{worktree_root})", worktree_root]]
+    places += roles.keys.map { |id| ["seat #{id}'s working directory", workdir(id)] }
+    places << ['this factory checkout', INSTALL]
+    places.each do |what, dir|
+      next unless path_overlap?(p, dir)
+
+      ds = File.join(dir, '.state')
+      next if path_within?(p, ds) && fold_path(p) != fold_path(ds) && path_within?(p, dir) # <dir>/.state/<name> and below
+
+      die "state: #{p} is, holds or sits inside #{what}: a state folder inside a checkout is tracked or is a seat's own work. " \
+          "Use a folder outside every checkout, or one under <checkout>/.state/"
+    end
+  end
+
+  # `check`'s warnings about where the state is (#264). The key does not move anything: a team given
+  # state: at a new, empty folder starts its seats with no notes while the old folder still holds them.
+  def state_warnings
+    out = []
+    d = default_state_dir
+    here = state_dir
+    return out if File.expand_path(here) == File.expand_path(d)
+
+    from = state_source
+    if File.symlink?(d) && fold_path(d) == fold_path(here)
+      out << "note: #{d} is a link to the state folder (#{here}); #{from} wins, so the link is unused and can be removed."
+    elsif File.symlink?(d) || (File.directory?(d) && !empty_dir?(d))
+      what = File.symlink?(d) ? "a link to #{real_path(d)}" : 'a folder with content'
+      out << "warning: the state folder is #{here} (from #{from}), but the default #{d} also exists (#{what}) and is a different folder. " \
+             'Seats will start with the notes, message log and triage records of this one, not that one. Move, do not copy (docs/pinned-release.md).'
+    end
+    out
+  end
+
+  # Whether an Edit deny rule covers a path, for `check`: only the form this team's own rules and the
+  # example use, Edit(//<absolute path or glob>), where ** is any depth. Anything it cannot read
+  # (~, a relative pattern, a Write rule) it says nothing about rather than guesses. An approximation
+  # of Claude Code's own gitignore-style matching (sec: how close).
+  def edit_deny_covers?(rule, path)
+    spec = rule[/\AEdit\((.*)\)\z/m, 1]
+    return false unless spec&.start_with?('//')
+
+    pat = spec[1..]
+    pat = "#{pat[0...-3]}/**/*" if pat.end_with?('/**')
+    File.fnmatch(pat, path, File::FNM_PATHNAME | File::FNM_EXTGLOB)
+  end
+
+  # A deny on a seat's own note beats the Edit allow on it, so the seat cannot keep its note (#264,
+  # the pinned-release team whose deny named the releases folder). The note is checked at the real
+  # path, which is what the prompt tells the seat to write.
+  def note_deny_warnings
+    roles.keys.flat_map do |id|
+      note = note_real_path(id)
+      merged_permissions(id)['deny'].select { |r| edit_deny_covers?(r, note) }.map do |r|
+        "warning: #{id}: the deny #{r} covers its own progress note (#{note}), so the Edit allow on the note has no effect and #{id} cannot write it. " \
+          "Set state: in the team file to a folder that rule does not cover, or narrow the rule."
+      end
+    end
+  end
+
   # What `check` warns about. Warnings do not stop a start.
   def warnings
-    held_message_warnings + merge_warnings + triage_warnings
+    held_message_warnings + merge_warnings + triage_warnings + state_warnings + note_deny_warnings
   end
 
   # A role other than TRIAGE_WRITER that lists the security-triage skill would write its records
@@ -1311,6 +1472,7 @@ class TeamConfig
     die "project.name is required" if project['name'].to_s.empty?
     die "project.url must be an https://github.com/ URL" unless project['url'].to_s.start_with?('https://github.com/')
     die "repo.path is not a directory: #{repo_path}" unless File.directory?(repo_path)
+    validate_state_key
     other_teams_listed
     die 'storage.volume is required (an absolute path such as /Volumes/MyDrive)' unless storage['volume'].to_s.start_with?('/', '~')
     die 'storage.root is required and must be relative to the volume' if storage['root'].to_s.empty? || storage['root'].to_s.start_with?('/')
@@ -1388,6 +1550,7 @@ class TeamConfig
       role_prompt(id)
       kickoff(id)
     end
+    validate_state_work
     prompts_common
     prompts_project
     roles.each_key { |id| render(id) } # unknown @@placeholders and a project label fail here, not at launch
@@ -1430,6 +1593,7 @@ when 'get'
   when 'sessions.plugin' then puts(cfg.plugin? ? real_path(PLUGIN_DIR) : '')
   when 'sessions.wrapper' then puts(cfg.claude['wrapper'] ? cfg.expand(cfg.claude['wrapper']) : '')
   when 'state.dir' then puts cfg.state_dir
+  when 'state.source' then puts cfg.state_source
   when 'claude.config_dir' then puts cfg.claude_config_paths.first
   when 'state.generated_dirs' then puts GENERATED_DIRS
   when 'state.hook_dirs' then puts HOOK_DIRS

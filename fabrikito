@@ -40,7 +40,8 @@
 # session alive; `up` after that skips the seat. Run `down` first to start it fresh.
 #
 # Environment: TEAM_CONFIG (team file), TEAM_STATE_DIR (generated prompts, launchers, settings
-# and the message log; default .state/<team>/ next to this script).
+# and the message log). The state folder is TEAM_STATE_DIR, else the team file's `state:`, else
+# .state/<team>/ next to this script.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -419,7 +420,7 @@ cmd_check() {
     done
     echo "            $d ($(cat "$d/.how" 2>/dev/null || echo '?')):${users:- no running seat}"
   done
-  echo "state     : $STATE"
+  echo "state     : $STATE ($(cfg get state.source))"
   printf '%-5s %-36s %-18s %-12s %-9s %-24s %-9s %-7s %s\n' ROLE SEAT SESSION MODEL EFFORT MODE MEMORY GATE WORKDIR
   for r in $ROLES; do
     printf '%-5s %-36s %-18s %-12s %-9s %-24s %-9s %-7s %s\n' "$r" "$(title "$r")" "$(session "$r")" "$(cfg role "$r" model)" \
@@ -569,8 +570,12 @@ cmd_up() {
     } >"$launch"
     chmod +x "$launch"
 
+    # TEAM_STATE_DIR only when up had it in its environment (a throwaway team, a test): the seat's
+    # say then reads the same folder up did (#264). Without it the team file names the state, for
+    # up and for the seat alike. Not always set: a seat that ran another team file would otherwise
+    # inherit this team's state folder and write into it.
     tmux new-session -d -s "$sess" -c "$dir" -x 220 -y 50 \
-      -e "TEAM_ROLE=$r" -e "TEAM_CONFIG=$CONFIG" -e "TEAM_SCRIPT=$SELF"
+      -e "TEAM_ROLE=$r" -e "TEAM_CONFIG=$CONFIG" -e "TEAM_SCRIPT=$SELF" ${TEAM_STATE_DIR+-e "TEAM_STATE_DIR=$STATE"}
     apply_title "$r"
     tmux send-keys -t "=$sess:" "$launch" Enter
     echo "start  $r: $(title "$r") -> tmux session $sess ($dir)"
