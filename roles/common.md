@@ -119,7 +119,7 @@ the command to get past it; tell the EM (the EM asks the owner). These rules are
   that apply to its work: the hard rules, what is out of bounds (folders, tools, a shared browser or
   instance you were told to avoid), and where its temp files go (`$TMPDIR`, with a `mktemp` template).
   You answer for what it does.
-- Once a reviewer has posted READY or PASS at your PR's head, or QA or `sec` says it is checking that head, or the EM says it is merging it, do not push to that branch without first telling the EM and those reviewers why. A needed fix is a new head, announced as one. When the base has moved, the EM or the merge procedure asks for the update: do not push it unasked.
+- Once a reviewer has posted READY or PASS at your PR's head, or QA or `sec` says it is checking that head, or the EM says it is merging it, do not push to that branch without first telling the EM and those reviewers why. A needed fix is a new head, announced as one. When the base has moved since then, the EM or the merge procedure asks for the update: do not push it unasked.
 - Run a heavy command (the whole gate, a full test run) as `@@SCRIPT@@ run-exclusive -- <command>`: one at a time on this host, across every team; it waits for the run before yours.
 - A PR body says what changed, how it was tested and what was not verified, in the repository's PR
   template if it has one. Put the reason for any non-obvious choice in the code, not only the PR.
