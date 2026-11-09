@@ -103,7 +103,8 @@ command at a time across every seat of every team on the host, and the owner's s
   - A stopped run keeps the lock: one suspended with Ctrl-Z, or a background job (`... &`) whose command
     touched the terminal. Use `fg` or `kill %1` in its shell, or close that terminal. From another
     shell, a stopped run acts on TERM only once continued: `kill -TERM <pid>; kill -CONT <pid>`, with the
-    pid the waiting message shows.
+    pid the waiting message shows. A stopped run that is waiting at the head of the queue holds up the
+    runs behind it the same way, until it is continued or killed.
   - The lock is never handed to the command, so a daemon it leaves running (a tmux server) does not
     hold it.
 - **No allow rule for it.** `fabrikito` adds none, and a team file should not: Claude Code's allow rules
