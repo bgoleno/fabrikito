@@ -124,7 +124,7 @@ rescue Errno::ENOENT
 end
 
 def open_lock(lock)
-  die("#{lock} is a symlink, a hard link or not a regular file, and the lock is never taken through one: remove that exact path") if unsafe?(lock)
+  die("#{lock} is a symlink, a hard link or not a regular file, and the lock is never taken through one. Do not delete this file: it may be the real one, with a second name made elsewhere. Remove the other name, or move this file aside") if unsafe?(lock)
   # NOFOLLOW: a link made after the check fails the open. NONBLOCK: a FIFO does not hang it. Ruby opens
   # every file close-on-exec, so the command never holds the lock: anything it leaves running would
   # hold it otherwise, as with lockf(1), which hands it on (the e2e's tmux server outlives the run).
@@ -132,7 +132,7 @@ def open_lock(lock)
   st = f.stat
   unless st.file? && st.nlink == 1
     f.close
-    die("#{lock} is not a regular file with one name, and the lock is never taken through one: remove that exact path")
+    die("#{lock} is not a regular file with one name, and the lock is never taken through one. Do not delete this file: it may be the real one, with a second name made elsewhere. Remove the other name, or move this file aside")
   end
   f
 rescue Errno::ELOOP
