@@ -144,9 +144,9 @@ rm $T/state/messages.log && mv $T/msglog.real $T/state/messages.log
 mv $T/state/messages.log $T/msglog.real && ln $T/sent-log $T/state/messages.log
 lout=$(TEAM_ROLE=em $S -c $T/team.yaml say w1 "through a hard-linked log" 2>&1); rc=$?; sleep 1
 rm $T/state/messages.log && mv $T/msglog.real $T/state/messages.log
-[ $rc != 0 ] && cmp -s $T/sent-log $T/sent-log.want && echo "$lout" | grep -qF "$T/state/messages.log is a symlink, a FIFO or a hard link" && echo "$lout" | grep -qF "could not be written" \
+[ $rc != 0 ] && cmp -s $T/sent-log $T/sent-log.want && echo "$lout" | grep -qF "$T/state/messages.log is a symlink, a FIFO or a hard link" && echo "$lout" | grep -qF "could not be written" && echo "$lout" | grep -qF "Do not delete this file: it may be the real one, with a second name made elsewhere. Remove the other name, or move this file aside" && ! echo "$lout" | grep -qF "exact path" \
   && tmux has-session -t '=tt-w1' 2>/dev/null && ! tmux capture-pane -p -t '=tt-w1:' | grep -q "through a hard-linked log" \
-  && ok "say: a hard link at messages.log is refused, nothing is delivered or written through it, and say says the line was not written" || { bad "say through a hard-linked log (rc=$rc)"; echo "$lout"; cat $T/sent-log; }
+  && ok "say: a hard link at messages.log is refused, nothing is delivered or written through it, say says the line was not written, and the advice is to remove the other name or move the file aside, never to delete it" || { bad "say through a hard-linked log (rc=$rc)"; echo "$lout"; cat $T/sent-log; }
 # A say to or from sec is logged without its body (#227). A team file that also has a sec seat (down: the
 # line is NOT-DELIVERED, which is the status the checks read), with its own state folder.
 echo "--- say: sec's messages are logged without their body (#227)"
