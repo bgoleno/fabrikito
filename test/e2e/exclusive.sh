@@ -216,7 +216,7 @@ out=$(FACTORY_RUN_LOCK=$rx/ln/lock $S run-exclusive -- sh -c 'echo SHOULD-NOT-RU
   && ok "run-exclusive refuses a lock file that is a symlink, and runs nothing" || { bad "run-exclusive through a symlink (rc=$rc)"; echo "$out" | tail -2; }
 : > $rx/hl-other; mkdir -p $rx/hl && ln $rx/hl-other $rx/hl/lock
 out=$(FACTORY_RUN_LOCK=$rx/hl/lock $S run-exclusive -- sh -c 'echo SHOULD-NOT-RUN' 2>&1); rc=$?
-[ $rc = 1 ] && echo "$out" | grep -qF "$rx/hl/lock is a symlink, a hard link" && ! echo "$out" | grep -q SHOULD-NOT-RUN \
+[ $rc = 1 ] && echo "$out" | grep -qF "$rx/hl/lock is a symlink, a hard link" && echo "$out" | grep -qF "Do not delete this file: it may be the real one, with a second name made elsewhere. Remove the other name, or move this file aside" && ! echo "$out" | grep -qF "exact path" && ! echo "$out" | grep -q SHOULD-NOT-RUN \
   && ok "run-exclusive refuses a lock file that is a hard link, and runs nothing" || { bad "run-exclusive through a hard link (rc=$rc)"; echo "$out" | tail -2; }
 mkdir -p $rx/ld-target && ln -s $rx/ld-target $rx/ld
 out=$(FACTORY_RUN_LOCK=$rx/ld/lock $S run-exclusive -- sh -c 'echo SHOULD-NOT-RUN' 2>&1); rc=$?

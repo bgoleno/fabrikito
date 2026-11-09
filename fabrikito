@@ -1476,7 +1476,7 @@ cmd_say() {
   # just before it. Anything else that cannot be appended to (a folder, a file without write
   # permission) fails the append itself, after the delivery, as before (#128).
   if log_unsafe && [ -z "$why" ]; then
-    why="$LOG is a symlink, a FIFO or a hard link, and say does not write through one: report it to the EM (only a seat could have put it there; it is removed by its exact path)"
+    why="$LOG is a symlink, a FIFO or a hard link, and say does not write through one: report it to the EM (only a seat could have put it there). Do not delete this file: it may be the real one, with a second name made elsewhere. Remove the other name, or move this file aside"
   fi
   # Record before report (#128): the messages.log line is written before any terminal message.
   # The log is the record the owner and the EM go by. A write to the terminal or a pipe can fail:
