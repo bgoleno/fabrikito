@@ -102,7 +102,7 @@ done
 for f in log count; do
   rm -f $T/gstate/gate/w9.$f && ln $T/gsent/w9.$f $T/gstate/gate/w9.$f
   before=$(runs); gate s7
-  [ $rc = 2 ] && echo "$err" | grep -qF "$T/gstate/gate/w9.$f is a symlink, a hard link" && [ "$(runs)" = "$before" ] && diff -r $T/gsent $T/gsent.want >/dev/null \
+  [ $rc = 2 ] && echo "$err" | grep -qF "$T/gstate/gate/w9.$f is a symlink, a hard link" && echo "$err" | grep -qF "Do not delete this file: it may be the real one, with a second name made elsewhere. Remove the other name, or move this file aside" && ! echo "$err" | grep -qF "exact path" && [ "$(runs)" = "$before" ] && diff -r $T/gsent $T/gsent.want >/dev/null \
     && ok "a hard link at gate/w9.$f: the hook does not run the gate or write through it, and sends the seat back naming it" || { bad "a hard link at gate/w9.$f (rc=$rc, gate runs $before -> $(runs))"; echo "$err"; diff -r $T/gsent $T/gsent.want; }
   rm $T/gstate/gate/w9.$f
 done
