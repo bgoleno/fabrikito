@@ -648,6 +648,15 @@ class TeamConfig
     [File.expand_path(note_path(id)), real_path(note_path(id))].uniq.map { |p| "Edit(/#{glob_escape(p)})" }
   end
 
+  # Edit allow on everything in the seat's own temp folder (roles.<id>.tmpdir, #252), in both
+  # spellings. The folder is outside the seat's working directory, so in a mode that prompts a Write
+  # there would wait for a human. Only the seat's own folder: never another role's or team's, and
+  # none for a seat without a tmpdir. An allow is the weakest list, so any deny above it still wins.
+  def tmpdir_rules(id)
+    t = tmpdir(id) or return []
+    [File.expand_path(t), real_path(t)].uniq.map { |p| "Edit(/#{glob_escape(p)}/**)" }
+  end
+
   # <state>/triage/** in both spellings (as configured and real): the folder glob-escaped, then an
   # unescaped /** for everything in it.
   def triage_paths
@@ -1047,7 +1056,7 @@ class TeamConfig
     tri = triage_rules(id)
     deny = protected_paths(id).map { |p| "Edit(/#{p})" } + others + log_read_rules(id) + memory_rules(id) + tri['deny'] +
            other_team_rules(id)
-    add.call({ 'deny' => deny, 'ask' => base_push_rules, 'allow' => own + tri['allow'] }, 'fabrikito')
+    add.call({ 'deny' => deny, 'ask' => base_push_rules, 'allow' => own + tri['allow'] + tmpdir_rules(id) }, 'fabrikito')
     out
   end
 
@@ -1208,7 +1217,8 @@ class TeamConfig
         factory.include?(r) && !notes.include?(r) && !logs.include?(r) && !mem.include?(r) && !tri['deny'].include?(r) && !others.include?(r)
       end
       asks = merged['ask'].count { |r| factory.include?(r) }
-      note = merged['allow'].any? { |r| factory.include?(r) } ? ', Edit allow on its own progress note and deny on the other seats\'' : ''
+      note = merged['allow'].any? { |r| note_rules(id).include?(r) } ? ', Edit allow on its own progress note and deny on the other seats\'' : ''
+      tmp = merged['allow'].any? { |r| tmpdir_rules(id).include?(r) } ? ", Edit allow on its own temp folder (#{tmpdir(id)})" : ''
       memo = mem.empty? ? '' : ", Edit deny on the repository's auto-memory folder (#{mem.size} spellings)"
       log = (merged['deny'] & logs).empty? ? '' : ', Read deny on the message log'
       triage = if id == TRIAGE_WRITER then ', Edit and Read allow on the triage record folder'
@@ -1221,7 +1231,7 @@ class TeamConfig
                 ", Read and Edit deny on #{other_teams.size} other teams' state folders" +
                   (watched.empty? ? '' : " (observer of #{watched.join(', ')}: may read its log and notes)")
               end
-      out << "    added: Edit deny on #{added} protected paths#{asks.positive? ? ", ask on #{asks} push-to-#{base_branch} patterns" : ''}#{note}#{memo}#{log}#{triage}#{teams}"
+      out << "    added: Edit deny on #{added} protected paths#{asks.positive? ? ", ask on #{asks} push-to-#{base_branch} patterns" : ''}#{note}#{tmp}#{memo}#{log}#{triage}#{teams}"
       out << '    note : allow rules have no effect in bypassPermissions' if mode.start_with?('bypassPermissions') && !(merged['allow'] - factory).empty?
       out << '    note : ask rules are refused in dontAsk mode, not asked' if mode == 'dontAsk' && !merged['ask'].empty?
     end
