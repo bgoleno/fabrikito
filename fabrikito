@@ -341,11 +341,17 @@ bootstrap_worktree() {
     # every other variable, and installs rely on the user's (proxies, SSH_AUTH_SOCK, tool paths).
     local v; local -a drop=()
     for v in "${!CLAUDE_CODE_MESSAGING_@}"; do drop+=(-u "$v"); done # quoted: a name may hold a space or *
+    # A role with roles.<id>.tmpdir gets that folder as TMPDIR, as its seat does (#253): an install writes
+    # temp files, and with the caller's TMPDIR they could land on the internal disk. up made the folder
+    # (prepare_tmpdir) before this runs. A role without tmpdir keeps the caller's TMPDIR, as before.
+    local rt; local -a tmp=()
+    rt=$(cfg role "$id" tmpdir)
+    [ -z "$rt" ] || tmp=(TMPDIR="$rt")
     set -m
     (
       set +e
       (cd "$dir" && exec env ${drop[@]+"${drop[@]}"} -u CLAUDECODE \
-        -u TMUX -u TMUX_PANE TEAM_ROLE="$id" TEAM_REPO="$REPO" bash -c "$BOOTSTRAP") </dev/null 2>&1 | sed -l 's/^/    | /'
+        -u TMUX -u TMUX_PANE TEAM_ROLE="$id" TEAM_REPO="$REPO" ${tmp[@]+"${tmp[@]}"} bash -c "$BOOTSTRAP") </dev/null 2>&1 | sed -l 's/^/    | /'
       exit "${PIPESTATUS[0]}"
     ) &
     BOOT_PID=$!
