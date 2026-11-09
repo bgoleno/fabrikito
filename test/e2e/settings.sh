@@ -79,7 +79,8 @@ echo changed >> $T/ginst/VERSION
 gd=$($T/ginst/fabrikito -c $T/ginst/teams/team.yaml check 2>&1 | grep "^install ")
 [ "$gl" = "install   : $T/ginst at v9.8.7" ] && [ "$gd" = "install   : $T/ginst at v9.8.7-dirty" ] \
   && ok "check: the install line names the factory checkout and its tag (lightweight), with -dirty after a change" || { bad "check: install line in a git checkout"; echo "clean: $gl"; echo "dirty: $gd"; }
-mkdir -p $T/linst/teams; for p in fabrikito lib roles plugin; do ln -s $SRC/$p $T/linst/$p; done; cp $T/team.yaml $T/linst/teams/team.yaml
+# fabrikito is copied, not linked: a link to the file is the real install (#263), so a linked file would make $SRC the install.
+mkdir -p $T/linst/teams; cp $SRC/fabrikito $T/linst/fabrikito; for p in lib roles plugin; do ln -s $SRC/$p $T/linst/$p; done; cp $T/team.yaml $T/linst/teams/team.yaml
 $T/linst/fabrikito -c $T/linst/teams/team.yaml check 2>&1 | grep -qxF "install   : $T/linst (not a git checkout)" && ok "check: an install outside any git checkout says so" || { bad "check: install line outside git"; $T/linst/fabrikito -c $T/linst/teams/team.yaml check 2>&1 | grep -E "^(install|error)"; }
 echo "$chk" | grep -qxF "bootstrap : $T/bin/boot (run in each new worktree before its seat starts)" && echo "$chk" | grep -qxF "copy      : .env.local, conf/dev.json, missing.txt (from the main checkout into each new worktree)" && ok "check: bootstrap and copy lines" || { bad "check: bootstrap and copy lines"; echo "$chk" | grep -E "^(bootstrap|copy) "; }
 echo "$chk" | grep -qE "^em +Manager .* bypassPermissions " && echo "$chk" | grep -qE "^w1 +Worker One .* default " && ok "check: MODE column per role" || { bad "check MODE column"; echo "$chk"; }
