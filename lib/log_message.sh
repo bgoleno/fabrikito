@@ -11,6 +11,8 @@
 # in the receiver's inbox, and NOT-SENT when it returned success false or failed. The recipient is
 # written as a role id when it names a roster seat's session (with or without a " [ref]"), or when
 # it is a uds: address whose process runs in a roster seat's pane; anything else is written as given.
+# A call with notify_when_idle and no message sends nothing: its outcome is NOTIFY-WHEN-IDLE and its
+# message the placeholder "<no message: notify when idle>" (#247).
 # A message or recipient that is not a string is written as its JSON text. Input that cannot be read
 # at all is still recorded, as a line with recipient "?", outcome UNREADABLE and a placeholder message:
 # the hook runs only on SendMessage, so a message was sent, and the log should say so.
@@ -135,8 +137,17 @@ ruby --disable-gems -rjson -e '
       r = (JSON.parse(r) rescue r) if r.is_a?(String)
       r.is_a?(Hash) && r["success"] == false ? "NOT-SENT" : "sent"
     end
+  # A call with notify_when_idle and no message sends nothing: it asks to be told when the receiver
+  # is idle (#247). Logged as sent with an empty message it read as an empty message sent, so it is
+  # written with a placeholder message, and as outcome NOTIFY-WHEN-IDLE when it succeeded (a failure
+  # stays NOT-SENT). Only a missing or empty message with notify_when_idle exactly true counts; every
+  # other call is logged as before, byte for byte. The sender cannot choose the outcome, so a
+  # message that spells the placeholder cannot pass for a subscription.
+  watch = inp["notify_when_idle"] == true && (inp["message"].nil? || inp["message"] == "")
+  outcome = "NOTIFY-WHEN-IDLE" if watch && outcome == "sent"
+  msg = watch ? "<no message: notify when idle>" : field(text(inp["message"]))
   name = to.sub(/ \[[^\]]*\]\z/, "")
   rcpt = roles[name] || uds_role(to, roles) || to
-  append(log, [stamp, field(from), field(rcpt), outcome, field(text(inp["message"]))])
+  append(log, [stamp, field(from), field(rcpt), outcome, msg])
 ' -- "$log" "$from" "$@" </dev/stdin >/dev/null 2>&1
 exit 0

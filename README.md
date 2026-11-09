@@ -285,6 +285,10 @@ Each `SendMessage` from a seat appends one line in the same format, written by `
   `SendMessage` returned `success: false` or failed. `sent` is not `delivered`: a receiver in another
   permission mode can still hold a message for its user's approval, or refuse it, and that comes back
   later as a notice to the sender, which the log does not see;
+- a call with `notify_when_idle` and no message (or an empty one) sends nothing: it asks to be told when
+  the receiver is idle. It is logged with the outcome `NOTIFY-WHEN-IDLE` and the message
+  `<no message: notify when idle>` (`NOT-SENT` if the call failed), not as an empty message sent
+  ([#247](../../issues/247));
 - hook input that still cannot be read is logged as a line with the recipient `?`, the outcome
   `UNREADABLE` and the message `<hook input could not be read>`, so a message is never left out of
   the log without a trace.
