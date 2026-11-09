@@ -73,8 +73,17 @@ command at a time across every seat of every team on the host, and the owner's s
 - **The command** is an argument list, not a shell string (write a pipeline as `bash -c '...'`). It
   runs in the caller's process group, so a pager or a prompt works at a terminal and Ctrl-C reaches it.
   The exit status is the command's, or 128 plus the signal that ended it. It needs no team file, so it
-  works from any checkout. Waiting runs do not queue in order of arrival: each tries the lock every 2
-  seconds, so one can be passed by another.
+  works from any checkout.
+- **First come, first served** ([#283](../../../issues/283)). Waiting runs get the lock in the order they
+  arrived, so a run that starts later never passes one that is already waiting (a merge gate is not
+  starved by later runs). Each waiting run takes a ticket, a file named by its arrival time in a
+  folder next to the lock (`run-exclusive.lock.queue/`), and keeps it locked while it waits; only the
+  earliest live ticket tries the lock, every 2 seconds. A run that ends while waiting (Ctrl-C, TERM)
+  gives up its place at once. One killed with SIGKILL loses it as soon as the next poll finds its ticket
+  unlocked (within 2 seconds): the system drops the lock with the process, so a killed run leaves
+  nothing that blocks the ones behind it or a later run. The waiting message says how many runs are
+  ahead. The folder is removed when the last waiting run leaves. A run started before this was added
+  does not take a ticket and can still pass the queue, until it ends.
 - **The lock** is one file per user, `~/Library/Application Support/software-factory/run-exclusive.lock`,
   outside every team's state and checkout. Teams on one machine share the user, so they share the lock.
   `FACTORY_RUN_LOCK` names another file, by an absolute path (the e2e uses its own). The folder is made
