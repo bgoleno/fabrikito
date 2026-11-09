@@ -46,8 +46,9 @@ lt CDPATH=/ TMUX_TMPDIR=tmp sh -c 'cd / && exec "$@"' sh $S -c $T/lt.yaml up --n
 refused_default && ok "up refuses a relative TMUX_TMPDIR that resolves to /tmp, with CDPATH set" || { bad "up with CDPATH and a relative TMUX_TMPDIR (rc=$rc, calls=$calls)"; echo "$out"; }
 lt $S -c $T/lt.yaml up --no-view --default-socket
 [ "$calls" -gt 0 ] && ! echo "$out" | grep -qF "default tmux server" && ok "up --default-socket goes ahead on the default server" || { bad "up --default-socket (rc=$rc, calls=$calls)"; echo "$out"; }
-# a team file in teams/ next to fabrikito: an install of links under $T, so nothing is written in the checkout
-mkdir -p $T/inst/teams; for p in fabrikito lib roles plugin; do ln -s $SRC/$p $T/inst/$p; done; cp $T/lt.yaml $T/inst/teams/lt.yaml
+# a team file in teams/ next to fabrikito: an install under $T (links to lib, roles and plugin), so nothing is written in the checkout
+# fabrikito is copied, not linked: a link to the file is the real install (#263), so a linked file would make $SRC the install.
+mkdir -p $T/inst/teams; cp $SRC/fabrikito $T/inst/fabrikito; for p in lib roles plugin; do ln -s $SRC/$p $T/inst/$p; done; cp $T/lt.yaml $T/inst/teams/lt.yaml
 lt $T/inst/fabrikito -c $T/inst/teams/lt.yaml up --no-view
 [ "$calls" -gt 0 ] && ! echo "$out" | grep -qF "default tmux server" && ok "up goes ahead on the default server for a team file in teams/" || { bad "up for a team file in teams/ (rc=$rc, calls=$calls)"; echo "$out"; }
 # The same rule for down (with and without --yes), say, attach and view (#105). A team of two
