@@ -12,6 +12,20 @@ the reference for each key, and the file to copy.
 - `storage`: `volume` and `root`. Every worktree is created under `<volume>/<root>/`. The volume must be
   mounted, checked from the mount table when a worktree is created; the launcher never falls back to
   another disk.
+- `state` (optional): the team's state folder (settings, launch scripts, prompts, message log, progress
+  notes, triage records), an absolute path or `~/...`. Without it, `<install>/.state/<team>`. `up`,
+  `check`, `say`, the hooks and every seat read it from the team file, so a team run from a pinned
+  release needs no link in each release ([Running a team from a pinned release](pinned-release.md)).
+  Precedence: `TEAM_STATE_DIR` (throwaway teams and tests), then `state`, then the default; `check`
+  prints the folder and which of the three it is. The key moves nothing, so a team that adds it to an
+  existing state folder moves that folder first; `check` warns when the default folder is still there
+  and is a different one. Running seats keep the state folder they started with until they restart.
+  `check` refuses a relative path, the home folder or a folder holding it, a folder inside the
+  repository, a seat's working directory, the worktree folder or a factory checkout (a folder under
+  `<factory checkout>/.state/` is allowed, and only there), a volume that is not mounted, and a folder that is, holds or sits
+  inside another team's state folder (one in `other_teams` or one `check` finds by its `settings/`,
+  `launch/` and `prompts/`). The other teams `check` finds are the folders beside the state folder, so
+  a state folder shared with other teams' folders in one parent treats them as other teams.
 - `sessions`: tmux name prefix, an optional claude `wrapper`, `args`, and an optional default `model`,
   `effort` and `permission_mode`. Unset means the flag is omitted and the seat inherits
   `~/.claude/settings.json`. `sessions.claude.plugin` (default `true`) loads the factory plugin into

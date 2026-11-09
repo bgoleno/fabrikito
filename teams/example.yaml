@@ -49,6 +49,18 @@ storage:
   volume: /Volumes/YourDrive
   root: Projects/example-worktrees
 
+# Optional: where this team's state lives (settings, launch scripts, prompts, the message log, the
+# seats' progress notes, triage records, the team's copy of claude). An absolute path, or one starting
+# with ~/. Without it the state is <install>/.state/<team>. A team run from a pinned release names a
+# folder here, outside every checkout, and needs no link in each release (docs/pinned-release.md).
+# `up`, `check`, `say`, the hooks and every seat read it from this file. TEAM_STATE_DIR, when set,
+# wins over it (throwaway teams and tests). Refused by `check`: a relative path, the home folder or a
+# folder holding it, a folder inside the repository, a seat's working directory, the worktree folder
+# or a factory checkout (except under <factory checkout>/.state/, which that checkout git-ignores), a volume that is not mounted, and a folder
+# that is, holds or sits inside another team's state folder. It moves nothing: an existing team that
+# adds it starts with an empty folder, so move the old state first (docs/pinned-release.md).
+# state: /path/outside/every/checkout/example-state
+
 sessions:
   prefix: example             # tmux session name is <prefix>-<role id> unless a role sets `session`
   claude:
