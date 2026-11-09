@@ -15,11 +15,17 @@
 # removed while a run holds it no longer makes the next run wait (tl on #214). FACTORY_RUN_LOCK names
 # another file instead (the e2e uses its own).
 #
+# Waiting runs get the lock in the order they arrived (#283). Each takes a ticket, a file named by its
+# arrival time in <lock>.queue/, flocked for as long as the run waits; only the earliest live ticket
+# tries the lock. The system drops a flock when its process ends however it ends (even SIGKILL), so a
+# killed waiter's ticket is found stale by the next poll and removed: its place is never stuck.
+#
 # System ruby 2.6: no gems, no endless methods.
 require "json"
 require "etc"
 
 LOCK_POLL = 2       # seconds between tries while the lock is busy
+TICKET_STALE = 10   # seconds: a waiting run touches its ticket every poll; one untouched this long is not waiting (#283)
 REMIND = 300        # seconds between "still waiting" lines
 
 def say(msg)
@@ -141,6 +147,86 @@ rescue SystemCallError => e
   die("cannot open #{lock}: #{e.message}")
 end
 
+# The queue (#283). Tickets are named <arrival time in ns, 20 digits>-<pid>, so a sorted listing is the
+# order of arrival. A ticket is made under a temporary name, flocked, and then renamed (the lock stays
+# with the file), so a name that looks like a ticket is always already locked by its run.
+QUEUE_RE = /\A\d{20}-\d{1,10}\z/
+TMP_RE = /\A\.tmp-\d{1,10}\z/
+
+def queue_dir!(qdir)
+  begin
+    Dir.mkdir(qdir, 0o700)
+  rescue Errno::EEXIST
+    nil
+  rescue SystemCallError => e
+    die("cannot make #{qdir}: #{e.message}")
+  end
+  st = File.lstat(qdir)
+  die("#{qdir} is a symlink or not a folder, and the queue is never kept in one: remove that exact path") if st.symlink? || !st.directory?
+  die("#{qdir} is owned by another user or open to others, and the queue is never kept in one: move it aside") if st.uid != Process.uid || (st.mode & 0o022) != 0
+end
+
+# Returns [open file, path]. The file's flock is the ticket's life: it ends with this run.
+def take_ticket(qdir)
+  3.times do
+    name = format("%020d-%d", Process.clock_gettime(Process::CLOCK_REALTIME, :nanosecond), Process.pid)
+    tmp = File.join(qdir, ".tmp-#{Process.pid}")
+    begin
+      # Inside the retry: the last run to leave may remove the folder between the mkdir and the lstat in
+      # queue_dir!, or between it and the open below (tl on #284).
+      queue_dir!(qdir)
+      File.unlink(tmp) if File.symlink?(tmp) || File.exist?(tmp)
+      f = File.open(tmp, File::WRONLY | File::CREAT | File::EXCL | File::NOFOLLOW, 0o600)
+      f.flock(File::LOCK_EX)
+      path = File.join(qdir, name)
+      File.rename(tmp, path)
+      return [f, path]
+    rescue Errno::ENOENT
+      next # the last run left and removed the empty folder between the mkdir and the open: make it again
+    rescue SystemCallError => e
+      (File.unlink(tmp) rescue nil)
+      die("cannot take a place in the queue #{qdir}: #{e.message}")
+    end
+  end
+  die("cannot take a place in the queue #{qdir}")
+end
+
+# Whether the run that made this ticket is alive: its flock is still held. A ticket nobody holds is
+# stale (its run was killed) and is removed. Anything that is not a regular file with one name is not a
+# ticket: only its name is removed, never what it leads to. A ticket that cannot be read counts as
+# stale: a place in line is not worth a wait that never ends.
+def live_ticket?(path)
+  st = File.lstat(path)
+  unless st.file? && st.nlink == 1
+    (File.unlink(path) rescue nil)
+    return false
+  end
+  f = File.open(path, File::RDONLY | File::NOFOLLOW | File::NONBLOCK)
+  begin
+    # Held, and touched lately: a run that is waiting. Held but not touched for TICKET_STALE seconds: its
+    # run is stopped (Ctrl-Z, kill -STOP) or hung, and a ticket like that must not hold up the line while
+    # the lock is free. Its run finds the ticket gone when it continues and takes a new place at the end.
+    return true if !f.flock(File::LOCK_SH | File::LOCK_NB) && Time.now - f.stat.mtime <= TICKET_STALE
+    cur = (File.lstat(path) rescue nil)
+    fs = f.stat
+    File.unlink(path) if cur && cur.dev == fs.dev && cur.ino == fs.ino
+    false
+  ensure
+    f.close
+  end
+rescue SystemCallError
+  false
+end
+
+# How many live runs arrived before the one whose ticket is named name.
+def ahead(qdir, name)
+  names = (Dir.children(qdir) rescue [])
+  # A run killed between its create and its rename leaves a .tmp-<pid>. One younger than a few seconds may be
+  # a run about to lock it, so it is left alone (its probe would call it stale and the run would lose its place).
+  names.each { |n| live_ticket?(File.join(qdir, n)) if n =~ TMP_RE && (Time.now - (File.lstat(File.join(qdir, n)).mtime rescue Time.now)) > 5 }
+  names.select { |n| n =~ QUEUE_RE && n < name }.count { |n| live_ticket?(File.join(qdir, n)) }
+end
+
 # Until the command is about to start, a signal ends this run (130, 143, 129) without running it. From
 # then on it is passed on to the command, and the command's own end decides the exit status. A signal
 # that arrives while the command is being started is held and passed on once its pid is known. CONT
@@ -170,9 +256,31 @@ started = Time.now
 waited = false
 reminded = started
 f = nil
+qdir = "#{lock}.queue"
+tf, tpath = take_ticket(qdir)
+tname = File.basename(tpath)
+# However this run ends (a signal, a refusal, the end of its command) its ticket goes, and the folder
+# with it when it is the last (a leftover folder would change nothing but the listing).
+at_exit do
+  (File.unlink(tpath) rescue nil)
+  (tf.close rescue nil)
+  (Dir.rmdir(qdir) rescue nil)
+end
 loop do
-  f = open_lock(lock)
-  if f.flock(File::LOCK_EX | File::LOCK_NB)
+  # Show the line this run is alive (its flock does not tell a stopped run from a running one). If the
+  # ticket is gone, the others took this run for stopped (it was, or the machine stalled it for
+  # TICKET_STALE seconds): it takes a new place at the end. Mutual exclusion is the main lock, not this.
+  begin
+    File.utime(nil, nil, tpath)
+  rescue SystemCallError
+    (tf.close rescue nil)
+    tf, tpath = take_ticket(qdir)
+    tname = File.basename(tpath)
+  end
+  n = ahead(qdir, tname)
+  # Only the earliest waiting run tries the lock; the others wait their turn, however free it is.
+  f = n == 0 ? open_lock(lock) : nil
+  if f && f.flock(File::LOCK_EX | File::LOCK_NB)
     # The lock is on the open file, not the name. A waiter can open the file, have its name removed
     # and made again by another run, then lock the old file once its holder ends: it would hold a lock
     # nobody else takes, and overlap the run on the new file. So the name must still lead to the file
@@ -183,18 +291,21 @@ loop do
     f.close
     next
   end
-  f.close
+  f.close if f
   now = Time.now
+  line = n.zero? ? "" : "; #{n} earlier run#{n == 1 ? " is" : "s are"} waiting ahead of this one"
   if !waited
-    say "waiting for the lock (#{lock}), held by #{who(record(holder))}"
+    say "waiting for the lock (#{lock}), held by #{who(record(holder))}#{line}"
     waited = true
   elsif now - reminded >= REMIND
-    say "still waiting, since #{started.strftime("%H:%M:%S")} (#{(now - started).round}s), for #{who(record(holder))}"
+    say "still waiting, since #{started.strftime("%H:%M:%S")} (#{(now - started).round}s), for #{who(record(holder))}#{line}"
     reminded = now
   end
   sleep LOCK_POLL
 end
 
+# This run's turn is over: its ticket goes, and the next in line may try the lock.
+(File.unlink(tpath) rescue nil)
 me = Process.pid
 rec = {
   "pid" => me,
