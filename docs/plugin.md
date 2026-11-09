@@ -4,8 +4,8 @@ The Claude Code plugin that carries fabrikito's skills into every seat, and how 
 
 `plugin/` is a Claude Code [plugin](https://code.claude.com/docs/en/plugins) (`.claude-plugin/plugin.json`
 and `skills/`) that `up` loads into every seat with `--plugin-dir <this checkout>/plugin`. Seats work in
-the target project's folders, where this repository's own `.claude/` is never read, so this is how the
-factory's skills reach them. Nothing is installed into your settings: a session fabrikito did not start
+the target project's folders, where this repository's own `.claude/` is never read, so this is how
+fabrikito's skills reach them. Nothing is installed into your settings: a session fabrikito did not start
 does not have the plugin. Its skills are namespaced by the plugin name and show as `/fabrikito:<skill>`.
 
 ## Its skills
@@ -19,6 +19,20 @@ when typed: see [Skills started by typing them](#skills-started-by-typing-them).
 procedure. The rules it applies (a brief's fields, the review bar) stay in the role prompt, which the
 skill points to rather than copies, and a skill stops if the prompt lacks them. `test/e2e/launch.sh`
 checks every skill's frontmatter, so adding one needs no new test code.
+
+### The security-audit skill
+
+`/fabrikito:security-audit` is a modified copy of the MIT-licensed
+[security-audit-skill](https://github.com/cloudflare/security-audit-skill) from Cloudflare. It is for the
+security engineer (`sec`) only: its description says so, and `teams/example.yaml` lists it for `sec` alone
+(`test/e2e/audit.sh` checks that no other role's prompt lists it). Every seat still loads it, as every
+seat loads every skill. It gives security guidance by default, which writes nothing. A full audit runs
+only with the owner's say-so passed through the EM, and its output goes to the team's triage folder,
+never into a repository, an issue or a pull request. The team's rules for it are in
+[`FABRIKITO-PROCESS.md`](../plugin/skills/security-audit/FABRIKITO-PROCESS.md) in the skill's folder,
+which wins over the upstream text where they differ. [`UPSTREAM.md`](../plugin/skills/security-audit/UPSTREAM.md)
+there names the upstream commit that was copied and lists every change, and
+[`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md) holds the copyright notice and license.
 
 ### Skills started by typing them
 

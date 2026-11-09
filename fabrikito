@@ -46,7 +46,19 @@
 # .state/<team>/ next to this script.
 set -euo pipefail
 
-HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# This file may be run through a symlink (relative or absolute, a chain of links, from any folder, #263):
+# follow the links to the real file before looking for lib/ next to it, as factory.sh does. A path that
+# loops is refused: the shell cannot start such a link at all, so the limit is a guard, not a case that
+# an e2e run can reach.
+src=${BASH_SOURCE[0]} hops=0
+while [ -L "$src" ]; do
+  hops=$((hops + 1))
+  [ "$hops" -le 40 ] || { echo "error: too many symbolic links (a loop?) resolving $0" >&2; exit 1; }
+  d=$(cd -P "$(dirname "$src")" && pwd -P) # physical, so a target with .. resolves as the kernel does
+  src=$(readlink "$src")
+  case $src in /*) ;; *) src=$d/$src ;; esac
+done
+HERE=$(cd "$(dirname "$src")" && pwd)
 SELF="$HERE/fabrikito"
 RB="$HERE/lib/team_config.rb"
 
