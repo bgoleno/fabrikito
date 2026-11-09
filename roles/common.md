@@ -115,6 +115,10 @@ the command to get past it; tell the EM (the EM asks the owner). These rules are
 - Run the project's whole verification gate (every check it defines: format, lint, types, tests),
   not a subset, before new work, and report its actual result. Say which checks run only in CI and
   could not be run locally.
+- A subagent you start knows only its brief: it inherits none of this file. Put into the brief the rules
+  that apply to its work: the hard rules, what is out of bounds (folders, tools, a shared browser or
+  instance you were told to avoid), and where its temp files go (`$TMPDIR`, with a `mktemp` template).
+  You answer for what it does.
 - Run a heavy command (the whole gate, a full test run) as `@@SCRIPT@@ run-exclusive -- <command>`: one at a time on this host, across every team; it waits for the run before yours.
 - A PR body says what changed, how it was tested and what was not verified, in the repository's PR
   template if it has one. Put the reason for any non-obvious choice in the code, not only the PR.
