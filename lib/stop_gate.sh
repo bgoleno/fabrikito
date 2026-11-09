@@ -76,7 +76,7 @@ else
   done
 fi
 if [ -n "$unsafe" ]; then
-  why="The stop gate did not run: $unsafe is a symlink, a hard link, or not a regular file or folder, and the hook does not write or read its state through one (#194). Report it to the EM: only a seat could have put it there, and it is removed by its exact path."
+  why="The stop gate did not run: $unsafe is a symlink, a hard link, or not a regular file or folder, and the hook does not write or read its state through one (#194). Report it to the EM: only a seat could have put it there. Do not delete this file: it may be the real one, with a second name made elsewhere. Remove the other name, or move this file aside."
   if [ "$active" = true ]; then
     ruby -rjson -e 'puts JSON.generate("continue" => false, "stopReason" => ARGV[0])' "$why"
     exit 0

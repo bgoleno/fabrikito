@@ -76,7 +76,7 @@ See [Testing](docs/testing.md).
 
 ## License
 
-Apache License 2.0. See LICENSE.
+Apache License 2.0. See [LICENSE](LICENSE).
 
 The `security-audit` plugin skill is a modified copy of Cloudflare's
 [security-audit-skill](https://github.com/cloudflare/security-audit-skill) (MIT); see
@@ -268,7 +268,8 @@ sent again), and exits with status 1.
 The log is never written through a link ([#194](../../issues/194)). When `messages.log` is a symlink, a
 FIFO or a hard link (a file with a second name), `say` delivers nothing and writes no line: it prints
 why, says the record could not be written, and exits with status 1. Only a seat could put one there;
-remove it by its exact path. `lib/log_message.sh` (below) opens the log without following a symlink and
+do not delete the file (it may be the real one, with a second name made elsewhere): remove the other
+name, or move this file aside. `lib/log_message.sh` (below) opens the log without following a symlink and
 writes only to a regular file with one link, so there it costs that line.
 
 Each `SendMessage` from a seat appends one line in the same format, written by `lib/log_message.sh`, a
@@ -366,7 +367,7 @@ role's (team first; a role can add or tighten a rule, never loosen one), plus wh
   A listed folder may not be, hold or sit inside this team's own state folder, its repository, its
   worktree folder or a seat's working directory, whether or not it exists yet. The one exception is a
   team's state folder whose parent is a real folder named `.state`, which may sit inside them once that
-  team has run `up` (a pinned team working on fabrikito lists `<factory>/.state/<team>`). If
+  team has run `up` (a pinned team working on fabrikito lists `<install>/.state/<team>`). If
   it exists, it must be a team's state folder itself (holding `settings/`, `launch/` and `prompts/`),
   not its checkout or `.state/` above it. Outside them, one that doesn't exist yet, or is still empty,
   is accepted, and `check` says so. `check` lists the
