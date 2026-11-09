@@ -510,7 +510,8 @@ mkdir -p $IN/src; rmdir $IN/.state; ln -s src $IN/.state; mk "plugin: false" "st
 [ $irc = 0 ] && [ $ilrc != 0 ] && echo "$ilc" | grep -qF "is, holds or sits inside this factory checkout" && ok "state: .state of a factory checkout is allowed, and not when .state is a link" || { bad "state: .state link in a factory checkout (real=$irc link=$ilrc)"; echo "$ivc$ilc" | tail -2; }
 rm $IN/.state
 # up and the seats: no link, no TEAM_STATE_DIR in the seat, one folder for up and for the seat's say.
-mk "wrapper: $T/bin/wrap" "state: $T/ks3"; sed -e 's/^team: tv/team: tk/' -e 's/prefix: tv/prefix: tk/' $T/v.yaml > $T/k.yaml
+mk "wrapper: $T/bin/wrap" "state: $T/ks3
+prompts: { common: $SRC/roles/common.md }"; sed -e 's/^team: tv/team: tk/' -e 's/prefix: tv/prefix: tk/' $T/v.yaml > $T/k.yaml
 up=$(nos env TEAM_VIEW=0 $S -c $T/k.yaml up --no-view em 2>&1); rc=$?; sleep 1
 senv=$(tmux show-environment -t '=tk-em:' TEAM_STATE_DIR 2>&1)
 [ $rc = 0 ] && [ -f $T/ks3/settings/em.json ] && [ -f $T/ks3/launch/em.sh ] && [ -d $T/ks3/notes ] && [ ! -e $SRC/.state/tk ] && ! echo "$senv" | grep -q "^TEAM_STATE_DIR=" \
