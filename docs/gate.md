@@ -73,8 +73,17 @@ command at a time across every seat of every team on the host, and the owner's s
 - **The command** is an argument list, not a shell string (write a pipeline as `bash -c '...'`). It
   runs in the caller's process group, so a pager or a prompt works at a terminal and Ctrl-C reaches it.
   The exit status is the command's, or 128 plus the signal that ended it. It needs no team file, so it
-  works from any checkout. Waiting runs do not queue in order of arrival: each tries the lock every 2
-  seconds, so one can be passed by another.
+  works from any checkout.
+- **First come, first served** ([#283](../../../issues/283)). Waiting runs get the lock in the order they
+  arrived, so a run that starts later never passes one that is already waiting (a merge gate is not
+  starved by later runs). Each waiting run takes a ticket, a file named by its arrival time in a
+  folder next to the lock (`run-exclusive.lock.queue/`), and keeps it locked while it waits; only the
+  earliest live ticket tries the lock, every 2 seconds. A run that ends while waiting (Ctrl-C, TERM)
+  gives up its place at once. One killed with SIGKILL loses it as soon as the next poll finds its ticket
+  unlocked (within 2 seconds): the system drops the lock with the process, so a killed run leaves
+  nothing that blocks the ones behind it or a later run. The waiting message says how many runs are
+  ahead. The folder is removed when the last waiting run leaves. A run started before this was added
+  does not take a ticket and can still pass the queue, until it ends.
 - **The lock** is one file per user, `~/Library/Application Support/software-factory/run-exclusive.lock`,
   outside every team's state and checkout. Teams on one machine share the user, so they share the lock.
   `FACTORY_RUN_LOCK` names another file, by an absolute path (the e2e uses its own). The folder is made
@@ -94,7 +103,9 @@ command at a time across every seat of every team on the host, and the owner's s
   - A stopped run keeps the lock: one suspended with Ctrl-Z, or a background job (`... &`) whose command
     touched the terminal. Use `fg` or `kill %1` in its shell, or close that terminal. From another
     shell, a stopped run acts on TERM only once continued: `kill -TERM <pid>; kill -CONT <pid>`, with the
-    pid the waiting message shows.
+    pid the waiting message shows. A stopped run that is waiting does not hold up the line: a waiting run
+    touches its ticket every 2 seconds, and one untouched for 10 seconds is dropped from the queue. When
+    it is continued it takes a new place at the end.
   - The lock is never handed to the command, so a daemon it leaves running (a tmux server) does not
     hold it.
 - **No allow rule for it.** `fabrikito` adds none, and a team file should not: Claude Code's allow rules
