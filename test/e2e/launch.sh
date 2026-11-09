@@ -78,4 +78,9 @@ for sl in abs sub/rel deep/chain sub/chain2; do
 done
 self_rel=$(cd $T/selflink/sub && ./rel -c $T/team.yaml check 2>&1)
 [ "$self_rel" = "$self_direct" ] && ok "fabrikito through a relative link, run from the link's own folder" || bad "fabrikito through a relative link from its own folder"
+# A relative link whose target goes up through a symlinked folder (dl/../rel2): the kernel resolves the .. in the
+# folder dl points at, so the resolver must use the physical folder (cd -P), not the path as written (#263).
+mkdir -p $T/selflink/real/a $T/selflink/L/m && ln -s ../abs $T/selflink/real/rel2 && ln -s $T/selflink/real/a $T/selflink/L/m/dl && ln -s dl/../rel2 $T/selflink/L/m/k
+self_dl=$(cd / && $T/selflink/L/m/k -c $T/team.yaml check 2>&1); self_dl_rc=$?
+[ "$self_dl_rc" = 0 ] && [ "$self_dl" = "$self_direct" ] && ok "fabrikito through a relative link whose target goes up through a symlinked folder" || { bad "fabrikito through dl/../rel2 (rc=$self_dl_rc)"; echo "$self_dl" | tail -3; }
 e2e_end=launch # the last line: test/e2e.sh checks that the file ran to here
