@@ -146,4 +146,28 @@ o4=$(printf '{"hook_event_name":"PostToolUse","tool_name":"SendMessage","tool_in
   | $SRC/lib/log_message.sh $T/lstate/hard.log w9 tt-w2=w2 2>&1); r4=$?
 [ $r4 = 0 ] && [ -z "$o4" ] && cmp -s $T/sent-hlog $T/sent-hlog.want \
   && ok "SendMessage log: a hard link at messages.log is not written through (exit 0, nothing printed)" || { bad "SendMessage log through a hard link (rc=$r4)"; echo "$o4"; cat $T/sent-hlog; }
+# A message to or from sec is logged without its body (#227): the line keeps the time, sender, recipient and
+# outcome, with a fixed marker in place of the text. A sentinel in the text must not appear anywhere in the log.
+# sec1 is sender and recipient both: the recipient is the role id (a session name or a uds: address resolves to
+# it first), so a message to sec's session is caught whatever name it was sent to.
+SEC_MARK='[body not logged: sec]'
+SENT='SENTINEL-227-hook-body'
+secchk() { local what=$1 who=$2 to=$3 m=$4 want_from=$5 want_to=$6 n
+  n=$(wc -l < $LG)
+  printf '%s' "$(TO="$to" M="$m" ruby -rjson -e 'print JSON.generate({"hook_event_name"=>"PostToolUse","tool_name"=>"SendMessage","tool_input"=>{"to"=>ENV["TO"],"message"=>ENV["M"]},"tool_response"=>{"success"=>true}})')" \
+    | $SRC/lib/log_message.sh $LG $who tt-em=em tt-sec=sec tt-w2=w2 >/dev/null 2>&1
+  line=$(tail -n +$((n + 1)) $LG)
+  if [ "$(wc -l < $LG)" -eq $((n + 1)) ] && [ "$(printf '%s\n' "$line" | cut -f2-5)" = "$want_from	$want_to	sent	$SEC_MARK" ] && ! grep -qF "$SENT" $LG; then
+    ok "SendMessage log: $what is logged without its body"
+  else bad "SendMessage log: $what"; printf '%s\n' "$line"; fi; }
+secchk "a message to sec's session" w9 tt-sec "text $SENT" w9 sec
+secchk "a message to sec's session with a [ref]" w9 'tt-sec [3fa9c1]' "text $SENT" w9 sec
+secchk "a message from sec" sec tt-w2 "text $SENT" sec w2
+secchk "a message from sec to the owner's em" sec tt-em "text $SENT, tab	and newline
+more" sec em
+# Everything else stays in full, and sec's own line keeps the outcome: a failed send to sec is NOT-SENT, not hidden.
+hlogged tt-w2 "plain $SENT-other" w2 sent "plain $SENT-other" "a message between two other seats is still logged in full"
+n=$(wc -l < $LG)
+printf '%s' '{"hook_event_name":"PostToolUseFailure","tool_name":"SendMessage","tool_input":{"to":"tt-sec","message":"x SENTINEL-227-fail"},"error":"boom"}' | $SRC/lib/log_message.sh $LG w9 tt-sec=sec >/dev/null 2>&1
+[ "$(tail -n +$((n + 1)) $LG | cut -f2-5)" = "w9	sec	NOT-SENT	$SEC_MARK" ] && ! grep -qF SENTINEL-227-fail $LG && ok "SendMessage log: a failed send to sec is NOT-SENT with the marker, without its body" || { bad "SendMessage log: failed send to sec"; tail -n +$((n + 1)) $LG; }
 e2e_end=hooks # the last line: test/e2e.sh checks that the file ran to here
