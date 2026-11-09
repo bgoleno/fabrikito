@@ -198,5 +198,5 @@ Removing the link deletes the link, never the shared state it points to. (In the
 place. Remove it by its path anyway, so nothing relies on that.) Git-ignored files do not stop
 `git worktree remove`, which deletes them with the checkout, the copied project prompts included.
 
-Updating Claude Code is unchanged: see [Updating Claude Code](../README.md#updating-claude-code). The
+Updating Claude Code is unchanged: see [Updating Claude Code](updating-claude-code.md). The
 copies of claude live in the shared state folder, so every release uses them.
