@@ -68,4 +68,14 @@ $S -c $T/team.yaml nosuchcommand >/dev/null 2>&1; shim_new_bad=$?
 mkdir -p $T/shimlink/sub && ln -s $SRC/factory.sh $T/shimlink/abs.sh && ln -s ../abs.sh $T/shimlink/sub/rel.sh
 shim_abs=$(cd / && $T/shimlink/abs.sh -c $T/team.yaml check 2>/dev/null); shim_rel=$(cd /tmp && $T/shimlink/sub/rel.sh -c $T/team.yaml check 2>/dev/null)
 [ "$shim_abs" = "$shim_new" ] && [ "$shim_rel" = "$shim_new" ] && ok "shim: works through an absolute and a relative symlink, from another folder" || bad "shim: symlink or other cwd"
+# fabrikito itself through a symlink to its file (#263): an absolute link, a relative one, a chain of links
+# (one relative, one absolute), each from another folder, finds lib/ and prints what a direct run prints.
+mkdir -p $T/selflink/sub $T/selflink/deep && ln -s $SRC/fabrikito $T/selflink/abs && ln -s ../abs $T/selflink/sub/rel && ln -s $T/selflink/sub/rel $T/selflink/deep/chain && ln -s ../deep/chain $T/selflink/sub/chain2
+self_direct=$($S -c $T/team.yaml check 2>/dev/null)
+for sl in abs sub/rel deep/chain sub/chain2; do
+  self_out=$(cd / && $T/selflink/$sl -c $T/team.yaml check 2>&1); self_rc=$?
+  [ "$self_rc" = 0 ] && [ -n "$self_direct" ] && [ "$self_out" = "$self_direct" ] && ok "fabrikito through a symlink ($sl) finds lib/ and prints what a direct run prints" || { bad "fabrikito through a symlink ($sl) (rc=$self_rc)"; echo "$self_out" | tail -3; }
+done
+self_rel=$(cd $T/selflink/sub && ./rel -c $T/team.yaml check 2>&1)
+[ "$self_rel" = "$self_direct" ] && ok "fabrikito through a relative link, run from the link's own folder" || bad "fabrikito through a relative link from its own folder"
 e2e_end=launch # the last line: test/e2e.sh checks that the file ran to here
