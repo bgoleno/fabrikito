@@ -148,24 +148,24 @@ rm $T/state/messages.log && mv $T/msglog.real $T/state/messages.log
   && tmux has-session -t '=tt-w1' 2>/dev/null && ! tmux capture-pane -p -t '=tt-w1:' | grep -q "through a hard-linked log" \
   && ok "say: a hard link at messages.log is refused, nothing is delivered or written through it, say says the line was not written, and the advice is to remove the other name or move the file aside, never to delete it" || { bad "say through a hard-linked log (rc=$rc)"; echo "$lout"; cat $T/sent-log; }
 # A say to or from sec is logged without its body (#227). A team file that also has a sec seat (down: the
-# line is NOT-DELIVERED, which is the status the checks read), with its own state folder.
+# line is NOT-DELIVERED, which is the status the checks read; em and w1 are up, so a say to them is delivered), with its own state folder.
 echo "--- say: sec's messages are logged without their body (#227)"
 sed 's|^  w2: .*|&\n  sec: { title: Security, workdir: { type: project, path: '$T'/proj }, prompt_text: "sec prompt" }|' $T/team.yaml > $T/team-sec.yaml
 mkdir -p $T/secstate
-SECLOG=$T/secstate/messages.log
+SECLOG=$T/secstate/messages.log; : > $SECLOG
 SEC_MARK='[body not logged: sec]'
 # secsay <what> <from> <to> <message>: one line with time, sender, recipient, status, marker; the sentinel is nowhere in the log.
-secsay() { local what=$1 f=$2 t=$3 m=$4 n line
+secsay() { local what=$1 f=$2 t=$3 m=$4 st=$5 n line
   n=$(wc -l < $SECLOG 2>/dev/null || echo 0)
   TEAM_STATE_DIR=$T/secstate TEAM_ROLE=$f $S -c $T/team-sec.yaml say "$t" "$m" >/dev/null 2>&1
   line=$(tail -n +$((n + 1)) $SECLOG)
-  if [ "$(wc -l < $SECLOG)" -eq $((n + 1)) ] && [ "$(printf '%s\n' "$line" | cut -f2-5)" = "$f	$t	NOT-DELIVERED	$SEC_MARK" ] && ! grep -q SENTINEL-227-say $SECLOG \
+  if [ "$(wc -l < $SECLOG)" -eq $((n + 1)) ] && [ "$(printf '%s\n' "$line" | cut -f2-5)" = "$f	$t	$st	$SEC_MARK" ] && ! grep -q SENTINEL-227-say $SECLOG \
     && printf '%s\n' "$line" | cut -f1 | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}$'; then
     ok "say log: $what is logged without its body"
   else bad "say log: $what"; printf '%s\n' "$line"; fi; }
-secsay "a say to sec" em sec "to sec SENTINEL-227-say"
-secsay "a say from sec" sec em $'from sec\nSENTINEL-227-say, tab\t'
-secsay "a say from sec to w1" sec w1 "SENTINEL-227-say again"
+secsay "a say to sec" em sec "to sec SENTINEL-227-say" NOT-DELIVERED
+secsay "a say from sec" sec em $'from sec\nSENTINEL-227-say, tab\t' delivered
+secsay "a say from sec to w1" sec w1 "SENTINEL-227-say again" delivered
 # say all from a seat other than sec is logged in full, as today: the text is that seat's, and the line names all.
 n=$(wc -l < $SECLOG)
 TEAM_STATE_DIR=$T/secstate TEAM_ROLE=em $S -c $T/team-sec.yaml say all "plain broadcast SENTINEL-227-other" >/dev/null 2>&1
