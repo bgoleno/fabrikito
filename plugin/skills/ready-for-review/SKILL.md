@@ -47,6 +47,11 @@ them. Where the two differ, the role prompt wins.
    - Every criterion met: the PR says `Closes #<n>`.
    - Any criterion not met yet: the PR says `Refs #<n>` and names what is still open. Never write
      `Closes` for a criterion you have not met.
+   - GitHub closes an issue on merge when a closing keyword (`close`, `fix`, `resolve` and their
+     forms) comes right before its reference, **whatever the words around it**: "does not close
+     #12" closes #12. Use a closing keyword only before an issue this PR completes, and `Refs #N`
+     for any other issue; never name one after a closing keyword in the body, the title or a
+     commit message, even to say it stays open.
 3. **Bring the branch up to date with the base:** `git fetch origin`, then
    `git merge --no-edit origin/<base>`. Merge, do not rebase: reviewers may already have read your
    commits. On a conflict, keep both sides' intent; if you cannot tell what one side meant, stop
@@ -86,6 +91,12 @@ them. Where the two differ, the role prompt wins.
      changed.
    - Never put a body in the command itself (`--body "$(...)"`): it makes the command unparseable
      for the permission rules, so it can stop at a prompt nobody answers.
+   - **Check what GitHub will close,** before asking anyone to review (each time the body, the title
+     or a commit changes):
+     `gh pr view <pr> -R <repo> --json closingIssuesReferences --jq '.closingIssuesReferences[].number'`.
+     The numbers must be exactly the issues step 2 says this PR completes. An extra number: remove
+     the closing keyword that matched it from the body (`gh pr edit`) and use `Refs #N`, then check
+     again. A missing one: the keyword is absent or misspelt. Do not ask for review until it matches.
 8. **Wait for CI:** `gh pr checks <pr> -R <repo>`. If a required check fails, find the cause and
    fix it with a new commit (back to step 4); do not re-run and hope. If no checks are reported,
    say so, and name the checks you could not run locally.
