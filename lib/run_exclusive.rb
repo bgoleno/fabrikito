@@ -25,6 +25,7 @@ require "json"
 require "etc"
 
 LOCK_POLL = 2       # seconds between tries while the lock is busy
+TICKET_STALE = 10   # seconds: a waiting run touches its ticket every poll; one untouched this long is not waiting (#283)
 REMIND = 300        # seconds between "still waiting" lines
 
 def say(msg)
@@ -168,10 +169,12 @@ end
 # Returns [open file, path]. The file's flock is the ticket's life: it ends with this run.
 def take_ticket(qdir)
   3.times do
-    queue_dir!(qdir)
     name = format("%020d-%d", Process.clock_gettime(Process::CLOCK_REALTIME, :nanosecond), Process.pid)
     tmp = File.join(qdir, ".tmp-#{Process.pid}")
     begin
+      # Inside the retry: the last run to leave may remove the folder between the mkdir and the lstat in
+      # queue_dir!, or between it and the open below (tl on #284).
+      queue_dir!(qdir)
       File.unlink(tmp) if File.symlink?(tmp) || File.exist?(tmp)
       f = File.open(tmp, File::WRONLY | File::CREAT | File::EXCL | File::NOFOLLOW, 0o600)
       f.flock(File::LOCK_EX)
@@ -200,7 +203,10 @@ def live_ticket?(path)
   end
   f = File.open(path, File::RDONLY | File::NOFOLLOW | File::NONBLOCK)
   begin
-    return true unless f.flock(File::LOCK_SH | File::LOCK_NB)
+    # Held, and touched lately: a run that is waiting. Held but not touched for TICKET_STALE seconds: its
+    # run is stopped (Ctrl-Z, kill -STOP) or hung, and a ticket like that must not hold up the line while
+    # the lock is free. Its run finds the ticket gone when it continues and takes a new place at the end.
+    return true if !f.flock(File::LOCK_SH | File::LOCK_NB) && Time.now - f.stat.mtime <= TICKET_STALE
     cur = (File.lstat(path) rescue nil)
     fs = f.stat
     File.unlink(path) if cur && cur.dev == fs.dev && cur.ino == fs.ino
@@ -215,7 +221,9 @@ end
 # How many live runs arrived before the one whose ticket is named name.
 def ahead(qdir, name)
   names = (Dir.children(qdir) rescue [])
-  names.each { |n| live_ticket?(File.join(qdir, n)) if n =~ TMP_RE } # a run killed between its create and its rename
+  # A run killed between its create and its rename leaves a .tmp-<pid>. One younger than a few seconds may be
+  # a run about to lock it, so it is left alone (its probe would call it stale and the run would lose its place).
+  names.each { |n| live_ticket?(File.join(qdir, n)) if n =~ TMP_RE && (Time.now - (File.lstat(File.join(qdir, n)).mtime rescue Time.now)) > 5 }
   names.select { |n| n =~ QUEUE_RE && n < name }.count { |n| live_ticket?(File.join(qdir, n)) }
 end
 
@@ -259,6 +267,16 @@ at_exit do
   (Dir.rmdir(qdir) rescue nil)
 end
 loop do
+  # Show the line this run is alive (its flock does not tell a stopped run from a running one). If the
+  # ticket is gone, the others took this run for stopped (it was, or the machine stalled it for
+  # TICKET_STALE seconds): it takes a new place at the end. Mutual exclusion is the main lock, not this.
+  begin
+    File.utime(nil, nil, tpath)
+  rescue SystemCallError
+    (tf.close rescue nil)
+    tf, tpath = take_ticket(qdir)
+    tname = File.basename(tpath)
+  end
   n = ahead(qdir, tname)
   # Only the earliest waiting run tries the lock; the others wait their turn, however free it is.
   f = n == 0 ? open_lock(lock) : nil
