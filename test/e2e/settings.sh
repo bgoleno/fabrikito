@@ -486,6 +486,11 @@ reject "state: a folder holding a team's state folder" "state: $T/ks2 holds anot
 mk "" "state: $T/ks
 $(rule deny "\"Edit(/$RT/ks/**)\"")"; dw=$(nos $S -c $T/v.yaml check 2>&1)
 echo "$dw" | grep -qF "warning: em: the deny Edit(/$RT/ks/**) covers its own progress note ($RT/ks/notes/em.md)" && ok "state: check warns when a deny covers a seat's own note" || { bad "state: deny over the note"; echo "$dw" | grep -E "^(warning|error)" | cut -c1-200; }
+# A denied folder that holds the note under a dot folder (the default layout, .state/<team>/notes/): * and ** match it (tl on #270).
+mkdir -p $T/dk/.state; mk "" "state: $T/dk/.state/tk
+$(rule deny "\"Edit(/$RT/dk/**)\"")"; dw=$(nos $S -c $T/v.yaml check 2>&1)
+echo "$dw" | grep -qF "the deny Edit(/$RT/dk/**) covers its own progress note ($RT/dk/.state/tk/notes/em.md)" && ok "state: a deny on a folder covers a note under its .state folder" || { bad "state: deny over a note under .state"; echo "$dw" | grep -E "^(warning|error)" | cut -c1-200; }
+reject "state: .state of a repository that is not a factory checkout" "state: $T/repo/.state/st is, holds or sits inside this team's repository (repo.path)" "" "state: $T/repo/.state/st"
 mk "" "state: $T/ks
 $(rule deny "\"Edit(/$RT/elsewhere/**)\", \"Read(/$RT/ks/**)\"")"; dw=$(nos $S -c $T/v.yaml check 2>&1)
 ! echo "$dw" | grep -qF "covers its own progress note" && ok "state: no warning for a deny elsewhere or on another tool" || { bad "state: a false warning"; echo "$dw" | grep -F "covers its own" | cut -c1-200; }
@@ -499,6 +504,11 @@ rm -r $IN/.state/tv; ln -s $T/ks $IN/.state/tv; dw=$(nos $IC warnings 2>&1)
 echo "$dw" | grep -qF "note: $RT/inst/.state/tv is a link to the state folder ($T/ks); state: in the team file wins, so the link is unused and can be removed." && ok "state: a default link to the same folder is named as unused" || { bad "state: unused link"; echo "$dw" | grep -E "^(note|error)" | cut -c1-200; }
 rm $IN/.state/tv; dw=$(nos $IC warnings 2>&1)
 ! echo "$dw" | grep -qE "default .* also exists|is a link to the state folder" && ok "state: no state warning when the default folder is absent" || bad "state: warning without a default folder"
+# The .state exemption holds for a factory checkout whose .state is a real folder, and not when it is a link into the checkout (sec on #270).
+: > $IN/fabrikito; mk "plugin: false" "state: $IN/.state/e2e-ks"; ivc=$(nos ruby $IN/lib/team_config.rb $T/v.yaml validate 2>&1); irc=$?
+mkdir -p $IN/src; rmdir $IN/.state; ln -s src $IN/.state; mk "plugin: false" "state: $IN/.state/e2e-ks"; ilc=$(nos ruby $IN/lib/team_config.rb $T/v.yaml validate 2>&1); ilrc=$?
+[ $irc = 0 ] && [ $ilrc != 0 ] && echo "$ilc" | grep -qF "is, holds or sits inside this factory checkout" && ok "state: .state of a factory checkout is allowed, and not when .state is a link" || { bad "state: .state link in a factory checkout (real=$irc link=$ilrc)"; echo "$ivc$ilc" | tail -2; }
+rm $IN/.state
 # up and the seats: no link, no TEAM_STATE_DIR in the seat, one folder for up and for the seat's say.
 mk "wrapper: $T/bin/wrap" "state: $T/ks3"; sed -e 's/^team: tv/team: tk/' -e 's/prefix: tv/prefix: tk/' $T/v.yaml > $T/k.yaml
 up=$(nos env TEAM_VIEW=0 $S -c $T/k.yaml up --no-view em 2>&1); rc=$?; sleep 1

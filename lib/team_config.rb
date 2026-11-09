@@ -1347,8 +1347,8 @@ class TeamConfig
 
   # The refusals that need the team's own work (validate runs this once the roles are checked): the
   # state folder may not be, hold or sit inside the repository, the worktree folder, a seat's working
-  # directory or this factory checkout, except under <that folder>/.state/, the factory's own
-  # git-ignored layout (a team working on this repository keeps its state in its checkout's .state/).
+  # directory or this factory checkout, except under <that folder>/.state/ when that folder is a factory
+  # checkout, whose .state is git-ignored (a team working on this repository keeps its state there).
   # Anything else inside a checkout is tracked or may be: a seat's own work would deny itself, and
   # the Edit denies on the state folder would stop the seats' work there.
   def validate_state_work
@@ -1362,7 +1362,11 @@ class TeamConfig
       next unless path_overlap?(p, dir)
 
       ds = File.join(dir, '.state')
-      next if path_within?(p, ds) && fold_path(p) != fold_path(ds) && path_within?(p, dir) # <dir>/.state/<name> and below
+      # <dir>/.state/<name> and below, in a factory checkout only: it ignores .state. Another project's
+      # repository may not, and git clean in a seat's worktree would delete state kept there (tl on #270).
+      factory = File.file?(File.join(dir, 'fabrikito')) && File.file?(File.join(dir, 'lib', 'team_config.rb'))
+      # .state must itself be a real folder (or missing): a link there leads anywhere in the checkout (sec on #270).
+      next if factory && !File.symlink?(ds) && path_within?(p, ds) && fold_path(p) != fold_path(ds) && path_within?(p, dir)
 
       die "state: #{p} is, holds or sits inside #{what}: a state folder inside a checkout is tracked or is a seat's own work. " \
           "Use a folder outside every checkout, or one under <checkout>/.state/"
@@ -1398,7 +1402,10 @@ class TeamConfig
 
     pat = spec[1..]
     pat = "#{pat[0...-3]}/**/*" if pat.end_with?('/**')
-    File.fnmatch(pat, path, File::FNM_PATHNAME | File::FNM_EXTGLOB)
+    # DOTMATCH: gitignore-style rules match dot folders, and the default note sits under .state/ (tl on #270).
+    flags = File::FNM_PATHNAME | File::FNM_EXTGLOB | File::FNM_DOTMATCH
+    flags |= File::FNM_CASEFOLD if RUBY_PLATFORM.include?('darwin') # a miss would only lose the warning
+    File.fnmatch(pat, path, flags)
   end
 
   # A deny on a seat's own note beats the Edit allow on it, so the seat cannot keep its note (#264,

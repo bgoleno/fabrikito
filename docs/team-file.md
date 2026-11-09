@@ -22,7 +22,7 @@ the reference for each key, and the file to copy.
   and is a different one. Running seats keep the state folder they started with until they restart.
   `check` refuses a relative path, the home folder or a folder holding it, a folder inside the
   repository, a seat's working directory, the worktree folder or a factory checkout (a folder under
-  `<checkout>/.state/` is allowed), a volume that is not mounted, and a folder that is, holds or sits
+  `<factory checkout>/.state/` is allowed, and only there), a volume that is not mounted, and a folder that is, holds or sits
   inside another team's state folder (one in `other_teams` or one `check` finds by its `settings/`,
   `launch/` and `prompts/`). The other teams `check` finds are the folders beside the state folder, so
   a state folder shared with other teams' folders in one parent treats them as other teams.
