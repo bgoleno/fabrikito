@@ -1,5 +1,5 @@
 # Runs one heavy command (a full gate, an e2e run) at a time across every seat of every team on this
-# host, and anyone's shell (#214). factory.sh run-exclusive execs this before it reads a team file:
+# host, and anyone's shell (#214). fabrikito run-exclusive execs this before it reads a team file:
 #
 #   ruby lib/run_exclusive.rb [--] <command> [args...]
 #
@@ -40,7 +40,7 @@ end
 
 args = ARGV.dup
 args.shift if args.first == "--"
-die("usage: factory.sh run-exclusive -- <command> [args...]", 64) if args.empty?
+die("usage: fabrikito run-exclusive -- <command> [args...]", 64) if args.empty?
 
 lock = ENV["FACTORY_RUN_LOCK"].to_s
 # A relative path would name a different lock in each caller's folder (tl on #240).

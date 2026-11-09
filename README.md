@@ -1,43 +1,91 @@
-# software-factory
+# fabrikito
 
-Starts a team of Claude Code sessions for a software project. Each seat (engineering manager, tech
-lead, engineers, QA, security, or whatever you define) runs in its own persistent tmux session, is
-told its role, works in its own git worktree, and can message the other seats.
+Run a team of Claude Code sessions on one project: an engineering manager, a tech lead, engineers, QA,
+security, or whatever roles you define. `fabrikito` starts each one as a persistent tmux session in a git
+worktree of its own, tells it its role, lets it message the other seats, and shows them all together in one
+iTerm tab.
 
-The team is defined in one YAML file per project, so different projects can have different teams,
-prompts, models and storage.
+- **One YAML file defines the team.** Roles, prompts, models, effort, permissions and where each seat's
+  files live are in a team file per project, so different projects get different teams. Every key is
+  documented in [`teams/example.yaml`](teams/example.yaml).
+- **No server, no background service.** `fabrikito` is a bash script (with the system `ruby` to read the
+  YAML, no gems). It generates each seat's prompt, settings and launch script and starts the seat; tmux
+  keeps it running and Claude Code's own cross-session messaging carries the messages. See
+  [How it works](docs/how-it-works.md).
+- **Seats work in separate worktrees.** Each seat has its own working directory, so engineers do not
+  overwrite each other's files, and the team's work lands through pull requests.
+- **Rules are generated into each seat's settings.** Deny rules on the files that would change a seat's own
+  rules, and an ask on any push to the base branch, are written into its settings file at every `up`. They
+  guard against accidents, not against a determined seat or user: read [Safety](#safety) for what they
+  cover and what they do not.
+- **A seat can be held to your gate.** With `gate_on_stop`, a seat that stops with uncommitted work is held
+  until the repository's checks pass. See [The gate](docs/gate.md).
 
-## Requirements
+## Quick start
 
-Moved to [Commands: Requirements](docs/commands.md#requirements).
+You need macOS, `tmux`, `claude` (Claude Code), `git` 2.36 or later, `gh` and the system `ruby`. See
+[Requirements](docs/commands.md#requirements) for the details.
 
-## Use
+```
+git clone https://github.com/bgoleno/fabrikito.git
+cd fabrikito
+cp teams/example.yaml teams/team.yaml     # edit it: your repository, project, storage and roles
+./fabrikito check                        # validate the team file and show where everything lives
+./fabrikito up                           # start the team
+./fabrikito view                         # open an iTerm tab with every running seat
+./fabrikito say em "What is the plan for today?"
+./fabrikito down --yes                   # stop the seats (worktrees are kept)
+```
 
-Moved to [Commands](docs/commands.md): [the commands](docs/commands.md#the-commands), [which team file](docs/commands.md#which-team-file) and [throwaway teams](docs/commands.md#throwaway-teams).
+Run `check` first. Your own team files in `teams/`, and anything under `projects/`, are git-ignored, so a
+project's specifics stay out of this repository. Every command and option is in
+[Commands](docs/commands.md). To decide how many seats to run and what they cost, see
+[Right-sizing a team](docs/right-sizing.md).
 
-## The iTerm view
+## Documentation
 
-Moved to [Commands: The iTerm view](docs/commands.md#the-iterm-view).
+| Read | To |
+|---|---|
+| [How it works](docs/how-it-works.md) | See how the parts fit together: what `up` does, what a seat is made of, hooks, messaging. |
+| [Commands](docs/commands.md) | Install and run a team: every command and option, which team file is used, throwaway teams, the iTerm view. |
+| [The team file](docs/team-file.md) | Set up a team: what each part does, what is checked, how a new worktree is prepared, and temp files. |
+| [Right-sizing a team](docs/right-sizing.md) | Choose the number of seats, effort and model per seat, and see the cost. |
+| [The fabrikito plugin](docs/plugin.md) | See how fabrikito's skills reach every seat. |
+| [How work is tracked](docs/workflow.md) | The issues-first rule and the seats' progress notes. |
+| [The gate](docs/gate.md) | How a seat is held to the repository's checks when it stops. |
+| [Pinned releases](docs/pinned-release.md) | Run a team from a checkout fixed at a release. |
+| [Testing](docs/testing.md) | Run a live test on a private tmux server, and the end-to-end test. |
+| [Troubleshooting](docs/troubleshooting.md) | Find what you see (an error, a refused message, a silent seat) and what to do. |
 
-## Right-sizing
+The full index is [docs/README.md](docs/README.md). Messaging (how seats talk, `say`, the message log),
+[Safety](#safety) and [Updating Claude Code](#updating-claude-code) are still on this page, below.
 
-Moved to [Right-sizing a team](docs/right-sizing.md).
+## Reporting a vulnerability
 
-## The team file
+Report a vulnerability through GitHub's private vulnerability reporting:
+<https://github.com/bgoleno/fabrikito/security/advisories/new>. Do not open a public issue for it.
+See [SECURITY.md](SECURITY.md).
 
-Moved to [The team file](docs/team-file.md).
+## Contributing
 
-## New worktrees
+Every change starts as a GitHub issue, and its pull request links the issue and fills in the pull request
+template. Nothing tracked may name a specific project, person, drive or path. Before a pull request, run
+the gate: `bash -n fabrikito factory.sh test/e2e.sh lib/stop_gate.sh lib/session_start.sh lib/log_message.sh`,
+`ruby -c lib/team_config.rb`, and `env -u TMUX TEST_VOLUME=/Volumes/<a mounted, writable volume> test/e2e.sh`.
+See [Testing](docs/testing.md).
 
-Moved to [The team file: New worktrees](docs/team-file.md#new-worktrees).
+## License
 
-## The factory plugin
+Apache License 2.0. See LICENSE.
 
-Moved to [The factory plugin](docs/plugin.md).
+The `security-audit` plugin skill is a modified copy of Cloudflare's
+[security-audit-skill](https://github.com/cloudflare/security-audit-skill) (MIT); see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-## Issues first
+## Messaging, safety and updating
 
-Moved to [How work is tracked: Issues first](docs/workflow.md#issues-first).
+The sections below hold the reference for messaging, safety and updating Claude Code. They are moving to
+pages under `docs/`.
 
 ## How seats talk
 
@@ -150,7 +198,7 @@ between `say`'s empty-box check and the paste, and the message scrolls that text
 out with the message; and if the label is cleared from the box (Ctrl-C, Esc) in the moment between
 `say`'s check of it and the message's paste, the message goes out without it.
 The input box is recognised as Claude Code 2.1.316 draws it, so a CLI update that changes it makes `say`
-refuse every seat until `factory.sh` is updated. A refused message is logged as NOT-DELIVERED. Messages
+refuse every seat until `fabrikito` is updated. A refused message is logged as NOT-DELIVERED. Messages
 are labelled `[from <role>]`, and the owner's are `[from owner]`. The label is set by the sender (from
 `TEAM_ROLE`, or `owner` when it is unset) and is not authenticated. When `TEAM_ROLE` is unset, `say`
 run from inside a seat (found from the terminals of the processes that started it) is labelled with
@@ -164,7 +212,7 @@ is a pane of another server, whose seats `say` cannot see ([#115](../../issues/1
 any team on any other server, and the owner's own pane on such a server too. From a terminal outside tmux
 the owner is still `[from owner]` (`TEAM_ROLE=owner` is refused). A background job that outlives the
 command that started it, or a command a seat runs in a new tmux session on the server `say` addresses, is
-not caught and is labelled `[from owner]` (the comment above `caller_seat` in `factory.sh` lists every such
+not caught and is labelled `[from owner]` (the comment above `caller_seat` in `fabrikito` lists every such
 way). A seat cannot `say` to itself. A `TEAM_ROLE` that is set must be one of the team's role ids, or
 `live-test`: `say` refuses any other value, and the reserved `owner` and `launcher`, sending no keys and
 logging NOT-DELIVERED. It refuses an empty or whitespace-only message the same way, before any tmux
@@ -217,6 +265,12 @@ kept all the same. If the line itself cannot be appended, `say` still prints its
 record could not be written and whether the message was delivered (so that a delivered message is not
 sent again), and exits with status 1.
 
+The log is never written through a link ([#194](../../issues/194)). When `messages.log` is a symlink, a
+FIFO or a hard link (a file with a second name), `say` delivers nothing and writes no line: it prints
+why, says the record could not be written, and exits with status 1. Only a seat could put one there;
+remove it by its exact path. `lib/log_message.sh` (below) opens the log without following a symlink and
+writes only to a regular file with one link, so there it costs that line.
+
 Each `SendMessage` from a seat appends one line in the same format, written by `lib/log_message.sh`, a
 `PostToolUse` and `PostToolUseFailure` hook on `SendMessage` in every seat's settings:
 
@@ -247,11 +301,11 @@ Messages a seat receives are logged by their sender, so traffic from outside the
 
 Each seat starts with a generated settings file, `.state/<team>/settings/<role>.json`, passed with
 `--settings` and rewritten read-only on every `up`. It holds the team's `permissions` merged with the
-role's (team first; a role can add or tighten a rule, never loosen one), plus what factory.sh adds:
+role's (team first; a role can add or tighten a rule, never loosen one), plus what fabrikito adds:
 
 - an `Edit` deny on the files that would change a seat's next start or its live rules: the generated
   settings, launchers and prompts, the message log and the gate's state, the team file and its
-  prompts, the launcher (`factory.sh`, `lib/`, `roles/`, `plugin/`), any plugin given with `--plugin-dir`
+  prompts, the launcher (`fabrikito`, `lib/`, `roles/`, `plugin/`), any plugin given with `--plugin-dir`
   in `args`, and the claude `wrapper` (its whole `.app` bundle, if it is in one), the main checkout's `.mcp.json`, `.claude/settings.json`,
   `.claude/settings.local.json`, `.claude/CLAUDE.md`, and `.claude/hooks/`, `rules/`, `skills/`,
   `agents/` and `commands/` (not the root `CLAUDE.md`, which is project work), the
@@ -279,7 +333,7 @@ role's (team first; a role can add or tighten a rule, never loosen one), plus wh
   team with no `em` role has the deny on every seat. This is an accident guard, not a boundary: every
   seat runs as the same OS user (#29), and a command that reads the file some other way is not stopped;
 - rules on the security-triage record folder, `.state/<team>/triage/` (#138), where the
-  `factory:security-triage` skill has `sec` write its records. A record can hold an unfixed
+  `fabrikito:security-triage` skill has `sec` write its records. A record can hold an unfixed
   medium-or-higher finding. The folder is outside every working directory, so without a rule each
   write and read would prompt in a mode other than bypass. The role with id `sec` gets an `Edit` and
   a `Read` allow on `triage/**`, the role with id `em` a `Read` allow (and an `Edit` deny), and every
@@ -423,14 +477,6 @@ that apply to them enable it. The hard rules in the shared prompt (`roles/common
 read them before changing them. A seat started in a folder Claude Code has not seen stops at a trust
 dialog until a human answers it once; `up` reports which seats those are.
 
-## The gate
-
-Moved to [The gate](docs/gate.md).
-
-## Progress notes
-
-Moved to [How work is tracked: Progress notes](docs/workflow.md#progress-notes).
-
 ## Updating Claude Code
 
 Claude Code's updater replaces its shared executable (the npm package's `bin/claude.exe`), even with
@@ -443,7 +489,9 @@ under (a removable volume holding the worktrees, for example) stop working until
   makes it from the shared executable when it is missing: an APFS clone where the state folder is on
   the same file system (it takes no space while the shared file exists), else a plain copy. It is
   checked (size, `--version`) before use, and if it cannot be made, `up` stops instead of running the
-  shared file. Nothing but `up` writes there, and seats cannot edit it.
+  shared file. A copy that is already there is used only if it is the shared executable byte for byte;
+  one that differs is refused, not replaced, and `up` starts no seat ([#208](../../issues/208)).
+  Nothing but `up` writes there, and seats cannot edit it.
 - **The seats' own updater is off** (`DISABLE_AUTOUPDATER=1`, in the launch script and the generated
   settings), so the seats do not add reinstalls of their own.
 - `check` names the shared executable, its version and the copy seats will run, and lists every copy
@@ -452,13 +500,9 @@ under (a removable volume holding the worktrees, for example) stop working until
   Restart it (`down --yes <role>`, then `up <role>`).
 
 To update: `claude update` in your own shell (a manual update works with the variable set), then
-`./factory.sh down --yes` and `./factory.sh up`. The next `up` copies the new version, and every seat
+`./fabrikito down --yes` and `./fabrikito up`. The next `up` copies the new version, and every seat
 starts on it.
 
 Old copies are never removed automatically. Once the shared file has moved on, each one holds about
 310 MB. When `check` lists a copy with no running seat, remove that folder by its exact path, for
 example `rm -r .state/<team>/bin/claude-2.1.314`.
-
-## Tests
-
-Moved to [Testing](docs/testing.md): [live tests](docs/testing.md#live-tests) and [the end-to-end test](docs/testing.md#the-end-to-end-test).

@@ -111,7 +111,7 @@ one finding, and does not restate them. Where the two differ, the role prompt wi
        each marker it clears by its comment id (the number after `issuecomment-` in its URL), and
        nothing about the points themselves. Name only markers whose points you have triaged, each
        matched by the marker URL its reporter sent you; never clear a marker you cannot match. That
-       line is the only clearance the EM and `factory:merge-train` count, and only at that head: a
+       line is the only clearance the EM and `fabrikito:merge-train` count, and only at that head: a
        new commit needs a new one.
      - A marker posted by mistake is cleared the same way, by that line, only once you have
        checked that it is one: a repeat of a marker already held, a marker on the wrong PR, or a

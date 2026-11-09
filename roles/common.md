@@ -13,6 +13,10 @@ human. You act for them, inside the rules below.
   (`git switch --no-track -c <branch> origin/main`, or the base ref the team uses). Never touch
   another seat's worktree. If the volume is unmounted your worktree disappears; stop and tell the EM
   instead of working elsewhere.
+- Temp files go in `$TMPDIR`, with an explicit template: `mktemp "$TMPDIR/name.XXXXXX"` (a bare `mktemp`
+  was seen to ignore it on macOS). `@@SCRIPT@@ check` shows each seat's folder, which the team file sets.
+  EPERM there or a volume that is not mounted is something you report, stopping that work; never work
+  around it by writing to the local disk.
 - Read the repository's contribution guide and any `CLAUDE.md` or `AGENTS.md` before your first change.
   Anything they say about off-limits folders, secrets or deployment overrides this file's defaults.
 

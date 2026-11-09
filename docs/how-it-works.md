@@ -1,7 +1,7 @@
 # How it works
 
-software-factory turns one YAML team file into a team of Claude Code sessions. There is no server
-and no background service: `factory.sh` (bash) and `lib/team_config.rb` (the system ruby, no gems)
+fabrikito turns one YAML team file into a team of Claude Code sessions. There is no server
+and no background service: `fabrikito` (bash) and `lib/team_config.rb` (the system ruby, no gems)
 generate each seat's prompt, settings and launch script, and start each seat in a tmux session of its
 own. After that, tmux keeps the seats running, Claude Code's own messaging carries their messages,
 and three small hook scripts run inside the seats. Each command (`up`, `say`, `down` and the rest)
@@ -13,8 +13,8 @@ This page shows how the parts fit together. Each section links to the page with 
 
 | Part | What it is |
 |---|---|
-| `factory.sh` | The launcher. Every command (`check`, `up`, `view`, `titles`, `status`, `say`, `attach`, `migrate`, `down`) is a function in it. |
-| `lib/team_config.rb` | Reads and validates the team file, and generates what each seat is started with: its prompt, kickoff, settings (permission rules and hooks) and claude flags. `factory.sh` calls it for every value. |
+| `fabrikito` | The launcher. Every command (`check`, `up`, `view`, `titles`, `status`, `say`, `attach`, `migrate`, `down`) is a function in it. |
+| `lib/team_config.rb` | Reads and validates the team file, and generates what each seat is started with: its prompt, kickoff, settings (permission rules and hooks) and claude flags. `fabrikito` calls it for every value. |
 | `lib/session_start.sh` | A `SessionStart` hook: shows a seat its progress note and the state of its working directory. |
 | `lib/log_message.sh` | A `PostToolUse` and `PostToolUseFailure` hook on `SendMessage`: writes each message a seat sends to the message log. |
 | `lib/stop_gate.sh` | A `Stop` hook: runs the repository's gate when a seat ends a turn with uncommitted work. |
@@ -40,7 +40,10 @@ session names, unknown placeholders and invalid UTF-8 stop the command before an
 3. **Makes the team's own copy of claude.** It finds `claude` on the `PATH`, reads its version and,
    if `.state/<team>/bin/claude-<version>/claude` is missing, clones or copies the executable there
    and checks the copy. Seats run this copy, so a Claude Code update in another session does not
-   replace the file under them. See [Updating Claude Code](../README.md#updating-claude-code).
+   replace the file under them. A symlink at the copy's path is refused, naming it: the seats would
+   run whatever it points at ([#194](../../../issues/194)). A copy already there must be the executable
+   byte for byte, with one name, or `up` refuses it, without replacing it ([#208](../../../issues/208)).
+   See [Updating Claude Code](../README.md#updating-claude-code).
 4. **Starts each role in turn,** in file order or in the order given on the command line, and stops
    at the first role it cannot start. A role whose tmux session already exists is skipped and left
    alone; if the claude file it runs was replaced under it, `up` prints an `ATTENTION` line saying
@@ -63,6 +66,10 @@ session names, unknown placeholders and invalid UTF-8 stop the command before an
      auto-memory switch), and runs the team's copy of claude, through the `wrapper` if one is set
      and present, with the role's flags, `--settings <file>`, `-n <session>`, the prompt as
      `--append-system-prompt` and the kickoff as the first message.
+
+     The settings, the prompt, the kickoff and the launch script are each removed by their exact
+     path before they are written, so a symlink a seat put at one is replaced, never written
+     through ([#194](../../../issues/194)).
    - **Starts a tmux session** named for the seat, in the seat's folder, with `TEAM_ROLE`,
      `TEAM_CONFIG` and `TEAM_SCRIPT` set, gives it its title, and types the launch script's path
      into its shell.
@@ -86,7 +93,7 @@ tmux session and keeps the worktree, and closing the iTerm tab only detaches fro
   by default (`workdir.name` changes the folder name), created detached at the base ref, or an
   existing folder (`workdir.type: project`). See [The team file](team-file.md).
 - **A settings file,** passed with `--settings`. It holds the team's and the role's permission rules
-  merged (a role can add or tighten a rule, never loosen one), the denies and allows `factory.sh` adds,
+  merged (a role can add or tighten a rule, never loosen one), the denies and allows `fabrikito` adds,
   and the hooks below. Its single values, such as `env`, win over the user, project and local
   settings files. Its permission rules do not replace theirs: Claude Code applies the rules of every
   settings file together, deny first, then ask, then allow, so an `allow` in the project's or the
@@ -170,9 +177,9 @@ and deny every other seat's. See [Progress notes](workflow.md#progress-notes).
 ## The plugin skills
 
 The skills under `plugin/skills/` are procedures for a role, such as assigning an issue
-(`factory:assign`), starting a task (`factory:start-task`) or reviewing a pull request
-(`factory:review-pr`). A skill is loaded only when it is used, instead of sitting in every prompt.
-The rules a skill applies, such as the brief's template or the review bar, stay in the role prompt,
+(`fabrikito:assign`), starting a task (`fabrikito:start-task`) or reviewing a pull request
+(`fabrikito:review-pr`). A skill is loaded only when it is used, instead of sitting in every prompt.
+The rules a skill applies, such as the brief's fields or the review bar, stay in the role prompt,
 and the skill points to them. See [The factory plugin](plugin.md).
 
 ## What the rules are, and are not

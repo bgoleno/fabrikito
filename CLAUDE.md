@@ -1,14 +1,15 @@
-# software-factory
+# fabrikito
 
 A launcher that starts a team of Claude Code sessions for a software project: one persistent tmux
 session per seat, each told its role, each in its own git worktree, able to message each other, shown
 together in one iTerm tab. Read `README.md` for use and `teams/example.yaml` for every config key.
 
 ## Layout
-- `factory.sh`: the launcher (bash). Commands: check, up, view, titles, status, say, attach, migrate, down,
+- `fabrikito`: the launcher (bash). Commands: check, up, view, titles, status, say, attach, migrate, down,
   run-exclusive.
+- `factory.sh`: the deprecated old name of the launcher (#261), a shim that prints a notice and execs `fabrikito`. Remove it after one release.
 - `lib/team_config.rb`: parses and validates a team YAML file for the script (system ruby, no gems).
-- `lib/run_exclusive.rb`: `factory.sh run-exclusive`, one heavy command at a time on the host (#214).
+- `lib/run_exclusive.rb`: `fabrikito run-exclusive`, one heavy command at a time on the host (#214).
 - `lib/screen_bounds.js`: usable area of the screen a point is on, for sizing the iTerm window.
 - `roles/`: generic prompts. `teams/example.yaml`: documented example team file.
 - `test/e2e.sh`: end-to-end test with a stand-in `claude`, a private tmux server and a throwaway repo: the entry point,
@@ -27,7 +28,7 @@ together in one iTerm tab. Read `README.md` for use and `teams/example.yaml` for
 - Issues first: every change to this repository starts as a GitHub issue, filed before work begins. Its PR
   links it with `Closes #<n>` when the PR completes the issue (`Refs #<n>` when it does not) and fills in
   `.github/pull_request_template.md`.
-- Gates: `bash -n factory.sh test/e2e.sh lib/stop_gate.sh lib/session_start.sh lib/log_message.sh`, `ruby -c lib/team_config.rb`, and
+- Gates: `bash -n fabrikito factory.sh test/e2e.sh lib/stop_gate.sh lib/session_start.sh lib/log_message.sh`, `ruby -c lib/team_config.rb`, and
   `TEST_VOLUME=/Volumes/<a mounted, writable volume> test/e2e.sh` (all assertions must pass).
 - Do not run the e2e test, or any experiment, against the user's real tmux server: unset `TMUX` and use
   `TMUX_TMPDIR`, as the test does. Never kill or restart seats of a running team without being asked.
@@ -47,7 +48,7 @@ together in one iTerm tab. Read `README.md` for use and `teams/example.yaml` for
   macOS Automation grant, and a pending prompt blocks osascript forever: run it with a time limit.
 - System ruby is 2.6: no endless method definitions. YAML flow mappings need quoted URLs.
 - Under heavy load, an e2e run can fail one assertion with `echo: write error: Interrupted system call`
-  from factory.sh: macOS bash 3.2 does not restart a pipe write interrupted by SIGCHLD (#101). Rerun
+  from fabrikito: macOS bash 3.2 does not restart a pipe write interrupted by SIGCHLD (#101). Rerun
   only for that exact message; for any other failure a green rerun is not evidence.
 - Durable knowledge about this project lives in the Obsidian vault under `projects/software-factory/`,
   not in Claude Code's own memory files.

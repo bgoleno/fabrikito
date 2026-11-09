@@ -1,6 +1,6 @@
 # Commands
 
-What software-factory needs, every `factory.sh` command and its options, which team file a command
+What fabrikito needs, every `fabrikito` command and its options, which team file a command
 uses, and the iTerm view. For what `up` does step by step, see [How it works](how-it-works.md).
 
 ## Requirements
@@ -13,19 +13,19 @@ system `ruby` (it parses the YAML; it ships with macOS). Optional: a wrapper pro
 
 ```
 cp teams/example.yaml teams/team.yaml     then edit it: repo, project, storage, roles
-./factory.sh check                        validate the team file, show where everything lives
-./factory.sh up [role...]                 start the team (all roles, in file order)
-./factory.sh status                       which seats are up, and where each works
-./factory.sh view                         open an iTerm tab with every running seat in a pane
-./factory.sh titles                       set each running seat's terminal title (role | title | session)
-./factory.sh say <role|all> "..."         type a message into a seat (seats use SendMessage)
-./factory.sh attach <role>                attach your terminal (detach: ctrl-b d)
-./factory.sh migrate [role...]            remove clean worktrees that are not on the storage volume
+./fabrikito check                        validate the team file, show where everything lives
+./fabrikito up [role...]                 start the team (all roles, in file order)
+./fabrikito status                       which seats are up, and where each works
+./fabrikito view                         open an iTerm tab with every running seat in a pane
+./fabrikito titles                       set each running seat's terminal title (role | title | session)
+./fabrikito say <role|all> "..."         type a message into a seat (seats use SendMessage)
+./fabrikito attach <role>                attach your terminal (detach: ctrl-b d)
+./fabrikito migrate [role...]            remove clean worktrees that are not on the storage volume
                                           (never one a running process works in)
-./factory.sh down --yes [role...]         kill seats (worktrees are kept)
-./factory.sh run-exclusive -- <command>   run a heavy command (a gate, an e2e run) one at a time on this
+./fabrikito down --yes [role...]         kill seats (worktrees are kept)
+./fabrikito run-exclusive -- <command>   run a heavy command (a gate, an e2e run) one at a time on this
                                           host, waiting for the run before it (needs no team file)
-./factory.sh -c path/to/other.yaml up     use a different team file
+./fabrikito -c path/to/other.yaml up     use a different team file
 ```
 
 Options:

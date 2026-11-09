@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# SessionStart hook that factory.sh puts in every seat's generated settings (#5). Claude Code adds what
+# SessionStart hook that fabrikito puts in every seat's generated settings (#5). Claude Code adds what
 # it prints to the seat's context at startup, on resume, after /clear and after a compaction, so a
 # restarted seat can carry on: its progress note, what to do with it, the branch it is on, recent
 # commits and uncommitted files.

@@ -20,7 +20,7 @@ run on the default server, pass `--default-socket`. See [Throwaway teams](comman
 ### `up` stops: "'<role>' already has a worktree elsewhere"
 
 The repository has a worktree with this seat's folder name at another path, from an older layout for
-example. Stop the seat, then run `./factory.sh migrate <role>`, which removes that worktree so that
+example. Stop the seat, then run `./fabrikito migrate <role>`, which removes that worktree so that
 `up` makes a new one in the right place. `migrate` refuses, and says why, a worktree with uncommitted
 or untracked files, a branch checked out, or commits that are not in the base, and any worktree a
 running process works in: move that work by hand first. See [The commands](commands.md#the-commands).
@@ -32,7 +32,7 @@ The launcher reads worktree paths with `git worktree list -z`, which git 2.36 ad
 
 ### `up` stops: "claude not found on PATH" or "could not read the version"
 
-Claude Code is not installed, is not on the `PATH` of the shell you run `factory.sh` from, or `up`
+Claude Code is not installed, is not on the `PATH` of the shell you run `fabrikito` from, or `up`
 caught it in the middle of a reinstall. Install Claude Code or add it to that `PATH`; after an update,
 wait for it to finish. Then run `up` again.
 
@@ -45,14 +45,14 @@ The system ruby (2.6) does not accept an unquoted URL inside a YAML flow mapping
 ### `up` prints "ATTENTION <role> is not at its input box (a startup dialog?)"
 
 A seat started in a folder Claude Code has not seen stops at a trust dialog until a human answers it
-once (and the first run in bypass mode shows a warning). Run `./factory.sh attach <role>`, answer the
+once (and the first run in bypass mode shows a warning). Run `./fabrikito attach <role>`, answer the
 dialog, and detach with ctrl-b d. See [Safety](../README.md#safety).
 
 ### The iTerm view does not open: "osascript timed out after 30s"
 
 The first run asks macOS for permission to control iTerm, and a permission prompt that nobody has
 answered blocks AppleScript. Answer the prompt (or allow your terminal to control iTerm under
-System Settings, Privacy & Security, Automation), then run `./factory.sh view`. The seats are running
+System Settings, Privacy & Security, Automation), then run `./fabrikito view`. The seats are running
 either way. See [The iTerm view](commands.md#the-iterm-view).
 
 ### A seat gets "Operation not permitted" on `~/Downloads` or a removable volume
@@ -144,7 +144,7 @@ gives the reason when it refuses:
   input box": tmux failed before anything reached the box. Send again.
 
 A refused message is logged as `NOT-DELIVERED`. If `say` refuses every seat after a Claude Code update,
-the update has changed how the input box is drawn, and `factory.sh` needs updating. See
+the update has changed how the input box is drawn, and `fabrikito` needs updating. See
 [`say`](../README.md#say).
 
 ## After a Claude Code update
@@ -152,9 +152,20 @@ the update has changed how the input box is drawn, and `factory.sh` needs updati
 ### `status` shows `REPLACED`, or `up` prints "ATTENTION ... has been replaced"
 
 The executable that seat runs was swapped under it, and macOS may stop its privacy grants (the
-worktree volume, for example). Restart the seat: `./factory.sh down --yes <role>`, then
-`./factory.sh up <role>`. To update every seat, run `claude update` in your own shell, then
+worktree volume, for example). Restart the seat: `./fabrikito down --yes <role>`, then
+`./fabrikito up <role>`. To update every seat, run `claude update` in your own shell, then
 `down --yes` and `up`. See [Updating Claude Code](../README.md#updating-claude-code).
+
+### `up` stops: "... is not a copy of ..."
+
+The file at the team's copy of claude, `.state/<team>/bin/claude-<version>/claude`, is runnable but
+differs from the shared executable of that version, or is a hard link (a file with a second name), so
+`up` would have every seat run something that may not be that claude. Either it was put there (by a
+seat or a person: find out which before going on), or the shared claude changed without a new version,
+as a reinstall under way can: then retry `up` once it is done. `up` does not replace the file, because
+a running seat may be using it. Once `status` shows no seat running it, remove that exact file and run
+`up` again, which makes a fresh copy ([#208](../../../issues/208)). A symlink there is refused the same
+way ([#194](../../../issues/194)).
 
 ### `.state/<team>/bin/` takes a lot of disk space
 
@@ -179,7 +190,7 @@ folder on every call. See [Live tests](testing.md#live-tests).
 
 ## For contributors
 
-These cost time when changing `factory.sh` or its tests.
+These cost time when changing `fabrikito` or its tests.
 
 - **A tmux target written `=name`** matches the session name exactly, but pane and option commands
   need a trailing colon (`=name:`). In zsh, quote it: zsh expands an unquoted `=name` to a command

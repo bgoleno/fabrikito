@@ -36,6 +36,11 @@ Roles without the switch never run it. The example gives it to the engineers and
   with no hook input, `lib/stop_gate.sh` runs the gate and reports but leaves the count alone. Claude
   Code also ends such a loop itself after 8 continuations with no tool call in between (raise it with
   `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`).
+- The hook never writes or reads its state through a link ([#194](../../../issues/194)). A symlink, a
+  hard link, or anything other than a folder or a regular file, at `.state/<team>/gate/` or at the
+  role's log or count in it, is refused: no gate runs and nothing is written. The seat is sent back,
+  told to report it; in a turn the hook has already sent back, the stop goes through with a note naming
+  it. Only a seat could put one there; remove it by its exact path.
 - The gate runs with a time limit (`repo.gate_timeout`, default 600 s) in a process group of its own,
   which is killed whole when the time is up. A program that detaches from that group (a daemon, a tmux
   server) is not killed.
@@ -53,12 +58,12 @@ Roles without the switch never run it. The example gives it to the engineers and
 ## One heavy run at a time
 
 Every seat running a full gate or test run at once loads a machine until timing tests fail for no
-other reason ([#214](../../../issues/214)). `factory.sh run-exclusive -- <command> [args...]` runs one such
+other reason ([#214](../../../issues/214)). `fabrikito run-exclusive -- <command> [args...]` runs one such
 command at a time across every seat of every team on the host, and the owner's shell:
 
 ```
-./factory.sh run-exclusive -- make check
-./factory.sh run-exclusive -- env -u TMUX TEST_VOLUME=/Volumes/YourDrive test/e2e.sh
+./fabrikito run-exclusive -- make check
+./fabrikito run-exclusive -- env -u TMUX TEST_VOLUME=/Volumes/YourDrive test/e2e.sh
 ```
 
 - **It waits, and never fails for a busy lock.** It prints who holds the lock (role, team file, pid,
@@ -91,7 +96,7 @@ command at a time across every seat of every team on the host, and the owner's s
     pid the waiting message shows.
   - The lock is never handed to the command, so a daemon it leaves running (a tmux server) does not
     hold it.
-- **No allow rule for it.** `factory.sh` adds none, and a team file should not: Claude Code's allow rules
+- **No allow rule for it.** `fabrikito` adds none, and a team file should not: Claude Code's allow rules
   match the start of a command, so a rule for `run-exclusive` would also allow whatever command it wraps.
 - **Nested runs** (a gate script that calls `run-exclusive` again) run at once instead of waiting for
   themselves, but only while the run that holds the lock is alive. A program left running from an
