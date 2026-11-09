@@ -130,6 +130,29 @@ differ, the role prompt wins.
     as "one point sent to sec and the EM" (sec: the neutral label of `fabrikito:security-triage`
     step 9), never by its class, file or severity.
 
+## A follow-up about a head you already judged
+A note after your verdict (an answer, a clarification, a point you add) can stop a merge:
+`fabrikito:merge-train` step 5 stops and asks when a required reviewer posts a comment that names the
+head after that reviewer's latest verdict and the comment is not itself a verdict. So post it in
+one of these two forms, and in no other:
+- **Without the head.** Name no commit of the PR (no SHA of 7 or more characters, in any spelling),
+  and point at your verdict by its comment URL. This is for a note that changes nothing about your
+  verdict.
+- **As a verdict.** The comment's text starts with your role id as a whole word (followed by a space
+  or a colon), and it has exactly one verdict line, `READY at <short sha>` or
+  `CHANGES NEEDED at <short sha>`, naming the head you now judge (it may be last, as in step 7).
+  It becomes your latest verdict, so say `READY` only if you would still say it with the follow-up
+  taken into account: a follow-up that finds a blocking problem ends `CHANGES NEEDED`. No other line
+  starts with `READY at` or `CHANGES NEEDED at` (refer to an earlier verdict by its URL, never by
+  repeating its line): a comment with two verdict lines stops the train. Repeat any `held point:`
+  and `Requires:` line your earlier verdict had, as step 7 says.
+
+This changes nothing about what stops a merge. A follow-up in neither form is still a stop, and the
+EM reports it to the owner plainly; do not reword a comment to slip past the check. Never edit or
+delete a comment you posted before (a train may already have read it): post a new one. A follow-up
+about a different head than the one you judged is not a follow-up: it needs the whole skill at that
+head.
+
 ## What to report
 In your session: the PR, the head, the verdict line, the gate result line, and the comment's URL.
 
