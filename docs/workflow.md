@@ -36,7 +36,7 @@ a record: when it and the repository disagree, the repository wins.
   and a repository's fsmonitor program is not run. Claude Code drops all of a hook's output when the
   hook runs past its timeout, so a slow status on a cold volume costs the seat its file list, not its
   note.
-- Each seat may edit only its own note: the others are denied (see [Safety](../README.md#safety)).
+- Each seat may edit only its own note: the others are denied (see [Safety](safety.md)).
 - The hook is a convenience, not a control, so it does not override a user who switched every hook
   off: with `disableAllHooks: true` in `~/.claude/settings.json`, a seat without a gate gets no note,
   and `check` prints a `hooks` line naming those seats.

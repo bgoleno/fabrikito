@@ -11,5 +11,5 @@ place. Include what you found, how to reproduce it, and which version or commit 
 ## Scope
 
 fabrikito starts Claude Code sessions on your machine. The permission rules it writes guard
-against accidents, not a determined user or seat: see [Safety](README.md#safety) for what they cover and
+against accidents, not a determined user or seat: see [Safety](docs/safety.md) for what they cover and
 what they do not.

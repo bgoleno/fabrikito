@@ -38,7 +38,7 @@ there names the upstream commit that was copied and lists every change, and
 
 Two skills set `disable-model-invocation`: `/fabrikito:ping` and `/fabrikito:merge-train`. A seat cannot
 start them with its Skill tool; they run when typed as the session's own input. That is not a boundary:
-any process running as you can type into a seat's pane (see [Safety](../README.md#safety)). For
+any process running as you can type into a seat's pane (see [Safety](safety.md)). For
 `merge-train` the e2e fails if the flag is missing, and the skill's step 1 checks for itself that the
 command arrived as the session's own input, with no `[from ...]` label.
 
@@ -55,7 +55,7 @@ typed `/fabrikito:merge-train` covers, are rules in that prompt; the skill is th
   `sessions.claude.plugin: false` to leave the flag out. `check` shows the plugin's path, or `off`.
 - A `--plugin-dir` of your own in `sessions.claude.args` is allowed: the flag repeats, so both load. Your
   installed plugins load as usual alongside it.
-- Seats get an `Edit` deny on `plugin/`, like `lib/` and `roles/` (see [Safety](../README.md#safety)),
+- Seats get an `Edit` deny on `plugin/`, like `lib/` and `roles/` (see [Safety](safety.md)),
   since it is code every seat runs at its next start, and on each plugin a team loads itself with
   `--plugin-dir` in `args` (the folder with everything under it, or the `.zip`; a relative path is taken
   from the seat's folder).

@@ -31,11 +31,11 @@ the reference for each key, and the file to copy.
   `~/.claude/settings.json`. `sessions.claude.plugin` (default `true`) loads the fabrikito plugin into
   every seat: see [The fabrikito plugin](plugin.md).
 - `permissions` (`deny`, `ask`, `allow`), at the top level and per role: see
-  [Safety](../README.md#safety).
+  [Safety](safety.md).
 - `other_teams`: other teams' state folders that aren't beside this team's own, each with the
   `observers` allowed to read its log and notes. That log does not hold the body of a message to or from
   `sec` (#227), but it can still carry private security reports sent to the EM, so an observer treats it
-  under rule 5 and sends `sec` and the EM only a pointer: see [Safety](../README.md#safety).
+  under rule 5 and sends `sec` and the EM only a pointer: see [Safety](safety.md).
 - `prompts.common` and a per-role `prompt` (file) or `prompt_text` (inline). Placeholders such as
   `@@ROSTER@@`, `@@GITHUB_REPO@@`, `@@PROJECT_URL@@` and `@@WORKTREE_ROOT@@` are filled in per seat.
 - `prompts.project` (optional): a file with your project's specifics, such as what the product is,
@@ -93,7 +93,7 @@ folder. A running seat keeps what it started with and picks up a change at its n
 Owner-only (mode 700) guards against other OS users, and only on a volume that honours ownership. It
 keeps out nobody on a volume mounted `noowners` (Finder's "ignore ownership on this volume"), and every
 seat runs as the same user in any case. Separate folders keep two teams' temp files apart by accident
-guard only, as with the other rules in [Safety](../README.md#safety): this is not a security boundary.
+guard only, as with the other rules in [Safety](safety.md): this is not a security boundary.
 
 A role with no `tmpdir` behaves as before: the seat takes `TMPDIR` and `CLAUDE_CODE_TMPDIR` from whatever
 started it, and `check` shows `(inherit)`. There is no default folder, because the choice is explicit per role.
