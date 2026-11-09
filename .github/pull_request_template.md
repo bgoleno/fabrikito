@@ -1,5 +1,11 @@
 Closes #
-<!-- Use "Refs #" instead of "Closes #" when this PR does not complete the issue. -->
+<!-- Use "Refs #" instead of "Closes #" when this PR does not complete the issue.
+GitHub closes an issue on merge when a closing keyword (close, closes, closed, fix, fixes, fixed, resolve,
+resolves, resolved) comes right before its reference, whatever the words around it: "does not close #N" and
+"will not fix #N" close it too. Write a closing keyword only before an issue this PR completes. For any
+other issue use "Refs #N", and do not name it after a closing keyword anywhere in this body, the title or a
+commit message. Before asking for review, check what GitHub will close:
+gh pr view <pr> --json closingIssuesReferences -->
 
 ## What changed
 
