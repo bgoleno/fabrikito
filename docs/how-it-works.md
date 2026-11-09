@@ -13,14 +13,15 @@ This page shows how the parts fit together. Each section links to the page with 
 
 | Part | What it is |
 |---|---|
-| `fabrikito` | The launcher. Every command (`check`, `up`, `view`, `titles`, `status`, `say`, `attach`, `migrate`, `down`) is a function in it. |
+| `fabrikito` | The launcher. Every command (`check`, `up`, `view`, `titles`, `status`, `say`, `attach`, `migrate`, `down`) is a function in it. `run-exclusive` hands over to `lib/run_exclusive.rb` before any team file is read. |
+| `lib/run_exclusive.rb` | `fabrikito run-exclusive`: runs one heavy command at a time on the host. See [One heavy run at a time](gate.md#one-heavy-run-at-a-time). |
 | `lib/team_config.rb` | Reads and validates the team file, and generates what each seat is started with: its prompt, kickoff, settings (permission rules and hooks) and claude flags. `fabrikito` calls it for every value. |
 | `lib/session_start.sh` | A `SessionStart` hook: shows a seat its progress note and the state of its working directory. |
 | `lib/log_message.sh` | A `PostToolUse` and `PostToolUseFailure` hook on `SendMessage`: writes each message a seat sends to the message log. |
 | `lib/stop_gate.sh` | A `Stop` hook: runs the repository's gate when a seat ends a turn with uncommitted work. |
 | `lib/screen_bounds.js` | Finds the usable area of the screen, for sizing the iTerm window. |
 | `roles/` | Generic prompts: `common.md`, shared by every seat, and one for each standard role (`em`, `tl`, `fs`, `qa`, `sec`). A project can use its own prompts instead. |
-| `plugin/` | The factory plugin: skills that every seat loads. |
+| `plugin/` | The fabrikito plugin: skills that every seat loads. |
 | `teams/example.yaml` | The documented example team file. Your own team files sit beside it and are git-ignored. |
 | `.state/<team>/` | Everything generated for a team (settings, launch scripts, prompts, the team's copy of claude), plus the message log, progress notes and the gate's state. Git-ignored. The team file's `state:` key moves it, and so does `TEAM_STATE_DIR`, which wins. |
 | `test/e2e.sh`, `test/live-env.sh` | The end-to-end test's entry point (the shared setup, the count and the cleanup), and the helper that runs a live test on a private tmux server. |
@@ -101,8 +102,8 @@ tmux session and keeps the worktree, and closing the iTerm tab only detaches fro
   depending on the account, installed mods apply above all of them.
   When a seat's permission mode is set and is not `bypassPermissions`, the file also sets
   `disableBypassPermissionsMode`, so the seat cannot be switched into bypass from inside the session.
-- **The factory plugin,** loaded with `--plugin-dir` unless `sessions.claude.plugin` is `false`. See
-  [The factory plugin](plugin.md).
+- **The fabrikito plugin,** loaded with `--plugin-dir` unless `sessions.claude.plugin` is `false`. See
+  [The fabrikito plugin](plugin.md).
 - **A progress note,** `.state/<team>/notes/<role>.md`, outside the working directory, so it survives
   a restart and a recreated worktree. See [Progress notes](workflow.md#progress-notes).
 
@@ -180,7 +181,7 @@ The skills under `plugin/skills/` are procedures for a role, such as assigning a
 (`fabrikito:assign`), starting a task (`fabrikito:start-task`) or reviewing a pull request
 (`fabrikito:review-pr`). A skill is loaded only when it is used, instead of sitting in every prompt.
 The rules a skill applies, such as the brief's fields or the review bar, stay in the role prompt,
-and the skill points to them. See [The factory plugin](plugin.md).
+and the skill points to them. See [The fabrikito plugin](plugin.md).
 
 ## What the rules are, and are not
 
