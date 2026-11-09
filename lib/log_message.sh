@@ -18,7 +18,8 @@
 # the hook runs only on SendMessage, so a message was sent, and the log should say so.
 #
 # A message to or from the role id sec is written without its body: the marker "[body not logged: sec]"
-# stands in for the text, the other fields are as always (#227).
+# stands in for the text, the other fields are as always (#227). So is a message to a uds: address
+# that did not resolve to a roster seat, with the marker "[body not logged: unresolved address]".
 #
 # The message is the sender's to choose, so every field is escaped exactly as say's log_field does:
 # a message cannot split or forge a log line, or drive the terminal that reads the log. The message
@@ -158,6 +159,11 @@ ruby --disable-gems -rjson -e '
   # role ids, so a session name, a "[ref]" or a uds: address that resolves to sec is caught too. The
   # id is TRIAGE_WRITER in lib/team_config.rb. A message to "all" (say) is not one to sec: see the README.
   msg = "[body not logged: sec]" if (rcpt == "sec" || from == "sec") && !watch
+  # Fail closed (sec on #227): a uds: address that did not resolve to a roster seat (the 2s lookup ran
+  # out on a loaded host, or the sender is outside a roster pane) may still be one for sec, and replying to a
+  # message by its from address is the usual way to answer sec. Its body is not written either. A named
+  # recipient that is not on the roster is still logged in full, as before.
+  msg = "[body not logged: unresolved address]" if rcpt == to && to.start_with?("uds:") && !watch && msg != "[body not logged: sec]"
   append(log, [stamp, field(from), field(rcpt), outcome, msg])
 ' -- "$log" "$from" "$@" </dev/stdin >/dev/null 2>&1
 exit 0

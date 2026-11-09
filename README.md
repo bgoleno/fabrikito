@@ -281,7 +281,8 @@ Each `SendMessage` from a seat appends one line in the same format, written by `
   as U+FFFD (`�`); a valid pair is kept;
 - the recipient is a role id when the `to` names a roster seat's session (`sf-tl`, or `sf-tl [3fa9c1]`)
   or is a `uds:` address whose process runs in a roster seat's pane, as a reply to a message does.
-  Anything else, another team's session, a subagent or an address no seat holds, is written as given;
+  Anything else, another team's session or a subagent, is written as given, and so is its message; an
+  address no seat holds is written as given too, but without its message (below, [#227](../../issues/227));
 - the outcome is `sent` when the message reached the receiver's inbox, and `NOT-SENT` when
   `SendMessage` returned `success: false` or failed. `sent` is not `delivered`: a receiver in another
   permission mode can still hold a message for its user's approval, or refuse it, and that comes back
@@ -303,7 +304,10 @@ except a message to or from `sec` (below): every seat but `em` has a `Read` deny
 (`disableAllHooks: true` in the user's settings, and no gate) logs nothing: `check` says which.
 A message to or from `sec` is logged without its body ([#227](../../issues/227)): by `say` and by the
 hook alike, the line keeps the time, the sender, the recipient and the outcome, and the text is replaced
-by `[body not logged: sec]`. A security point can sit in such a message before it is rated, and
+by `[body not logged: sec]`. The hook is also closed on a doubt: a message to a `uds:` address that did not
+resolve to a roster seat (the 2-second lookup ran out, or the sender is outside a roster pane) may be a reply
+to `sec`, so its text is replaced by `[body not logged: unresolved address]`, and the other fields are as
+usual. A security point can sit in such a message before it is rated, and
 the log is read by more seats than `sec` and the EM (an observer's team, anyone who copies it). The
 delivery checks read only the outcome, so they work as before. A `say all` from another seat is a message
 to every seat, `sec` among them, and is logged in full, as the text is that seat's; send a private point to
