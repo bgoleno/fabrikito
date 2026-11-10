@@ -118,6 +118,42 @@ nx=$(TEAM_STATE_DIR=$T/state8 $S -c $T/v.yaml up --no-view w5 2>&1); rc=$?
 [ -e $T/boot-started ] && [ $rc -eq 0 ] && echo "$nx" | grep -qF "is not marked set up" && [ "$(grep -c '^w5 ' $T/boot.log)" = 2 ] && tmux has-session -t '=tv-w5' 2>/dev/null &&
   ok "after a KILL mid-bootstrap, the next up finds the worktree unmarked and sets it up before it starts the seat" || { bad "up after a KILL (rc=$rc)"; echo "$nx" | tail -4; cat $T/boot.log; }
 TEAM_STATE_DIR=$T/state8 $S -c $T/v.yaml down --yes w5 >/dev/null 2>&1; git -C $T/repo worktree remove --force $VOL/$ROOT/team-w5 2>/dev/null
+# TERM, INT or HUP during git worktree add itself (#198, qa's forcing on #196): a git stand-in slows only
+# that command. up's trap is on before the worktree exists, so once git returns it removes the new
+# worktree by its exact path and starts no seat, with a setup (repo.bootstrap) and without one.
+mkdir -p $T/slowgit; realgit=$(command -v git)
+cat > $T/slowgit/git <<G
+#!/bin/sh
+for a in "\$@"; do
+  if [ "\$a" = add ]; then touch $T/wt-add-started; sleep 3; break; fi
+done
+exec $realgit "\$@"
+G
+chmod +x $T/slowgit/git
+wt_add_signal() { # wt_add_signal <role> <signal>: up for <role> with the slowed git, the signal during the add
+  rm -f $T/wt-add-started; local upid i
+  PATH=$T/slowgit:$PATH TEAM_STATE_DIR=$T/state-wa $S -c $T/v.yaml up --no-view $1 > $T/wa-$1.out 2>&1 & upid=$!
+  for i in $(seq 1 600); do [ -e $T/wt-add-started ] && break; kill -0 $upid 2>/dev/null || break; sleep 0.1; done
+  [ -e $T/wt-add-started ] || { echo "the add never started"; kill -TERM $upid 2>/dev/null; wait $upid 2>/dev/null; return 1; }
+  kill -$2 $upid 2>/dev/null; wait $upid; wa_rc=$?; sleep 1
+}
+wt_add_clean() { # no folder, no registered worktree, no seat, and the message
+  [ $wa_rc -ne 0 ] && grep -qF "up was interrupted while setting up" $T/wa-$1.out && [ ! -e $VOL/$ROOT/team-$1 ] && ! git -C $T/repo worktree list | grep -q "team-$1" && ! tmux has-session -t "=tv-$1" 2>/dev/null
+}
+REPO_EXTRA="bootstrap: \"$T/bin/boot\"" mk "wrapper: $T/bin/wrap"; echo "  w11: { title: A, workdir: { type: worktree }, prompt_text: \"p\" }" >> $T/v.yaml
+wt_add_signal w11 TERM && wt_add_clean w11 && ok "TERM during git worktree add (with a setup): the new worktree is removed by its path, up says it was interrupted, no seat starts" || { bad "TERM during git worktree add, with a setup (rc=${wa_rc:-?})"; cat $T/wa-w11.out; git -C $T/repo worktree list; }
+git -C $T/repo worktree remove --force $VOL/$ROOT/team-w11 2>/dev/null
+mk "wrapper: $T/bin/wrap"; echo "  w12: { title: B, workdir: { type: worktree }, prompt_text: \"p\" }" >> $T/v.yaml
+wt_add_signal w12 TERM && wt_add_clean w12 && ok "TERM during git worktree add (no setup configured): the new worktree is removed by its path, up says it was interrupted, no seat starts" || { bad "TERM during git worktree add, no setup (rc=${wa_rc:-?})"; cat $T/wa-w12.out; git -C $T/repo worktree list; }
+git -C $T/repo worktree remove --force $VOL/$ROOT/team-w12 2>/dev/null
+wt_add_signal w12 HUP && wt_add_clean w12 && ok "HUP during git worktree add: the new worktree is removed, no seat starts" || { bad "HUP during git worktree add (rc=${wa_rc:-?})"; cat $T/wa-w12.out; git -C $T/repo worktree list; }
+git -C $T/repo worktree remove --force $VOL/$ROOT/team-w12 2>/dev/null
+# INT is not sent: a background job of a script starts with INT ignored, and an ignored signal cannot be trapped.
+# With no signal, the slowed add finishes, the trap is gone, and the seat starts as before.
+rm -f $T/wt-add-started; nx=$(PATH=$T/slowgit:$PATH TEAM_STATE_DIR=$T/state-wa $S -c $T/v.yaml up --no-view w12 2>&1); rc=$?
+[ $rc -eq 0 ] && [ -d $VOL/$ROOT/team-w12 ] && tmux has-session -t '=tv-w12' 2>/dev/null && ok "up with a slowed git worktree add and no signal still creates the worktree and starts the seat" || { bad "up with a slowed git worktree add (rc=$rc)"; echo "$nx" | tail -4; }
+TEAM_STATE_DIR=$T/state-wa $S -c $T/v.yaml down --yes w12 >/dev/null 2>&1; git -C $T/repo worktree remove --force $VOL/$ROOT/team-w12 2>/dev/null
+rm -rf $T/slowgit
 reject "a non-boolean sessions.claude.auto_memory" "sessions.claude.auto_memory must be true or false" "auto_memory: maybe"
 reject "a non-boolean roles.<id>.auto_memory" "roles.em.auto_memory must be true or false" "" "" ", auto_memory: 1"
 mk "auto_memory: true" "" ", auto_memory: false"

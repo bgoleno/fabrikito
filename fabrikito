@@ -280,9 +280,20 @@ ensure_worktree() {
     *) die "origin of $REPO is '$url', expected it to contain '$GITHUB'" ;;
   esac
   git -C "$REPO" fetch --quiet origin "${BASE#origin/}" || echo "warning: fetch failed; using the local $BASE" >&2
+  # The interrupt handling is on before the worktree exists (#198): bash runs a trap only when the
+  # foreground command returns, so a TERM, INT or HUP during the add is handled once git is done, and
+  # the new worktree is then removed by its exact path, like one whose setup fails, and no seat starts.
+  # setup_failed removes only when BOOT_NEW is new. Without a setup, the trap is cleared after the add.
+  BOOT_DIR=$dir BOOT_NEW=new
+  trap 'boot_interrupted' INT TERM HUP
   git -C "$REPO" worktree add --detach "$dir" "$BASE" >/dev/null
   echo "  created worktree $dir"
-  if setup_wanted; then bootstrap_worktree "$id" "$dir" new; fi
+  if setup_wanted; then
+    bootstrap_worktree "$id" "$dir" new
+  else
+    trap - INT TERM HUP
+    BOOT_DIR="" BOOT_NEW=""
+  fi
 }
 
 # A worktree up has made has none of the main checkout's git-ignored files and no installed
@@ -293,6 +304,8 @@ ensure_worktree() {
 # can be stopped anywhere (a signal, a kill, a crash) and the seat must never start in a worktree
 # set up halfway. A failure, or INT, TERM or HUP meanwhile, stops up; a worktree this up has just
 # made is then removed by its exact path, and an existing one (it may hold work) is left as it is.
+# For a new worktree that holds from before git worktree add (ensure_worktree installs the trap there,
+# #198); a KILL, which no trap catches, is covered by the missing mark.
 BOOT_DIR="" BOOT_PID="" BOOT_NEW=""
 setup_wanted() { [ -n "$BOOTSTRAP" ] || [ -n "$COPY_PATHS" ]; }
 setup_mark() { echo "$STATE/setup/$1"; }
