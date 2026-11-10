@@ -142,8 +142,11 @@ What the rules cannot do:
   `sh -c`, in a script, or reached another way is not matched: for example `git -C <dir> push`, a bare
   `git push` while on the base branch, or `gh api` with a PATCH or DELETE on `git/refs/heads/<base>`.
 - A `Read` deny covers Claude's file tools and the file commands it recognises in Bash (`cat`, `head`,
-  `tail`, `sed`, `tee`, redirects). It does not cover `grep -r` over a folder, or a Python or Node
-  script that opens the file itself.
+  `tail`, `sed`, `tee`, redirects). It does not cover `grep -r` over a folder, `git show` of a committed
+  file, or a Python or Node script that opens the file itself. A `Read` deny on `.env` files keeps a
+  seat from opening one by accident; it does not keep a value out of its reach (the Read tool and `cat`
+  were refused, while `git show` and a recursive grep returned a dummy value, on Claude Code 2.1.316,
+  [#248](../../../issues/248)). Keep real credentials out of the repository and the worktrees.
 - The protected-path `Edit` denies stop the file tools, redirects, and `cp`, `mv` and `rm` with a
   protected file as the target (checked on Claude Code 2.1.316). They match the command text Claude
   writes, so they do not stop the same command run through another shell or a script (`sh -c 'cp …'`,

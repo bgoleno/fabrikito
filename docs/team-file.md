@@ -139,7 +139,9 @@ the seats started before it keep running, and the next `up` starts the rest (it 
 
 Do not list real credentials in `repo.copy`: each copy is another file on the worktree volume that a
 seat works in. Use development values, or have the bootstrap fetch what it needs. The example team's
-`Read` deny on `.env` files covers a copied `.env` like the original.
+`Read` deny on `.env` files covers a copied `.env` like the original. That deny stops the file tools and
+the file commands Claude recognises, not `git show` of a committed file or a recursive grep: see "What
+the rules cannot do" in [Safety](safety.md).
 
 ### Package stores
 
