@@ -56,7 +56,7 @@ storage:
 # `up`, `check`, `say`, the hooks and every seat read it from this file. TEAM_STATE_DIR, when set,
 # wins over it (throwaway teams and tests). Refused by `check`: a relative path, the home folder or a
 # folder holding it, a folder inside the repository, a seat's working directory, the worktree folder
-# or a factory checkout (except under <factory checkout>/.state/, which that checkout git-ignores), a volume that is not mounted, and a folder
+# or a fabrikito checkout (except under <fabrikito checkout>/.state/, which that checkout git-ignores), a volume that is not mounted, and a folder
 # that is, holds or sits inside another team's state folder. It moves nothing: an existing team that
 # adds it starts with an empty folder, so move the old state first (docs/pinned-release.md).
 # state: /path/outside/every/checkout/example-state
@@ -73,7 +73,7 @@ sessions:
     # --setting-sources, --permission-prompt-tool) are refused here, and so are permission flags
     # when permission_mode is set.
     # args: []
-    # Load the factory's own plugin (plugin/ next to fabrikito) into every seat with --plugin-dir.
+    # Load fabrikito's own plugin (plugin/ next to fabrikito) into every seat with --plugin-dir.
     # Its skills show as /fabrikito:<skill>, and only sessions fabrikito starts get them. Default true,
     # so a team file without this key gets the plugin at its next `up`, and gets every skill (and,
     # later, every hook) added to plugin/ after that. false: the flag is omitted. A --plugin-dir of
@@ -97,7 +97,7 @@ sessions:
     # Claude Code's auto memory is off in every seat unless this is true (a role can override it).
     # Its folder is shared by every worktree of the repo and loads into every session there, the
     # owner's own included, so a seat's note would reach all of them without review. true: the
-    # factory sets nothing and Claude Code's own settings decide.
+    # fabrikito sets nothing and Claude Code's own settings decide.
     # auto_memory: false
 
 # What `up` shows once the seats are running, and what `./fabrikito view` shows any time: a new

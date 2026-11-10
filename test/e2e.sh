@@ -32,10 +32,10 @@ ROOT="Projects/_teamtest-$$"; VOL=${TEST_VOLUME:-}
 # would fail only when run from a seat, and a stand-in seat could reach the real seat's tmux or
 # messaging socket (#75). This is the one list of what is cleared; add any new launcher variable here.
 # It runs before anything below exports a TEAM_* variable (TEAM_VIEW=0), or it would clear it.
-# FACTORY_*: run under run-exclusive (#214), the run inherits its lock's variables; nothing in it may
+# FABRIKITO_* and the old FACTORY_* (#273): run under run-exclusive (#214), the run inherits its lock's variables; nothing in it may
 # take or skip the real lock, so the run has a lock of its own in $T.
-for v in $(compgen -e); do case $v in DISABLE_AUTOUPDATER|TEAM_*|CLAUDE*|TMUX*|FACTORY_*) unset "$v" ;; esac; done
-export TMUX_TMPDIR=$T/tmux TEAM_STATE_DIR=$T/state FACTORY_RUN_LOCK=$T/rx-lock/run-exclusive.lock
+for v in $(compgen -e); do case $v in DISABLE_AUTOUPDATER|TEAM_*|CLAUDE*|TMUX*|FABRIKITO_*|FACTORY_*) unset "$v" ;; esac; done
+export TMUX_TMPDIR=$T/tmux TEAM_STATE_DIR=$T/state FABRIKITO_RUN_LOCK=$T/rx-lock/run-exclusive.lock
 # No run may drive iTerm (#93). A stand-in osascript first on PATH records every call and does
 # nothing, and the run fails at the end if it was called: `up` opens a real iTerm window unless told
 # not to, every run left its windows on the user's screen, and enough of them used up every pty on

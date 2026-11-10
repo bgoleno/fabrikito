@@ -82,7 +82,7 @@ SKILL_RE = /\A[A-Za-z0-9][A-Za-z0-9._-]*(:[A-Za-z0-9][A-Za-z0-9._-]*)?\z/.freeze
 # The folder fabrikito and this file are installed in.
 INSTALL = utf8(File.expand_path('..', __dir__), 'the install folder')
 
-# The factory's own plugin (skills, later agents and hooks). Each seat loads it with --plugin-dir, so it
+# Fabrikito's own plugin (skills, later agents and hooks). Each seat loads it with --plugin-dir, so it
 # reaches exactly the sessions fabrikito starts: seats work in the target project's folders, where this
 # repository's .claude/ is never read, and nothing is installed into the user's settings.
 PLUGIN_DIR = File.join(INSTALL, 'plugin')
@@ -303,7 +303,7 @@ class TeamConfig
     section('display', DISPLAY_KEYS, required: false)
   end
 
-  # sessions.claude.plugin: load the factory's plugin into every seat (default true).
+  # sessions.claude.plugin: load fabrikito's plugin into every seat (default true).
   def plugin?
     claude.key?('plugin') ? claude['plugin'] : true
   end
@@ -564,7 +564,7 @@ class TeamConfig
   # directory", and its MEMORY.md loads into every session there
   # (https://code.claude.com/docs/en/memory#storage-location). A seat's note would reach every other
   # seat and the owner's own sessions in the main checkout, unreviewed (#71), so it is off unless the
-  # team file turns it on (a role's value wins over sessions.claude). On means the factory sets
+  # team file turns it on (a role's value wins over sessions.claude). On means fabrikito sets
   # nothing and Claude Code's own settings decide.
   def auto_memory?(id)
     v = role(id).key?('auto_memory') ? role(id)['auto_memory'] : claude['auto_memory']
@@ -696,11 +696,11 @@ class TeamConfig
   end
 
   # How path overlaps this team's own work, or nil: it is, holds or sits inside the repository, the
-  # worktree folder or a seat's working directory, or it is or holds the home folder or this factory
+  # worktree folder or a seat's working directory, or it is or holds the home folder or this fabrikito
   # checkout. When the repository or a working directory holds this team's own state root (a team
   # working on fabrikito keeps .state/ in its own checkout, tl on #200), a folder inside that
   # state root is exempt from "sits inside" it: the other teams' folders are there. So is a listed
-  # folder that is a team's state folder in a factory checkout's .state (listed_team_state?, #205).
+  # folder that is a team's state folder in a fabrikito checkout's .state (listed_team_state?, #205).
   def own_work_overlap(path, listed: false)
     fold = RUBY_PLATFORM.include?('darwin') ? ->(x) { x.unicode_normalize(:nfc).downcase } : ->(x) { x }
     within = ->(i, o) { i == o || i.start_with?(o.end_with?('/') ? o : "#{o}/") }
@@ -720,15 +720,15 @@ class TeamConfig
 
     roles.each_key { |id| return "is, holds or sits inside seat #{id}'s working directory" if meets.call(workdir(id)) }
     return 'is or holds the home folder' if holds.call(home_utf8)
-    return 'is or holds this factory checkout' if holds.call(INSTALL)
+    return 'is or holds this fabrikito checkout' if holds.call(INSTALL)
 
     nil
   end
 
   # A listed folder that may sit inside this team's own work (#205): a team pinned to a release whose
-  # repo.path is the factory checkout lists <factory>/.state/<team>, inside its repository. It must
+  # repo.path is the fabrikito checkout lists <fabrikito>/.state/<team>, inside its repository. It must
   # exist, hold team state, and have a parent whose real name, links resolved, is exactly .state: the
-  # factory's own git-ignored layout. A source folder that merely holds settings/, launch/ and
+  # fabrikito's own git-ignored layout. A source folder that merely holds settings/, launch/ and
   # prompts/, or one under a link named .state, does not qualify, and neither does a missing or empty
   # folder (tl and sec on #204). File.realpath keeps the case as typed on a case-insensitive disk, so
   # the parent's name is also taken as stored on disk, from its own folder's listing: a folder named
@@ -917,7 +917,7 @@ class TeamConfig
       *([prompts_common_path, prompts_project_path] + roles.values.map { |r| r['prompt'] && expand(r['prompt']) }).compact,
       # the launcher itself, and the wrapper it runs claude through
       File.join(INSTALL, 'fabrikito'), File.join(INSTALL, 'factory.sh'), File.join(INSTALL, 'lib', '**'), File.join(INSTALL, 'roles', '**'),
-      # the factory's plugin, which every seat loads at its next start
+      # fabrikito's plugin, which every seat loads at its next start
       File.join(PLUGIN_DIR, '**'),
       # and any plugin the team loads itself with --plugin-dir in args
       *args_plugin_paths(id),
@@ -1197,11 +1197,11 @@ class TeamConfig
     out << "permissions per seat (they add to the rules in ~/.claude/settings.json and the repo's .claude/ settings, which still apply):"
     roles.each_key do |id|
       merged = merged_permissions(id)
-      factory = permission_entries(id).select(&added_by).map(&:first)
+      added_rules = permission_entries(id).select(&added_by).map(&:first)
       mode = mode_label(id)
       out << "[#{id}] mode #{mode}"
       PERMISSION_LISTS.each do |list|
-        own = merged[list] - factory
+        own = merged[list] - added_rules
         out << format('    %-5s: %s', list, own.empty? ? '(none)' : own.join(', '))
       end
       notes = (roles.keys - [id]).flat_map { |r| note_rules(r) }
@@ -1210,10 +1210,10 @@ class TeamConfig
       mem = memory_rules(id)
       tri = triage_rules(id)
       added = merged['deny'].count do |r|
-        factory.include?(r) && !notes.include?(r) && !logs.include?(r) && !mem.include?(r) && !tri['deny'].include?(r) && !others.include?(r)
+        added_rules.include?(r) && !notes.include?(r) && !logs.include?(r) && !mem.include?(r) && !tri['deny'].include?(r) && !others.include?(r)
       end
-      asks = merged['ask'].count { |r| factory.include?(r) }
-      note = merged['allow'].any? { |r| factory.include?(r) } ? ', Edit allow on its own progress note and deny on the other seats\'' : ''
+      asks = merged['ask'].count { |r| added_rules.include?(r) }
+      note = merged['allow'].any? { |r| added_rules.include?(r) } ? ', Edit allow on its own progress note and deny on the other seats\'' : ''
       memo = mem.empty? ? '' : ", Edit deny on the repository's auto-memory folder (#{mem.size} spellings)"
       log = (merged['deny'] & logs).empty? ? '' : ', Read deny on the message log'
       triage = if id == TRIAGE_WRITER then ', Edit and Read allow on the triage record folder'
@@ -1227,7 +1227,7 @@ class TeamConfig
                   (watched.empty? ? '' : " (observer of #{watched.join(', ')}: may read its log and notes)")
               end
       out << "    added: Edit deny on #{added} protected paths#{asks.positive? ? ", ask on #{asks} push-to-#{base_branch} patterns" : ''}#{note}#{memo}#{log}#{triage}#{teams}"
-      out << '    note : allow rules have no effect in bypassPermissions' if mode.start_with?('bypassPermissions') && !(merged['allow'] - factory).empty?
+      out << '    note : allow rules have no effect in bypassPermissions' if mode.start_with?('bypassPermissions') && !(merged['allow'] - added_rules).empty?
       out << '    note : ask rules are refused in dontAsk mode, not asked' if mode == 'dontAsk' && !merged['ask'].empty?
     end
     out << "note: no base-branch push rules (repo.base '#{repo['base']}' is not <remote>/<branch>)" if base_branch.nil?
@@ -1354,7 +1354,7 @@ class TeamConfig
 
   # The refusals that need the team's own work (validate runs this once the roles are checked): the
   # state folder may not be, hold or sit inside the repository, the worktree folder, a seat's working
-  # directory or this factory checkout, except under <that folder>/.state/ when that folder is a factory
+  # directory or this fabrikito checkout, except under <that folder>/.state/ when that folder is a fabrikito
   # checkout, whose .state is git-ignored (a team working on this repository keeps its state there).
   # Anything else inside a checkout is tracked or may be: a seat's own work would deny itself, and
   # the Edit denies on the state folder would stop the seats' work there.
@@ -1364,16 +1364,16 @@ class TeamConfig
     p = state_key_path
     places = [["this team's repository (repo.path)", repo_path], ["this team's worktree folder (#{worktree_root})", worktree_root]]
     places += roles.keys.map { |id| ["seat #{id}'s working directory", workdir(id)] }
-    places << ['this factory checkout', INSTALL]
+    places << ['this fabrikito checkout', INSTALL]
     places.each do |what, dir|
       next unless path_overlap?(p, dir)
 
       ds = File.join(dir, '.state')
-      # <dir>/.state/<name> and below, in a factory checkout only: it ignores .state. Another project's
+      # <dir>/.state/<name> and below, in a fabrikito checkout only: it ignores .state. Another project's
       # repository may not, and git clean in a seat's worktree would delete state kept there (tl on #270).
-      factory = File.file?(File.join(dir, 'fabrikito')) && File.file?(File.join(dir, 'lib', 'team_config.rb'))
+      fab_checkout = File.file?(File.join(dir, 'fabrikito')) && File.file?(File.join(dir, 'lib', 'team_config.rb'))
       # .state must itself be a real folder (or missing): a link there leads anywhere in the checkout (sec on #270).
-      next if factory && !File.symlink?(ds) && path_within?(p, ds) && fold_path(p) != fold_path(ds) && path_within?(p, dir)
+      next if fab_checkout && !File.symlink?(ds) && path_within?(p, ds) && fold_path(p) != fold_path(ds) && path_within?(p, dir)
 
       die "state: #{p} is, holds or sits inside #{what}: a state folder inside a checkout is tracked or is a seat's own work. " \
           "Use a folder outside every checkout, or one under <checkout>/.state/"

@@ -193,7 +193,7 @@ mk "plugin: false"; pa=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T
 [ $? = 0 ] && ! echo "$pa" | grep -q -- "--plugin-dir" && $S -c $T/v.yaml check 2>&1 | grep -qxF "plugin    : off (sessions.claude.plugin: false)" && ok "plugin: false omits --plugin-dir, and check says off" || { bad "plugin: false"; echo "$pa"; }
 # A team's own --plugin-dir in args is allowed and kept: the flag repeats, so both plugins load.
 mk "args: [--plugin-dir, $T/other-plugin]"; pa=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml claude_args em | tr '\n' ' ')
-[ "$pa" = "--plugin-dir $T/other-plugin --plugin-dir $PLUG " ] && ok "a team's own --plugin-dir in args is kept next to the factory plugin" || { bad "own --plugin-dir in args"; echo "$pa"; }
+[ "$pa" = "--plugin-dir $T/other-plugin --plugin-dir $PLUG " ] && ok "a team's own --plugin-dir in args is kept next to the fabrikito plugin" || { bad "own --plugin-dir in args"; echo "$pa"; }
 # Seats get an Edit deny on a plugin the team loads itself, in both spellings: a folder (existing or
 # not) with everything under it, a .zip as the file, a relative path taken from the seat's folder.
 mk "args: [--plugin-dir, $T/other-plugin, --plugin-dir=rel/plug.zip]"
