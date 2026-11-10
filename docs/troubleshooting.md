@@ -120,8 +120,11 @@ gives the reason when it refuses:
 
 - "screen not recognised as ready": a permission prompt, a menu or a dialog, the held-message dialog
   included. Attach, deal with it, and send again.
-- "the input box ... is not empty": someone is typing, or an earlier message was not sent. Attach and
-  clear the box.
+- "the input box ... is not empty": someone is typing, or an earlier message was not sent. Wait and
+  try once more later; do not loop (a repeat of the same text within 300 seconds is refused as a repeat,
+  and `status` shows a notice for the seat after three refusals). If the text is a fragment `say` itself
+  left, `./fabrikito flush <role>` submits it, deleting nothing; text someone typed is theirs, and the
+  owner can attach and submit or clear it. See [`say`](../README.md#say).
 - "in copy mode": someone is scrolling. Leave copy mode with q.
 - "shows Claude Code's diff panel notice": the pane is too short, even after `say` grew it for the
   check. Make it 110 columns wide or more, or 16 rows or more, or close the diff panel in the seat.
@@ -134,7 +137,8 @@ gives the reason when it refuses:
   regular file: remove it": something other than a plain file sits at the seat's lock path,
   `.state/<team>/say/<role>.lock`; remove it.
 - "does not show the message after the paste ... text left in input box": no Enter was sent, and
-  the text goes out with the next Enter in that seat. Attach and send or clear it.
+  the text goes out with the next Enter in that seat. If it is `say`'s own text, `./fabrikito flush
+  <role>` submits it (one Enter, nothing deleted); otherwise attach and send or clear it.
 - "does not show just the message's label after its paste ... so the message was not pasted": after
   pasting `[from <role>]`, `say` found something else in the box (the label cleared or swallowed,
   other text, a dialog), so it did not paste the message. Attach, clear the box, and send again.
