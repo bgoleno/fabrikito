@@ -1569,7 +1569,7 @@ sender_refusal() {
 cmd_say() {
   # Before anything else, tmux, caller_seat and the log included (#105).
   if [ "${1:-}" = --default-socket ]; then shift; else refuse_default_tmux say "type into seats"; fi
-  local to=${1:-} from=${TEAM_ROLE:-} why="" label r rc=0 lrc=0 held out=""
+  local to=${1:-} from=${TEAM_ROLE:-} why="" label r rc=0 lrc=0 held out="" body
   [ -n "$to" ] && [ $# -ge 2 ] || die "usage: say <role|all> <message...>"
   [ "$to" = all ] || check_role "$to"
   shift
@@ -1640,8 +1640,12 @@ cmd_say() {
   if log_unsafe; then
     lrc=1
   else
+    # A say to or from the security seat is logged without its body (#227), as lib/log_message.sh does
+    # for SendMessage: the line keeps the time, sender, recipient and status. The id is TRIAGE_WRITER in
+    # lib/team_config.rb. Refused and failed says count too: the text was typed either way.
+    if [ "$to" = sec ] || [ "$from" = sec ]; then body='[body not logged: sec]'; else body=$(log_field "$*"); fi
     printf '%s\t%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%dT%H:%M:%S')" "$(log_field "$from")" "$to" \
-      "$([ "$rc" -eq 0 ] && echo delivered || echo NOT-DELIVERED)" "$(log_field "$*")" >>"$LOG" || lrc=$?
+      "$([ "$rc" -eq 0 ] && echo delivered || echo NOT-DELIVERED)" "$body" >>"$LOG" || lrc=$?
   fi
   # Read in full before writing, so that nothing is written to the terminal when nothing was held.
   [ -z "$held" ] || { out=$(cat <&8); exec 7>&- 8<&-; }

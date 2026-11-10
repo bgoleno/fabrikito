@@ -315,7 +315,8 @@ Each `SendMessage` from a seat appends one line in the same format, written by `
   as U+FFFD (`�`); a valid pair is kept;
 - the recipient is a role id when the `to` names a roster seat's session (`sf-tl`, or `sf-tl [3fa9c1]`)
   or is a `uds:` address whose process runs in a roster seat's pane, as a reply to a message does.
-  Anything else, another team's session, a subagent or an address no seat holds, is written as given;
+  Anything else, another team's session or a subagent, is written as given, and so is its message; an
+  address no seat holds is written as given too, but without its message (below, [#227](../../issues/227));
 - the outcome is `sent` when the message reached the receiver's inbox, and `NOT-SENT` when
   `SendMessage` returned `success: false` or failed. `sent` is not `delivered`: a receiver in another
   permission mode can still hold a message for its user's approval, or refuse it, and that comes back
@@ -331,9 +332,20 @@ Each `SendMessage` from a seat appends one line in the same format, written by `
 The hook prints nothing and always exits 0, so a log it cannot write costs that line, never the message
 or the tool result. Looking up the seat behind a `uds:` address (with `ps` and `tmux`) gives up after
 2 seconds, killing what it started, and the address is then written as given. The message is written to
-`messages.log` only, which holds every native message in full, private reports to the EM among them:
-every seat but `em` has a `Read` deny on it (see [Safety](#safety)). A seat whose hooks are all off
+`messages.log` only, which holds every native message in full, private reports to the EM among them,
+except a message to or from `sec` (below): every seat but `em` has a `Read` deny on it (see
+[Safety](#safety)). A seat whose hooks are all off
 (`disableAllHooks: true` in the user's settings, and no gate) logs nothing: `check` says which.
+A message to or from `sec` is logged without its body ([#227](../../issues/227)): by `say` and by the
+hook alike, the line keeps the time, the sender, the recipient and the outcome, and the text is replaced
+by `[body not logged: sec]`. The hook is also closed on a doubt: a message to a `uds:` address that did not
+resolve to a roster seat (the 2-second lookup ran out, or the sender is outside a roster pane) may be a reply
+to `sec`, so its text is replaced by `[body not logged: unresolved address]`, and the other fields are as
+usual. A security point can sit in such a message before it is rated, and
+the log is read by more seats than `sec` and the EM (an observer's team, anyone who copies it). The
+delivery checks read only the outcome, so they work as before. A `say all` from another seat is a message
+to every seat, `sec` among them, and is logged in full, as the text is that seat's; send a private point to
+`sec` by name. The seat id is `sec`, the one `lib/team_config.rb` calls `TRIAGE_WRITER`.
 Messages a seat receives are logged by their sender, so traffic from outside the team is not logged.
 
 ## Safety
@@ -411,9 +423,10 @@ role's (team first; a role can add or tighten a rule, never loosen one), plus wh
   writes another way is not stopped. They also share the tmux server and the shared `claude`
   executable the copies come from.
 
-  An observer may read the observed team's message log, which records that team's messages in full,
-  so it can carry the private reports its seats send to `sec` and the EM: an unfixed security point
-  among them, before it is rated ([#222](../../issues/222)). An observer treats everything in that log
+  An observer may read the observed team's message log, which records that team's messages in full
+  except those to or from `sec` (their body is not logged, [#227](../../issues/227)), so it can still
+  carry the private reports its seats send to the EM: an unfixed security point among them, before it is
+  rated ([#222](../../issues/222)). An observer treats everything in that log
   under rule 5 of its prompt ([`roles/common.md`](roles/common.md)): it never quotes the log anywhere,
   and sends `sec` and the EM only a pointer to what it saw: the team and the time of the log line, and
   its line number when several lines share that time.

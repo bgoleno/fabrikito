@@ -33,9 +33,9 @@ the reference for each key, and the file to copy.
 - `permissions` (`deny`, `ask`, `allow`), at the top level and per role: see
   [Safety](../README.md#safety).
 - `other_teams`: other teams' state folders that aren't beside this team's own, each with the
-  `observers` allowed to read its log and notes. That log can carry private security reports, so an
-  observer treats it under rule 5 and sends `sec` and the EM only a pointer: see
-  [Safety](../README.md#safety).
+  `observers` allowed to read its log and notes. That log does not hold the body of a message to or from
+  `sec` (#227), but it can still carry private security reports sent to the EM, so an observer treats it
+  under rule 5 and sends `sec` and the EM only a pointer: see [Safety](../README.md#safety).
 - `prompts.common` and a per-role `prompt` (file) or `prompt_text` (inline). Placeholders such as
   `@@ROSTER@@`, `@@GITHUB_REPO@@`, `@@PROJECT_URL@@` and `@@WORKTREE_ROOT@@` are filled in per seat.
 - `prompts.project` (optional): a file with your project's specifics, such as what the product is,
