@@ -10,10 +10,10 @@ The placeholders below stand for your own paths and names:
 
 | Placeholder | What it is |
 |---|---|
-| `<factory>` | Your main checkout of fabrikito. |
+| `<install>` | Your main checkout of fabrikito. |
 | `<release>` | A tag or a commit of fabrikito, for example `v0.1.0`, the first release tag. Release tags are annotated, and a tag's message holds that release's notes, including any change to the state layout. Creating and pushing a tag is the owner's step. A commit works the same way, and `check` names a lightweight tag as well as an annotated one. |
-| `<releases>` | A folder outside `<factory>` that holds one checkout per release, for example `<releases>/factory-<release>`. |
-| `<state>` | The team's state folder, outside every checkout, on the same volume as `<factory>`. |
+| `<releases>` | A folder outside `<install>` that holds one checkout per release, for example `<releases>/fabrikito-<release>`. |
+| `<state>` | The team's state folder, outside every checkout, on the same volume as `<install>`. |
 | `<team>` | The team's name (`team:` in the team file). |
 | `<name>` | The project's folder under `projects/`, the one the team file's prompt paths name. |
 
@@ -31,7 +31,7 @@ until that seat restarts:
 | State | The team file's `state:`, here `<state>`, so every release shares one state folder: progress notes, the message log, triage records, the gate's counters and the team's copies of claude. Without `state:`, that checkout's `.state/<team>`, which can be a symlink to `<state>` (the older way, [below](#set-up-a-release-checkout)). |
 
 `./fabrikito check` prints the checkout it runs from and its `git describe`, for example
-`install   : <releases>/factory-<release> at <release>`. A checkout with uncommitted changes ends
+`install   : <releases>/fabrikito-<release> at <release>`. A checkout with uncommitted changes ends
 in `-dirty`.
 
 Name the state folder in the team file, `state: <state>` ([#264](../../../issues/264)). `up`, `check`, `say`,
@@ -48,17 +48,17 @@ seats keep their old settings until they restart.
 1. Make the checkout from your main checkout:
 
    ```
-   git -C <factory> fetch --tags
-   git -C <factory> worktree add --detach <releases>/factory-<release> <release>
+   git -C <install> fetch --tags
+   git -C <install> worktree add --detach <releases>/fabrikito-<release> <release>
    ```
 
 2. Copy the team file and the project's prompts into it. Both are git-ignored, so the checkout starts
    without them:
 
    ```
-   cp <factory>/teams/<team>.yaml <releases>/factory-<release>/teams/
-   mkdir -p <releases>/factory-<release>/projects
-   cp -pR <factory>/projects/<name> <releases>/factory-<release>/projects/
+   cp <install>/teams/<team>.yaml <releases>/fabrikito-<release>/teams/
+   mkdir -p <releases>/fabrikito-<release>/projects
+   cp -pR <install>/projects/<name> <releases>/fabrikito-<release>/projects/
    ```
 
    Make `projects/` first: a new checkout has no `projects/` folder, so without it `cp` makes
@@ -77,12 +77,12 @@ seats keep their old settings until they restart.
    in instead (optional, the older way, which `state:` replaces):
 
    ```
-   mkdir -p <releases>/factory-<release>/.state
-   ln -s <state> <releases>/factory-<release>/.state/<team>
+   mkdir -p <releases>/fabrikito-<release>/.state
+   ln -s <state> <releases>/fabrikito-<release>/.state/<team>
    ```
 
 From then on, run every command for this team with that checkout's `fabrikito` and team file:
-`<releases>/factory-<release>/fabrikito -c <releases>/factory-<release>/teams/<team>.yaml <command>`.
+`<releases>/fabrikito-<release>/fabrikito -c <releases>/fabrikito-<release>/teams/<team>.yaml <command>`.
 
 A seat protects only the checkout it runs from. A release checkout is a worktree of your main checkout,
 so another team on this machine, one working on fabrikito above all, could edit it, or remove
@@ -94,25 +94,25 @@ where those teams never work.
 The releases-folder deny goes in the other teams' files only, never in the pinned team's own. A seat's
 prompt names its progress note by its real path, so with `state:` outside the releases folder the note
 is not under the deny. Reached through a state link inside the releases folder, a note's other spelling,
-`<releases>/factory-<release>/.state/<team>/notes/<role>.md`, is covered by it: in the pinned team's
+`<releases>/fabrikito-<release>/.state/<team>/notes/<role>.md`, is covered by it: in the pinned team's
 file the deny covers that path, and a deny wins over the allow the seat's settings give its note
 ([#219](../../../issues/219), [#264](../../../issues/264)). If a deny does cover a seat's real note path, `check`
 warns, naming the seat and the rule. Give each pinned team a releases folder of its own: two pinned teams
 sharing one would each deny it in the other's file, and so block each other's notes.
 
 The shared `<state>` folder, which holds the pinned team's notes, log and records, needs the same care
-in both directions, and the factory finds neither direction itself. It finds another team's state only
+in both directions, and fabrikito finds neither direction itself. It finds another team's state only
 as a real folder beside its own: `<state>` is not beside the other teams' folders, and the pinned
-team's checkout holds only a link to it, which is never followed. So list them under `other_teams` (see [Safety](../README.md#safety)), in **both** team files:
+team's checkout holds only a link to it, which is never followed. So list them under `other_teams` (see [Safety](safety.md)), in **both** team files:
 
 - in every other team's file, the pinned team's `<state>`:
   `other_teams: [{ state: /path/to/state }]`;
 - in the pinned team's file, each other team's state folder, for example
-  `other_teams: [{ state: <factory>/.state/<other team> }]`.
+  `other_teams: [{ state: <install>/.state/<other team> }]`.
 
 A listed folder that doesn't exist yet, or is still empty because that team hasn't run `up`, is
 accepted, and `check` says so. If the pinned team works on fabrikito itself, so that its
-`repo.path` is `<factory>`, it may still list `<factory>/.state/<other team>` although that is inside
+`repo.path` is `<install>`, it may still list `<install>/.state/<other team>` although that is inside
 its repository: a team's state folder whose parent is a real folder named `.state` is the one thing
 inside its own work that a team may list. That holds only once the other team has run `up`: until then
 the folder is missing or empty, and such a folder inside the repository is refused.
@@ -128,10 +128,10 @@ way is not stopped.
 The team's state is moved, not copied, so nothing is left behind:
 
 1. Ask every seat to write its handoff (the `fabrikito:handoff` skill), and wait until each has.
-2. Note what to check afterwards: the number of files in `<factory>/.state/<team>/notes/`, the last line
-   of `<factory>/.state/<team>/messages.log`, and the number of records in `triage/`, if there is one.
-3. Stop the team from the main checkout: `<factory>/fabrikito -c <factory>/teams/<team>.yaml down --yes`.
-4. Move the state folder: `mv <factory>/.state/<team> <state>`. `<state>` must not exist yet: if it
+2. Note what to check afterwards: the number of files in `<install>/.state/<team>/notes/`, the last line
+   of `<install>/.state/<team>/messages.log`, and the number of records in `triage/`, if there is one.
+3. Stop the team from the main checkout: `<install>/fabrikito -c <install>/teams/<team>.yaml down --yes`.
+4. Move the state folder: `mv <install>/.state/<team> <state>`. `<state>` must not exist yet: if it
    does, `mv` puts the folder inside it, at `<state>/<team>`, and the link would then point one level
    too high, so `up` would start with no notes and no log. Check right after the move that
    `<state>/notes/` and `<state>/messages.log` exist. On one volume, the move is a rename, and nothing is
@@ -154,8 +154,8 @@ The team's state is moved, not copied, so nothing is left behind:
 2. For each seat in turn, once it has written its handoff:
 
    ```
-   <releases>/factory-<new>/fabrikito -c <releases>/factory-<new>/teams/<team>.yaml down --yes <role>
-   <releases>/factory-<new>/fabrikito -c <releases>/factory-<new>/teams/<team>.yaml up <role>
+   <releases>/fabrikito-<new>/fabrikito -c <releases>/fabrikito-<new>/teams/<team>.yaml down --yes <role>
+   <releases>/fabrikito-<new>/fabrikito -c <releases>/fabrikito-<new>/teams/<team>.yaml up <role>
    ```
 
 3. When no seat runs the old release, remove its checkout (below).
@@ -169,7 +169,7 @@ During the overlap, old and new seats share the state folder: the message log, t
 `say` takes and the claude copies. They can message each other, and both write the same log. That is
 safe only while the two releases agree on two things:
 
-- **The state layout.** If the new release's notes (its tag's message: `git -C <factory> tag -n99 -l <new>`)
+- **The state layout.** If the new release's notes (its tag's message: `git -C <install> tag -n99 -l <new>`)
   say it changed what is kept in the state folder, or how, upgrade with a full restart instead.
 - **The team file.** Each checkout has its own copy of the team file, and an old seat's `say` reads the
   old copy. A changed team file (a role added or removed, a changed prefix or session name, a changed
@@ -187,10 +187,10 @@ from the new copy, so a rolling upgrade is enough, and each seat picks it up whe
 Once no seat runs it, remove the state link and the team file by their exact paths, then the checkout:
 
 ```
-rm <releases>/factory-<old>/.state/<team>
-rmdir <releases>/factory-<old>/.state
-rm <releases>/factory-<old>/teams/<team>.yaml
-git -C <factory> worktree remove <releases>/factory-<old>
+rm <releases>/fabrikito-<old>/.state/<team>
+rmdir <releases>/fabrikito-<old>/.state
+rm <releases>/fabrikito-<old>/teams/<team>.yaml
+git -C <install> worktree remove <releases>/fabrikito-<old>
 ```
 
 Removing the link deletes the link, never the shared state it points to. (In the live check on #189,
@@ -198,5 +198,5 @@ Removing the link deletes the link, never the shared state it points to. (In the
 place. Remove it by its path anyway, so nothing relies on that.) Git-ignored files do not stop
 `git worktree remove`, which deletes them with the checkout, the copied project prompts included.
 
-Updating Claude Code is unchanged: see [Updating Claude Code](../README.md#updating-claude-code). The
+Updating Claude Code is unchanged: see [Updating Claude Code](updating-claude-code.md). The
 copies of claude live in the shared state folder, so every release uses them.

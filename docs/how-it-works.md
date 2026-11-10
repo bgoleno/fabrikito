@@ -13,14 +13,15 @@ This page shows how the parts fit together. Each section links to the page with 
 
 | Part | What it is |
 |---|---|
-| `fabrikito` | The launcher. Every command (`check`, `up`, `view`, `titles`, `status`, `say`, `attach`, `migrate`, `down`) is a function in it. |
+| `fabrikito` | The launcher. Every command (`check`, `up`, `view`, `titles`, `status`, `say`, `attach`, `migrate`, `down`) is a function in it. `run-exclusive` hands over to `lib/run_exclusive.rb` before any team file is read. |
+| `lib/run_exclusive.rb` | `fabrikito run-exclusive`: runs one heavy command at a time on the host. See [One heavy run at a time](gate.md#one-heavy-run-at-a-time). |
 | `lib/team_config.rb` | Reads and validates the team file, and generates what each seat is started with: its prompt, kickoff, settings (permission rules and hooks) and claude flags. `fabrikito` calls it for every value. |
 | `lib/session_start.sh` | A `SessionStart` hook: shows a seat its progress note and the state of its working directory. |
 | `lib/log_message.sh` | A `PostToolUse` and `PostToolUseFailure` hook on `SendMessage`: writes each message a seat sends to the message log. |
 | `lib/stop_gate.sh` | A `Stop` hook: runs the repository's gate when a seat ends a turn with uncommitted work. |
 | `lib/screen_bounds.js` | Finds the usable area of the screen, for sizing the iTerm window. |
 | `roles/` | Generic prompts: `common.md`, shared by every seat, and one for each standard role (`em`, `tl`, `fs`, `qa`, `sec`). A project can use its own prompts instead. |
-| `plugin/` | The factory plugin: skills that every seat loads. |
+| `plugin/` | The fabrikito plugin: skills that every seat loads. |
 | `teams/example.yaml` | The documented example team file. Your own team files sit beside it and are git-ignored. |
 | `.state/<team>/` | Everything generated for a team (settings, launch scripts, prompts, the team's copy of claude), plus the message log, progress notes and the gate's state. Git-ignored. The team file's `state:` key moves it, and so does `TEAM_STATE_DIR`, which wins. |
 | `test/e2e.sh`, `test/live-env.sh` | The end-to-end test's entry point (the shared setup, the count and the cleanup), and the helper that runs a live test on a private tmux server. |
@@ -43,7 +44,7 @@ session names, unknown placeholders and invalid UTF-8 stop the command before an
    replace the file under them. A symlink at the copy's path is refused, naming it: the seats would
    run whatever it points at ([#194](../../../issues/194)). A copy already there must be the executable
    byte for byte, with one name, or `up` refuses it, without replacing it ([#208](../../../issues/208)).
-   See [Updating Claude Code](../README.md#updating-claude-code).
+   See [Updating Claude Code](updating-claude-code.md).
 4. **Starts each role in turn,** in file order or in the order given on the command line, and stops
    at the first role it cannot start. A role whose tmux session already exists is skipped and left
    alone; if the claude file it runs was replaced under it, `up` prints an `ATTENTION` line saying
@@ -56,7 +57,7 @@ session names, unknown placeholders and invalid UTF-8 stop the command before an
      work. Only its setup is redone, if it was never marked done. See
      [New worktrees](team-file.md#new-worktrees).
    - **Writes the seat's settings** to `.state/<team>/settings/<role>.json`, read-only. They hold the
-     merged permission rules, the hooks and a few environment settings. See [Safety](../README.md#safety).
+     merged permission rules, the hooks and a few environment settings. See [Safety](safety.md).
    - **Renders the seat's prompt:** `prompts.common`, then the role's prompt, then a Skills section
      when the role lists `skills`, with every `@@PLACEHOLDER@@` filled in for that seat (its title,
      session, working directory, the roster, the note's path and the rest). It also renders the
@@ -101,8 +102,8 @@ tmux session and keeps the worktree, and closing the iTerm tab only detaches fro
   depending on the account, installed mods apply above all of them.
   When a seat's permission mode is set and is not `bypassPermissions`, the file also sets
   `disableBypassPermissionsMode`, so the seat cannot be switched into bypass from inside the session.
-- **The factory plugin,** loaded with `--plugin-dir` unless `sessions.claude.plugin` is `false`. See
-  [The factory plugin](plugin.md).
+- **The fabrikito plugin,** loaded with `--plugin-dir` unless `sessions.claude.plugin` is `false`. See
+  [The fabrikito plugin](plugin.md).
 - **A progress note,** `.state/<team>/notes/<role>.md`, outside the working directory, so it survives
   a restart and a recreated worktree. See [Progress notes](workflow.md#progress-notes).
 
@@ -152,7 +153,7 @@ prompt tells seats to send with `SendMessage` to that name and to check `ListAge
   owner typing. See [The kickoff](../README.md#the-kickoff).
 - **The message log,** `.state/<team>/messages.log`, records every `say` with whether it was
   delivered, and every `SendMessage` a seat sends (through the hook above). Every seat but `em` has a
-  `Read` deny on it, an accident guard like the other rules (see [Safety](../README.md#safety)). See
+  `Read` deny on it, an accident guard like the other rules (see [Safety](safety.md)). See
   [The message log](../README.md#the-message-log).
 
 Session names and `[from …]` labels are claims, not identities. The prompt tells seats to act only on
@@ -180,11 +181,11 @@ The skills under `plugin/skills/` are procedures for a role, such as assigning a
 (`fabrikito:assign`), starting a task (`fabrikito:start-task`) or reviewing a pull request
 (`fabrikito:review-pr`). A skill is loaded only when it is used, instead of sitting in every prompt.
 The rules a skill applies, such as the brief's fields or the review bar, stay in the role prompt,
-and the skill points to them. See [The factory plugin](plugin.md).
+and the skill points to them. See [The fabrikito plugin](plugin.md).
 
 ## What the rules are, and are not
 
 The permission rules in each seat's settings, and the hard rules in the shared prompt, guard against
 accidents. They are not a security boundary: every seat runs as the owner's OS user, with the owner's
 GitHub credential, and a rule matches command text, so a command written another way gets past it.
-The launcher does not turn on Claude Code's sandbox. See [Safety](../README.md#safety).
+The launcher does not turn on Claude Code's sandbox. See [Safety](safety.md).

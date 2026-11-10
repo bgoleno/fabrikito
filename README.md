@@ -16,7 +16,7 @@ iTerm tab.
   overwrite each other's files, and the team's work lands through pull requests.
 - **Rules are generated into each seat's settings.** Deny rules on the files that would change a seat's own
   rules, and an ask on any push to the base branch, are written into its settings file at every `up`. They
-  guard against accidents, not against a determined seat or user: read [Safety](#safety) for what they
+  guard against accidents, not against a determined seat or user: read [Safety](docs/safety.md) for what they
   cover and what they do not.
 - **A seat can be held to your gate.** With `gate_on_stop`, a seat that stops with uncommitted work is held
   until the repository's checks pass. See [The gate](docs/gate.md).
@@ -54,11 +54,13 @@ project's specifics stay out of this repository. Every command and option is in
 | [How work is tracked](docs/workflow.md) | The issues-first rule and the seats' progress notes. |
 | [The gate](docs/gate.md) | How a seat is held to the repository's checks when it stops. |
 | [Pinned releases](docs/pinned-release.md) | Run a team from a checkout fixed at a release. |
+| [Safety](docs/safety.md) | What the permission rules in each seat's settings cover, and what they cannot do. |
+| [Updating Claude Code](docs/updating-claude-code.md) | Update Claude Code on a running team, and remove old copies of claude. |
 | [Testing](docs/testing.md) | Run a live test on a private tmux server, and the end-to-end test. |
 | [Troubleshooting](docs/troubleshooting.md) | Find what you see (an error, a refused message, a silent seat) and what to do. |
 
 The full index is [docs/README.md](docs/README.md). Messaging (how seats talk, `say`, the message log),
-[Safety](#safety) and [Updating Claude Code](#updating-claude-code) are still on this page, below.
+[Safety](docs/safety.md) and [Updating Claude Code](docs/updating-claude-code.md) have moved to `docs/`.
 
 ## Reporting a vulnerability
 
@@ -76,16 +78,16 @@ See [Testing](docs/testing.md).
 
 ## License
 
-Apache License 2.0. See LICENSE.
+Apache License 2.0. See [LICENSE](LICENSE).
 
 The `security-audit` plugin skill is a modified copy of Cloudflare's
 [security-audit-skill](https://github.com/cloudflare/security-audit-skill) (MIT); see
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-## Messaging, safety and updating
+## Messaging
 
-The sections below hold the reference for messaging, safety and updating Claude Code. They are moving to
-pages under `docs/`.
+The sections below hold the reference for messaging. They are moving to a page under `docs/`; Safety and
+Updating Claude Code have already moved.
 
 ## How seats talk
 
@@ -104,7 +106,7 @@ local process can start a session under a seat's name. A delivered message carri
 in `from` and its session name in `from-name`. The prompt tells seats to act only on a `from-name` that
 exactly matches a roster name, and to report any other sender, or two sessions sharing a roster name, to
 the EM. That guards against mistakes, not impersonation, which is the same limit as for `say` and the
-pane (see [Safety](#safety)).
+pane (see [Safety](docs/safety.md)).
 
 ### Which messages are held
 
@@ -150,7 +152,8 @@ label, so a message never goes in without it. Anything else fails closed, with a
 - a seat that is not running claude (the text would run as a shell command);
 - any dialog, prompt or menu, known or not, the held-message approval dialog included ("screen not
   recognised as ready"), where the Enter would pick an answer;
-- an input box that already holds text (someone typing, or an earlier message that was not sent);
+- an input box that already holds text (someone typing, or an earlier message that was not sent): see
+  "A box that holds text" below for the back-off, the notice in `status` and `flush`;
 - a pane in copy mode (someone scrolling);
 - Claude Code's diff panel notice ("Resize your terminal to at least 110 columns to show the diff
   panel") in a pane of 13 rows or fewer, where it pushes the end of the input box off the screen.
@@ -173,6 +176,41 @@ screen no longer ends with the box, dim text was drawn next to the message, the 
 than it can and not just the message (as when someone typed after it), too little of the message's
 end is visible (under 40 characters, as with short last lines in a narrow pane), or the box does not
 end with the message.
+
+**A box that holds text ([#212](../../issues/212)).** A box that is not empty blocks every later
+message to that seat, and senders used to retry in a loop. Now:
+
+- the refusal is also written to `.state/<team>/say-refusals.log`, one line of time, sender, receiver
+  and class (`box-text`, or `box-text-repeat` below), with no message and no hash;
+- the same text from the same sender to the same seat, refused for its box and sent again within 300
+  seconds while the box still holds text, is refused as a repeat, with a message that says to stop
+  resending it and not to loop. Only a refusal for a box that holds text counts: a dialog, copy mode,
+  a shell or a busy seat do not, and a different text is refused for the box as before. The window is
+  kept per text (the last eight refused texts of each seat), so another sender's refusal in between, or
+  alternating two texts, does not hide a repeat. A message to or from `sec` is never hashed, so it is
+  refused for the box each time and not as a repeat. The `FACTORY_SAY_RESEND_WINDOW` environment variable
+  changes the 300 seconds (a value that is not a whole number means the default);
+- `status` prints one `NOTICE <role>` line for a seat once three sends to it were refused for its box
+  (`FACTORY_SAY_NOTICE_COUNT`), however many more are refused. It says when the last refusal was: only a
+  later `say` clears it, and `status` does not read the pane. Nothing is typed into any seat by it;
+- the records of that seat (what `say` keeps for the two points above, mode 600 files in
+  `.state/<team>/say/`, the hash of the text among them) are removed the moment its box is seen empty,
+  or a delivery or a `flush` succeeds, so the resend after the remedy is not held back for the rest of
+  the window.
+
+Recovery for text `say` itself left in a box (a label, or the start of a message whose paste did not
+finish) is `./fabrikito flush <role>`. It deletes nothing and sends no key but one Enter, so the
+fragment goes to the seat as a turn and the sender is told to resend: `say` writes what it is about to
+paste into `.state/<team>/say/paste-<role>` and removes it after the Enter, so a crash or a partial
+paste leaves it. `flush` submits only when the box, with white space left out, is a non-empty start of
+that record, or the record's label and one `[Pasted text #N]` placeholder. A message to or from `sec`
+keeps only its label in the record (no body of it is kept, [#227](../../issues/227)), so only a
+label left alone is matched there. Anything else is refused and left as it is: text someone typed is
+never cleared or submitted. `flush` runs the same pane checks as `say` (a seat at a shell or a dialog is
+refused), reads the box again right before the Enter and refuses if it changed, and sends one Enter, with
+no retry. It writes one line to `messages.log` from the caller, with the status `FLUSHED`, `NOT-FLUSHED`
+or `FLUSH-NOTHING` and the fixed message `[flush]`, never the box's text. Nothing here lets a seat edit
+another seat's box by hand; the owner can still attach and clear text they find.
 
 **Short panes ([#84](../../issues/84)).** A seat's pane takes the size of the iTerm pane attached to
 it, and the team view makes them small: 89x13 with ten seats on a 77-row display, about 10 rows with
@@ -268,7 +306,8 @@ sent again), and exits with status 1.
 The log is never written through a link ([#194](../../issues/194)). When `messages.log` is a symlink, a
 FIFO or a hard link (a file with a second name), `say` delivers nothing and writes no line: it prints
 why, says the record could not be written, and exits with status 1. Only a seat could put one there;
-remove it by its exact path. `lib/log_message.sh` (below) opens the log without following a symlink and
+do not delete the file (it may be the real one, with a second name made elsewhere): remove the other
+name, or move this file aside. `lib/log_message.sh` (below) opens the log without following a symlink and
 writes only to a regular file with one link, so there it costs that line.
 
 Each `SendMessage` from a seat appends one line in the same format, written by `lib/log_message.sh`, a
@@ -280,7 +319,8 @@ Each `SendMessage` from a seat appends one line in the same format, written by `
   as U+FFFD (`�`); a valid pair is kept;
 - the recipient is a role id when the `to` names a roster seat's session (`sf-tl`, or `sf-tl [3fa9c1]`)
   or is a `uds:` address whose process runs in a roster seat's pane, as a reply to a message does.
-  Anything else, another team's session, a subagent or an address no seat holds, is written as given;
+  Anything else, another team's session or a subagent, is written as given, and so is its message; an
+  address no seat holds is written as given too, but without its message (below, [#227](../../issues/227));
 - the outcome is `sent` when the message reached the receiver's inbox, and `NOT-SENT` when
   `SendMessage` returned `success: false` or failed. `sent` is not `delivered`: a receiver in another
   permission mode can still hold a message for its user's approval, or refuse it, and that comes back
@@ -296,220 +336,29 @@ Each `SendMessage` from a seat appends one line in the same format, written by `
 The hook prints nothing and always exits 0, so a log it cannot write costs that line, never the message
 or the tool result. Looking up the seat behind a `uds:` address (with `ps` and `tmux`) gives up after
 2 seconds, killing what it started, and the address is then written as given. The message is written to
-`messages.log` only, which holds every native message in full, private reports to the EM among them:
-every seat but `em` has a `Read` deny on it (see [Safety](#safety)). A seat whose hooks are all off
+`messages.log` only, which holds every native message in full, private reports to the EM among them,
+except a message to or from `sec` (below): every seat but `em` has a `Read` deny on it (see
+[Safety](docs/safety.md)). A seat whose hooks are all off
 (`disableAllHooks: true` in the user's settings, and no gate) logs nothing: `check` says which.
+A message to or from `sec` is logged without its body ([#227](../../issues/227)): by `say` and by the
+hook alike, the line keeps the time, the sender, the recipient and the outcome, and the text is replaced
+by `[body not logged: sec]`. The hook is also closed on a doubt: a message to a `uds:` address that did not
+resolve to a roster seat (the 2-second lookup ran out, or the sender is outside a roster pane) may be a reply
+to `sec`, so its text is replaced by `[body not logged: unresolved address]`, and the other fields are as
+usual. A security point can sit in such a message before it is rated, and
+the log is read by more seats than `sec` and the EM (an observer's team, anyone who copies it). The
+delivery checks read only the outcome, so they work as before. A `say all` from another seat is a message
+to every seat, `sec` among them, and is logged in full, as the text is that seat's; send a private point to
+`sec` by name. The seat id is `sec`, the one `lib/team_config.rb` calls `TRIAGE_WRITER`.
 Messages a seat receives are logged by their sender, so traffic from outside the team is not logged.
 
 ## Safety
 
-Each seat starts with a generated settings file, `.state/<team>/settings/<role>.json`, passed with
-`--settings` and rewritten read-only on every `up`. It holds the team's `permissions` merged with the
-role's (team first; a role can add or tighten a rule, never loosen one), plus what fabrikito adds:
-
-- an `Edit` deny on the files that would change a seat's next start or its live rules: the generated
-  settings, launchers and prompts, the message log and the gate's state, the team file and its
-  prompts, the launcher (`fabrikito`, `lib/`, `roles/`, `plugin/`), any plugin given with `--plugin-dir`
-  in `args`, and the claude `wrapper` (its whole `.app` bundle, if it is in one), the main checkout's `.mcp.json`, `.claude/settings.json`,
-  `.claude/settings.local.json`, `.claude/CLAUDE.md`, and `.claude/hooks/`, `rules/`, `skills/`,
-  `agents/` and `commands/` (not the root `CLAUDE.md`, which is project work), the
-  seat's own `.claude/settings.json` and `settings.local.json`, and Claude Code's user settings, MCP
-  config, instructions, user-level rules (`rules/`) and extensions under `~/.claude` and in `~/.claude.json` (and, when
-  `CLAUDE_CONFIG_DIR` is set where `up` runs, under that folder too, with the `.claude.json` inside
-  it; each seat's launch script pins the same value, so a seat uses a folder its rules protect, and
-  the default folder stays protected for sessions started without the variable). `.claude/worktrees/` stays editable: Claude
-  Code puts the worktrees it makes there, including those of a worktree seat's subagents, which land
-  under the main checkout. A path that runs through a symlink is denied both as configured and as its
-  real path, which stops `rm` and `mv` of a protected link; repointing a link with `ln -sf` is not a
-  file command Claude Code checks, and is not stopped (checked on 2.1.316). The seat's own `.mcp.json`
-  stays editable as project work; its servers normally need approval in a startup dialog, but with a
-  user setting such as `enableAllProjectMcpServers` on they load unprompted at the next start;
-- an `ask` on any push to the base branch (from `repo.base`), forced or not, since changes land through
-  PRs. It is an early warning for a project whose base branch has no protection. The real control is a
-  ruleset on the base branch that blocks force-push and deletion and requires a PR; where one exists,
-  this ask is redundant;
-- an `Edit` allow on the seat's own progress note (see [Progress notes](docs/workflow.md#progress-notes)), which is
-  outside its working directory and would otherwise prompt in a mode other than bypass, and an `Edit`
-  deny on every other seat's note: a note is put into its seat's context at each start, so a seat
-  that could write another's would have a lasting channel into it;
-- a `Read` deny on the message log, `.state/<team>/messages.log` (both spellings, when a symlink makes
-  them differ), for every seat but the role with id `em`: the log holds every `SendMessage` in full. A
-  team with no `em` role has the deny on every seat. This is an accident guard, not a boundary: every
-  seat runs as the same OS user (#29), and a command that reads the file some other way is not stopped;
-- rules on the security-triage record folder, `.state/<team>/triage/` (#138), where the
-  `fabrikito:security-triage` skill has `sec` write its records. A record can hold an unfixed
-  medium-or-higher finding. The folder is outside every working directory, so without a rule each
-  write and read would prompt in a mode other than bypass. The role with id `sec` gets an `Edit` and
-  a `Read` allow on `triage/**`, the role with id `em` a `Read` allow (and an `Edit` deny), and every
-  other seat an `Edit` and a `Read` deny, all in both spellings. `up` makes the folder (mode 700,
-  set on an existing folder too) when the team has a `sec` role; nothing deletes a record. The role
-  id is fixed: a team whose security seat has another id gets no record folder, every seat but `em`
-  is denied it, and `check` warns about a role other than `sec` that lists the skill. Like the log's, these denies are an
-  accident guard, not a boundary. As with any settings change, a `sec` seat that is already running
-  when `up` writes these rules keeps its old settings until it restarts;
-- denies on **other teams' state folders** (#197), when more than one team runs on the machine. For each
-  other team's folder, every seat gets a `Read` deny on its `triage/**` and an `Edit` deny on all of
-  it, plus a `Read` deny on its `messages.log` and `notes/**` unless the seat's role observes that team.
-  All are written in both spellings. The other teams' folders come from two places:
-  - **Found:** every real folder beside this team's own in the state root (`.state/`) that holds
-    `settings/`, `launch/` and `prompts/`. A symlink there is never followed. `check` names the links
-    it skips: list one under `other_teams` if it is another team's state.
-  - **Listed:** `other_teams` in the team file, for a state folder elsewhere (a pinned team's, see
-    [Pinned releases](docs/pinned-release.md)), each with its `observers`. These are the roles of this
-    team the owner allows to read that team's log and notes, never its triage records:
-
-    ```yaml
-    other_teams:
-      - { state: /path/to/other/state, observers: [qa2] }
-    ```
-
-  A listed folder may not be, hold or sit inside this team's own state folder, its repository, its
-  worktree folder or a seat's working directory, whether or not it exists yet. The one exception is a
-  team's state folder whose parent is a real folder named `.state`, which may sit inside them once that
-  team has run `up` (a pinned team working on fabrikito lists `<factory>/.state/<team>`). If
-  it exists, it must be a team's state folder itself (holding `settings/`, `launch/` and `prompts/`),
-  not its checkout or `.state/` above it. Outside them, one that doesn't exist yet, or is still empty,
-  is accepted, and `check` says so. `check` lists the
-  other teams found and listed, and each seat's denies. Settings are written at `up`, so a team that starts
-  after a seat does is covered from that seat's next restart. Teams on one machine still share the
-  machine user, so these denies are an accident guard, like the others: a command that reads or
-  writes another way is not stopped. They also share the tmux server and the shared `claude`
-  executable the copies come from.
-
-  An observer may read the observed team's message log, which records that team's messages in full,
-  so it can carry the private reports its seats send to `sec` and the EM: an unfixed security point
-  among them, before it is rated ([#222](../../issues/222)). An observer treats everything in that log
-  under rule 5 of its prompt ([`roles/common.md`](roles/common.md)): it never quotes the log anywhere,
-  and sends `sec` and the EM only a pointer to what it saw: the team and the time of the log line, and
-  its line number when several lines share that time.
-
-`permission_mode` (in `sessions.claude`, or per role) picks the mode; the example uses `auto`.
-`bypassPermissions` skips every prompt and is meant for an isolated machine only. Deny rules hold in
-every mode, bypass included, and ask rules still prompt there, so a seat that hits one waits until
-someone answers. `say` will not deliver to a seat at a permission prompt or any other dialog (see
-[`say`](#say)): attach and answer it yourself. These rules add to the ones in `~/.claude/settings.json`
-and the repo's `.claude/` settings, which still apply. `check` shows each seat's mode and rules, and is
-where load-time errors (unknown modes, malformed rules, a permission flag in `args`) are reported.
-It also warns, without stopping a start, about seats whose modes would hold messages between them
-([Which messages are held](#which-messages-are-held)), and about any role whose rules have neither a
-deny nor an ask on each of the merge patterns, unless that role is marked `may_merge: true` (a YAML
-boolean, so an unquoted `yes` or `on` also counts as true). The patterns, the ones `teams/example.yaml`
-denies or asks on ([#85](../../issues/85)):
-
-- `Bash(gh pr merge *)`: `gh pr merge`, with or without arguments.
-- `Bash(gh pr -* merge *)` and `Bash(gh pr -* merge)`: the same with a flag before the subcommand
-  (`gh pr -R o/r merge 5`, `--repo o/r`, `--repo=o/r`). The space after `merge` keeps
-  `gh pr -R o/r view 5 --json mergeable` out.
-- `Bash(gh api *pulls/*/merge*)` and `Bash(gh api graphql*mergePullRequest*)`: the REST and GraphQL merge.
-- `Bash(gh api graphql*enablePullRequestAutoMerge*)`: auto-merge.
-- `Bash(gh api graphql*mergeBranch*)` and `Bash(gh api *repos/*/merges*)`: merging a branch without a PR.
-
-A team file written before these were added gets the warning until it has them. Known false matches:
-a `gh pr -R o/r <subcommand>` whose later text has ` merge ` in it, and `gh api` reads whose path or
-query names these. Not covered: a GraphQL query read from a file or stdin (`-F query=@q.graphql`,
-`--input`), `curl` or other HTTP clients against the API, `gh` aliases, extensions and scripts, a
-`git push` of a merge commit to the base branch (the base-branch push ask covers that), and other
-hosts' CLIs.
-
-Claude Code's auto memory is off in every seat: the generated settings set `autoMemoryEnabled: false`
-and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, and the launch script exports the variable. Auto memory lives
-in one folder per repository (`<config>/projects/<repo>/memory/`), shared by all its worktrees, and its
-`MEMORY.md` loads into every session there, the owner's own in the main checkout included
-([docs](https://code.claude.com/docs/en/memory#storage-location)). A seat's note there would reach every
-other seat and the owner without review, outside the PR process. Set `auto_memory: true` under
-`sessions.claude`, or on a role, to leave it to Claude Code's own settings (that seat's launch script
-unsets the variable, so it is not inherited from a tmux server started inside a seat). `check` shows it per seat
-in the MEMORY column.
-
-Turning auto memory off stops a seat from writing memory by itself, but not from editing that folder
-with its file tools. So every seat with auto memory off also gets an `Edit` deny (which covers the
-Write tool too) on the repository's auto-memory folder, in every config folder and both spellings of
-the main checkout's path ([#108](../../issues/108)). Claude Code names the folder after that path, with
-every non-alphanumeric character turned into `-`; a name over 200 characters is matched by its first
-200 and a `*`, because Claude Code appends a hash to it. As with the other denies, Bash redirects, `tee`
-and `cp` into the folder are stopped too, and a script that opens the file itself is not (checked on
-Claude Code 2.1.314). `check` names the deny in each seat's `added:` line. The deny covers only that
-default folder: if you set `autoMemoryDirectory` in your settings, your sessions load memory from the
-folder it names, and the deny keeps protecting a folder nobody reads, with no warning.
-
-These rules are an accident guard, not a security boundary: every seat runs as the owner's OS user,
-with the owner's GitHub credential, and can change what loads. [#29](../../issues/29) tracks making
-them a boundary.
-
-What the rules cannot do:
-
-- A Bash rule matches the command text. The same program under another path (`/usr/bin/gh`), inside
-  `sh -c`, in a script, or reached another way is not matched: for example `git -C <dir> push`, a bare
-  `git push` while on the base branch, or `gh api` with a PATCH or DELETE on `git/refs/heads/<base>`.
-- A `Read` deny covers Claude's file tools and the file commands it recognises in Bash (`cat`, `head`,
-  `tail`, `sed`, `tee`, redirects). It does not cover `grep -r` over a folder, or a Python or Node
-  script that opens the file itself.
-- The protected-path `Edit` denies stop the file tools, redirects, and `cp`, `mv` and `rm` with a
-  protected file as the target (checked on Claude Code 2.1.316). They match the command text Claude
-  writes, so they do not stop the same command run through another shell or a script (`sh -c 'cp …'`,
-  which qa checked gets through), or a program that writes the file itself, such as a Python or Node
-  script.
-- "Never force-push a branch you did not create" cannot be written as a pattern. Engineers keep
-  force-pushing their own branches; only the EM is asked.
-- Any process running as this user can type into a seat's pane, so an ask rule guards against
-  accidents. It is not a gate that only the owner can pass.
-- Seats act with the owner's GitHub rights, so they can change a ruleset or branch protection through
-  the API. No rule here stops that (an ask that matched it would also stall seats reading the
-  settings); [#29](../../issues/29) tracks the fix.
-- Settings above these files apply as well: managed settings, and, depending on the account, installed
-  mods, which can approve calls these rules would stop.
-- Paths in Read and Edit rules: `//path` is absolute, `~/path` is under the home folder, `./path` or a
-  bare name is relative to the seat's folder. A single leading `/` anchors at the folder that holds the
-  generated file, so it is refused.
-- Claude Code matches permission rules against each part of a compound command (`;`, `&&`, `|`), but
-  against the whole command text when it can't parse the command (for example `"$(...)"` in an
-  argument, such as a PR body from `$(cat <<EOF ...)`, or `${...}` next to quotes). In default mode, a
-  subshell `( ... )` or a command it can't parse prompts even when no rule matches (the reason varies:
-  "can't be checked before it runs", "shell operators that require approval"); in bypass mode it
-  prompts only when a rule matches (measured on 2.1.316, [#103](../../issues/103); other modes not
-  measured). So seats run `git push` as its own simple command: chained with an unparseable part, a
-  `main` elsewhere in the command makes it match the base-branch ask. A prompt that names a rule
-  (`Permission rule ... requires confirmation`) means the command's text matched an ask rule, even
-  when the reason it shows is about parsing ("expansion obfuscation", "shell operators that require
-  approval"): that reason only says why Claude Code could not narrow the prompt to the matching part.
-  The shared prompt keeps the instructions (push alone, avoid a subshell, a named rule means a match)
-  and leaves this mechanism here ([#117](../../issues/117)).
-- Seats push with `git push origin <branch>:<branch>` on a branch cut with `--no-track`. A branch cut
-  with `git switch -c <branch> origin/main` has the base as its upstream, so under
-  `push.default=upstream` a bare `git push`, or even `git push origin <branch>`, would push to the base.
-
-The [sandbox](https://code.claude.com/docs/en/sandboxing) is the OS-level control that would hold
-whatever the command text, but the launcher does not turn it on: seats run without one unless settings
-that apply to them enable it. The hard rules in the shared prompt (`roles/common.md`) still apply;
-read them before changing them. A seat started in a folder Claude Code has not seen stops at a trust
-dialog until a human answers it once; `up` reports which seats those are.
+This section moved to [Safety](docs/safety.md): the rules generated into each seat's settings, how auto
+memory is handled, and what the rules cannot do.
 
 ## Updating Claude Code
 
-Claude Code's updater replaces its shared executable (the npm package's `bin/claude.exe`), even with
-the same version, and every Claude Code session on the machine runs it, not only this team's seats.
-macOS then can no longer identify a seat still running the old file, and the privacy grants it runs
-under (a removable volume holding the worktrees, for example) stop working until the seat restarts
-(#50). So:
-
-- **Each seat runs the team's own copy of claude**, `.state/<team>/bin/claude-<version>/claude`. `up`
-  makes it from the shared executable when it is missing: an APFS clone where the state folder is on
-  the same file system (it takes no space while the shared file exists), else a plain copy. It is
-  checked (size, `--version`) before use, and if it cannot be made, `up` stops instead of running the
-  shared file. A copy that is already there is used only if it is the shared executable byte for byte;
-  one that differs is refused, not replaced, and `up` starts no seat ([#208](../../issues/208)).
-  Nothing but `up` writes there, and seats cannot edit it.
-- **The seats' own updater is off** (`DISABLE_AUTOUPDATER=1`, in the launch script and the generated
-  settings), so the seats do not add reinstalls of their own.
-- `check` names the shared executable, its version and the copy seats will run, and lists every copy
-  with the running seats that use it. `status` shows each running seat's executable, or `REPLACED`
-  when the file it runs has been swapped under it; `up` prints an ATTENTION line for such a seat.
-  Restart it (`down --yes <role>`, then `up <role>`).
-
-To update: `claude update` in your own shell (a manual update works with the variable set), then
-`./fabrikito down --yes` and `./fabrikito up`. The next `up` copies the new version, and every seat
-starts on it.
-
-Old copies are never removed automatically. Once the shared file has moved on, each one holds about
-310 MB. When `check` lists a copy with no running seat, remove that folder by its exact path, for
-example `rm -r .state/<team>/bin/claude-2.1.314`.
+This section moved to [Updating Claude Code](docs/updating-claude-code.md): why an update needs care on
+a running team, the team's own copy of claude that each seat runs, how to update, and how to remove old
+copies.

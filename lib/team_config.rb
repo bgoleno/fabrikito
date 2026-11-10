@@ -868,7 +868,12 @@ class TeamConfig
     return [] if id == LOG_READER
 
     log = File.join(state_dir, 'messages.log')
-    [File.expand_path(log), real_path(log)].uniq.map { |p| "Read(/#{glob_escape(p)})" }
+    # The folder of say's records (#212) holds the body of a message that was pasted and not yet
+    # submitted, so it is the log's content under another name: the same deny, for the same seats
+    # (sec on #292). say and flush run as the launcher, not through a seat's Read tool.
+    say = File.join(state_dir, 'say')
+    spell = ->(f) { [File.expand_path(f), real_path(f)].uniq.map { |p| glob_escape(p) } }
+    spell.call(log).map { |e| "Read(/#{e})" } + spell.call(say).map { |e| "Read(/#{e}/**)" }
   end
 
   # A `permissions:` mapping (team level or a role's), checked. `where` names it in errors.

@@ -216,7 +216,7 @@ out=$(FACTORY_RUN_LOCK=$rx/ln/lock $S run-exclusive -- sh -c 'echo SHOULD-NOT-RU
   && ok "run-exclusive refuses a lock file that is a symlink, and runs nothing" || { bad "run-exclusive through a symlink (rc=$rc)"; echo "$out" | tail -2; }
 : > $rx/hl-other; mkdir -p $rx/hl && ln $rx/hl-other $rx/hl/lock
 out=$(FACTORY_RUN_LOCK=$rx/hl/lock $S run-exclusive -- sh -c 'echo SHOULD-NOT-RUN' 2>&1); rc=$?
-[ $rc = 1 ] && echo "$out" | grep -qF "$rx/hl/lock is a symlink, a hard link" && ! echo "$out" | grep -q SHOULD-NOT-RUN \
+[ $rc = 1 ] && echo "$out" | grep -qF "$rx/hl/lock is a symlink, a hard link" && echo "$out" | grep -qF "Do not delete this file: it may be the real one, with a second name made elsewhere. Remove the other name, or move this file aside" && ! echo "$out" | grep -qF "exact path" && ! echo "$out" | grep -q SHOULD-NOT-RUN \
   && ok "run-exclusive refuses a lock file that is a hard link, and runs nothing" || { bad "run-exclusive through a hard link (rc=$rc)"; echo "$out" | tail -2; }
 mkdir -p $rx/ld-target && ln -s $rx/ld-target $rx/ld
 out=$(FACTORY_RUN_LOCK=$rx/ld/lock $S run-exclusive -- sh -c 'echo SHOULD-NOT-RUN' 2>&1); rc=$?
@@ -226,6 +226,75 @@ out=$(cd $rx && FACTORY_RUN_LOCK=rel/lock $S run-exclusive -- sh -c 'echo SHOULD
 [ $rc = 64 ] && echo "$out" | grep -q 'must be an absolute path' && ! echo "$out" | grep -q SHOULD-NOT-RUN && [ ! -e $rx/rel ] \
   && ok "run-exclusive refuses a relative FACTORY_RUN_LOCK: it would name a different lock in each folder" || { bad "run-exclusive with a relative lock (rc=$rc)"; echo "$out" | tail -2; }
 [ "$(stat -f %Lp $(dirname $FACTORY_RUN_LOCK))" = 700 ] && ok "run-exclusive makes the lock's folder owner-only (700)" || bad "run-exclusive lock folder mode ($(stat -f %Lp $(dirname $FACTORY_RUN_LOCK)))"
+# Waiting runs get the lock in the order they arrived (#283). D holds it; W1..W4 start one after the other,
+# each only once the one before it is waiting (a run's place is taken before it says it waits), and they
+# must run in that order. Checked from the marks the commands record, never from timing.
+qd=$FACTORY_RUN_LOCK.queue; rm -f $rx/go $rx/ord.marks
+$S run-exclusive -- $rx/hold D $rx/ord.d $rx/go 2>/dev/null &
+h=$!
+rx_until "grep -q 'D start' $rx/ord.d 2>/dev/null"
+for w in W1 W2 W3 W4; do
+  $S run-exclusive -- sh -c 'echo "$0" >> "$1"' $w $rx/ord.marks 2>$rx/ord-$w.err &
+  eval "p$w=\$!"
+  rx_until "grep -q 'waiting for the lock' $rx/ord-$w.err"
+  sleep 1.2 # runs that poll the lock every 2s would then be at different points of their cycle: first come, first served is not luck
+done
+nq=$(ls $qd 2>/dev/null | wc -l | tr -d " ")
+touch $rx/go; rx_wait $h; rx_wait $pW1; r1=$?; rx_wait $pW2; r2=$?; rx_wait $pW3; r3=$?; rx_wait $pW4; r4=$?
+[ "$(tr '\n' ' ' < $rx/ord.marks)" = "W1 W2 W3 W4 " ] && [ $r1 = 0 ] && [ $r2 = 0 ] && [ $r3 = 0 ] && [ $r4 = 0 ] && [ "$nq" = 4 ] \
+  && ok "run-exclusive: four waiting runs get the lock in the order they arrived" || { bad "run-exclusive: arrival order (marks: $(tr '\n' ' ' < $rx/ord.marks), tickets=$nq, rc $r1 $r2 $r3 $r4)"; cat $rx/ord-W3.err; }
+grep -q '2 earlier runs are waiting ahead of this one' $rx/ord-W3.err && ! grep -q 'earlier run' $rx/ord-W1.err && [ ! -e $qd ] \
+  && ok "run-exclusive: a waiting run says how many are ahead of it, and the queue folder is gone when the last has run" || { bad "run-exclusive: the queue message or folder"; cat $rx/ord-W3.err $rx/ord-W1.err; ls -A $qd 2>&1; }
+# A waiter that is killed gives up its place: TERM at once (its own exit removes the ticket), SIGKILL as soon as
+# the next poll finds the ticket's lock dropped. The others still run in order, nothing blocks a later run,
+# and no ticket is left. W1 (first in line) gets TERM, W2 SIGKILL; W3 and W4 must run, in that order.
+rm -f $rx/go $rx/kq.marks
+$S run-exclusive -- $rx/hold D $rx/kq.d $rx/go 2>/dev/null &
+h=$!
+rx_until "grep -q 'D start' $rx/kq.d 2>/dev/null"
+for w in W1 W2 W3 W4; do
+  $S run-exclusive -- sh -c 'echo "$0" >> "$1"' $w $rx/kq.marks 2>$rx/kq-$w.err &
+  eval "p$w=\$!"
+  rx_until "grep -q 'waiting for the lock' $rx/kq-$w.err"
+  sleep 1.2 # runs that poll the lock every 2s would then be at different points of their cycle: first come, first served is not luck
+done
+kill -TERM $pW1; rx_wait $pW1; k1=$?
+t1=$(ls $qd | wc -l | tr -d " ")
+kill -KILL $pW2; wait $pW2 2>/dev/null
+rx_until "[ \"\$(ls $qd | wc -l | tr -d ' ')\" = 2 ]"; t2=$?
+touch $rx/go; rx_wait $h; rx_wait $pW3; k3=$?; rx_wait $pW4; k4=$?
+after=$(rx_bound $S run-exclusive -- sh -c 'echo ran' 2>&1); arc=$?
+[ $k1 = 143 ] && [ "$t1" = 3 ] && [ $t2 = 0 ] && [ "$(tr '\n' ' ' < $rx/kq.marks)" = "W3 W4 " ] && [ $k3 = 0 ] && [ $k4 = 0 ] && [ ! -e $qd ] && [ $arc = 0 ] && [ "$after" = ran ] \
+  && ok "run-exclusive: a waiter killed by TERM or SIGKILL gives up its place, the others still run in order, nothing is left behind" || { bad "run-exclusive: killed waiters (k1=$k1 tickets after TERM=$t1, after KILL wait=$t2, marks: $(tr '\n' ' ' < $rx/kq.marks), k3=$k3 k4=$k4, after=$arc/$after)"; ls -A $qd 2>&1; }
+# A waiter that is stopped (Ctrl-Z, kill -STOP) still holds its flock, so it must not hold up the line (tl on
+# #284): each waiting run touches its ticket every poll, and one untouched for TICKET_STALE seconds is dropped.
+# W1 is stopped at the front while D holds; D ends; W2 must run without W1 being continued. Then W1 is
+# continued: it finds its ticket gone, takes a new place, and runs.
+rm -f $rx/go $rx/st.marks
+$S run-exclusive -- $rx/hold D $rx/st.d $rx/go 2>/dev/null &
+h=$!
+rx_until "grep -q 'D start' $rx/st.d 2>/dev/null"
+for w in W1 W2; do
+  $S run-exclusive -- sh -c 'echo "$0" >> "$1"' $w $rx/st.marks 2>$rx/st-$w.err &
+  eval "p$w=\$!"
+  rx_until "grep -q 'waiting for the lock' $rx/st-$w.err"
+  sleep 1.2
+done
+t1=$(ls $qd | sort | head -1); rpid=${t1##*-}
+kill -STOP $rpid
+touch $rx/go; rx_wait $h
+rx_wait $pW2; s2=$?
+m2=$(tr '\n' ' ' < $rx/st.marks)
+kill -CONT $rpid; rx_wait $pW1; s1=$?
+[ $s2 = 0 ] && [ "$m2" = "W2 " ] && [ $s1 = 0 ] && [ "$(tr '\n' ' ' < $rx/st.marks)" = "W2 W1 " ] && [ ! -e $qd ] \
+  && ok "run-exclusive: a stopped waiter at the front does not hold up the runs behind it, and runs after it is continued" || { bad "run-exclusive: stopped waiter (W2 rc=$s2 marks then: $m2, W1 rc=$s1, marks now: $(tr '\n' ' ' < $rx/st.marks))"; cat $rx/st-W1.err $rx/st-W2.err; ls -A $qd 2>&1; }
+# A ticket whose run is gone, and things that are not tickets, never hold a run up; only names are removed.
+mkdir -p $qd; : > $qd/00000000000000000001-1; ln -s $rx/ord.marks $qd/00000000000000000002-2; mkdir $qd/00000000000000000003-3; : > $qd/.tmp-99; touch -t 202001010000 $qd/.tmp-99 # a .tmp younger than 5s may be a run about to lock it
+before=$(cat $rx/ord.marks | wc -l)
+out=$(rx_bound $S run-exclusive -- sh -c 'echo ran' 2>&1); rc=$?
+[ $rc = 0 ] && [ "$out" = ran ] && [ ! -e $qd/00000000000000000001-1 ] && [ ! -e $qd/.tmp-99 ] && [ ! -L $qd/00000000000000000002-2 ] && [ -d $qd/00000000000000000003-3 ] && [ "$(cat $rx/ord.marks | wc -l)" = "$before" ] \
+  && ok "run-exclusive: a stale ticket is not waited for and is removed, and a link or folder in the queue is never followed" || { bad "run-exclusive: stale tickets (rc=$rc)"; echo "$out" | tail -2; ls -A $qd; }
+rmdir $qd/00000000000000000003-3; rmdir $qd 2>/dev/null
 # Only a guard for a machine that has no real folder yet: where one exists, as after this is merged and
 # used, this cannot fail, since it cannot tell a folder the e2e made from one that was there.
 { [ $real_was = 1 ] || [ ! -e "$real" ]; } && ok "the e2e never made the real lock's folder ($real)" || bad "the e2e made the real lock's folder $real"

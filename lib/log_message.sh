@@ -17,6 +17,10 @@
 # at all is still recorded, as a line with recipient "?", outcome UNREADABLE and a placeholder message:
 # the hook runs only on SendMessage, so a message was sent, and the log should say so.
 #
+# A message to or from the role id sec is written without its body: the marker "[body not logged: sec]"
+# stands in for the text, the other fields are as always (#227). So is a message to a uds: address
+# that did not resolve to a roster seat, with the marker "[body not logged: unresolved address]".
+#
 # The message is the sender's to choose, so every field is escaped exactly as say's log_field does:
 # a message cannot split or forge a log line, or drive the terminal that reads the log. The message
 # goes into messages.log and nowhere else. The script never touches the message or the tool result:
@@ -148,6 +152,18 @@ ruby --disable-gems -rjson -e '
   msg = watch ? "<no message: notify when idle>" : field(text(inp["message"]))
   name = to.sub(/ \[[^\]]*\]\z/, "")
   rcpt = roles[name] || uds_role(to, roles) || to
+  # A message to or from the security seat is logged without its body (#227): it can hold an unfixed
+  # finding, which hard rule 5 keeps to sec and the EM, and the log is readable by more than they are
+  # (the observer role, a copy kept elsewhere). The line keeps time, sender, recipient and outcome, so
+  # the delivery checks read it as before. The test is on the resolved recipient and the sender, both
+  # role ids, so a session name, a "[ref]" or a uds: address that resolves to sec is caught too. The
+  # id is TRIAGE_WRITER in lib/team_config.rb. A message to "all" (say) is not one to sec: see the README.
+  msg = "[body not logged: sec]" if (rcpt == "sec" || from == "sec") && !watch
+  # Fail closed (sec on #227): a uds: address that did not resolve to a roster seat (the 2s lookup ran
+  # out on a loaded host, or the sender is outside a roster pane) may still be one for sec, and replying to a
+  # message by its from address is the usual way to answer sec. Its body is not written either. A named
+  # recipient that is not on the roster is still logged in full, as before.
+  msg = "[body not logged: unresolved address]" if rcpt == to && to.start_with?("uds:") && !watch && msg != "[body not logged: sec]"
   append(log, [stamp, field(from), field(rcpt), outcome, msg])
 ' -- "$log" "$from" "$@" </dev/stdin >/dev/null 2>&1
 exit 0

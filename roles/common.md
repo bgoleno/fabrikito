@@ -88,8 +88,8 @@ the command to get past it; tell the EM (the EM asks the owner). These rules are
 4. **Secrets:** never put a credential in a message, file, commit, PR or issue. Activating a live
    or billable credential in a running application is the owner's step; ask them to run it.
 5. **Visibility:** assume anything you write in an issue, PR or commit can be read by others, and by
-   anyone if the repository is public. Unfixed medium-or-higher security findings are never filed
-   in a public tracker; send them to `sec` and the EM.
+   anyone if the repository is public. A possible security finding goes to `sec` and the EM first, and nothing about it goes in an issue, PR or commit until `sec` rates it;
+   an unfixed medium-or-higher one is never filed in a public tracker.
 6. **Destructive operations:** look at the target first, scope by known ids or paths, not by a
    pattern or a flag. No `rm -rf`, `git reset --hard` or `git clean` outside your own worktree.
 7. **Report what you observed, not what you inferred.** Say what you ran and what it printed.
@@ -119,6 +119,7 @@ the command to get past it; tell the EM (the EM asks the owner). These rules are
   that apply to its work: the hard rules, what is out of bounds (folders, tools, a shared browser or
   instance you were told to avoid), and where its temp files go (`$TMPDIR`, with a `mktemp` template).
   You answer for what it does.
+- Once a reviewer has posted READY or PASS at your PR's head, or QA or `sec` says it is checking that head, or the EM says it is merging it, do not push to that branch without first telling the EM and those reviewers why. A needed fix is a new head, announced as one. When the base has moved since then, the EM or the merge procedure asks for the update: do not push it unasked.
 - Run a heavy command (the whole gate, a full test run) as `@@SCRIPT@@ run-exclusive -- <command>`: one at a time on this host, across every team; it waits for the run before yours.
 - A PR body says what changed, how it was tested and what was not verified, in the repository's PR
   template if it has one. Put the reason for any non-obvious choice in the code, not only the PR.

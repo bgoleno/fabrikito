@@ -21,21 +21,21 @@ the reference for each key, and the file to copy.
   existing state folder moves that folder first; `check` warns when the default folder is still there
   and is a different one. Running seats keep the state folder they started with until they restart.
   `check` refuses a relative path, the home folder or a folder holding it, a folder inside the
-  repository, a seat's working directory, the worktree folder or a factory checkout (a folder under
-  `<factory checkout>/.state/` is allowed, and only there), a volume that is not mounted, and a folder that is, holds or sits
+  repository, a seat's working directory, the worktree folder or a checkout of fabrikito (a folder under
+  `<install>/.state/` is allowed, and only there), a volume that is not mounted, and a folder that is, holds or sits
   inside another team's state folder (one in `other_teams` or one `check` finds by its `settings/`,
   `launch/` and `prompts/`). The other teams `check` finds are the folders beside the state folder, so
   a state folder shared with other teams' folders in one parent treats them as other teams.
 - `sessions`: tmux name prefix, an optional claude `wrapper`, `args`, and an optional default `model`,
   `effort` and `permission_mode`. Unset means the flag is omitted and the seat inherits
-  `~/.claude/settings.json`. `sessions.claude.plugin` (default `true`) loads the factory plugin into
-  every seat: see [The factory plugin](plugin.md).
+  `~/.claude/settings.json`. `sessions.claude.plugin` (default `true`) loads the fabrikito plugin into
+  every seat: see [The fabrikito plugin](plugin.md).
 - `permissions` (`deny`, `ask`, `allow`), at the top level and per role: see
-  [Safety](../README.md#safety).
+  [Safety](safety.md).
 - `other_teams`: other teams' state folders that aren't beside this team's own, each with the
-  `observers` allowed to read its log and notes. That log can carry private security reports, so an
-  observer treats it under rule 5 and sends `sec` and the EM only a pointer: see
-  [Safety](../README.md#safety).
+  `observers` allowed to read its log and notes. That log does not hold the body of a message to or from
+  `sec` (#227), but it can still carry private security reports sent to the EM, so an observer treats it
+  under rule 5 and sends `sec` and the EM only a pointer: see [Safety](safety.md).
 - `prompts.common` and a per-role `prompt` (file) or `prompt_text` (inline). Placeholders such as
   `@@ROSTER@@`, `@@GITHUB_REPO@@`, `@@PROJECT_URL@@` and `@@WORKTREE_ROOT@@` are filled in per seat.
 - `prompts.project` (optional): a file with your project's specifics, such as what the product is,
@@ -93,7 +93,7 @@ folder. A running seat keeps what it started with and picks up a change at its n
 Owner-only (mode 700) guards against other OS users, and only on a volume that honours ownership. It
 keeps out nobody on a volume mounted `noowners` (Finder's "ignore ownership on this volume"), and every
 seat runs as the same user in any case. Separate folders keep two teams' temp files apart by accident
-guard only, as with the other rules in [Safety](../README.md#safety): this is not a security boundary.
+guard only, as with the other rules in [Safety](safety.md): this is not a security boundary.
 
 In a permission mode that prompts, a `Write` outside a seat's working directory would wait for a human, so
 the generated settings give each seat an `Edit` allow on everything in its own `tmpdir`

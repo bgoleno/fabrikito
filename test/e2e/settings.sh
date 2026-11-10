@@ -4,10 +4,10 @@
 # Uses the running seats. Restarts em.
 echo "--- generated settings"
 # The user's rules, in team-then-role order, without duplicates. Rules the launcher adds itself
-# (Edit denies on its own files, the Read rules on the log and the triage folder, and the Read denies
+# (Edit denies on its own files, the Read rules on the log, say's records (#212) and the triage folder, and the Read denies
 # on the log, triage records and notes of secstate, the e2e's other team beside $T/state, #197) are
 # checked separately, so they are left out of these lists.
-perms() { ruby -rjson -e 'p = JSON.parse(File.read(ARGV[0]))["permissions"] || {}; %w[deny ask allow].each { |k| l = (p[k] || []).reject { |r| r.start_with?("Edit(//", "Bash(git push ") || r =~ %r{\ARead\(//.*/state/(messages\.log|triage/\*\*)\)\z} || r =~ %r{\ARead\(//.*/secstate/(messages\.log|triage/\*\*|notes/\*\*)\)\z} }; puts "#{k}=#{l.join(" | ")}" }; puts "disable=#{p["disableBypassPermissionsMode"]}"' "$1" 2>&1; }
+perms() { ruby -rjson -e 'p = JSON.parse(File.read(ARGV[0]))["permissions"] || {}; %w[deny ask allow].each { |k| l = (p[k] || []).reject { |r| r.start_with?("Edit(//", "Bash(git push ") || r =~ %r{\ARead\(//.*/state/(messages\.log|(triage|say)/\*\*)\)\z} || r =~ %r{\ARead\(//.*/secstate/(messages\.log|triage/\*\*|notes/\*\*)\)\z} }; puts "#{k}=#{l.join(" | ")}" }; puts "disable=#{p["disableBypassPermissionsMode"]}"' "$1" 2>&1; }
 # rules <file> <deny|ask|allow>: one rule per line
 rules() { ruby -rjson -e 'puts((JSON.parse(File.read(ARGV[0]))["permissions"] || {})[ARGV[1]] || [])' "$1" "$2"; }
 want_em='deny=Read(//**/.env) | Bash(touch tt-deny*)
@@ -79,7 +79,8 @@ echo changed >> $T/ginst/VERSION
 gd=$($T/ginst/fabrikito -c $T/ginst/teams/team.yaml check 2>&1 | grep "^install ")
 [ "$gl" = "install   : $T/ginst at v9.8.7" ] && [ "$gd" = "install   : $T/ginst at v9.8.7-dirty" ] \
   && ok "check: the install line names the factory checkout and its tag (lightweight), with -dirty after a change" || { bad "check: install line in a git checkout"; echo "clean: $gl"; echo "dirty: $gd"; }
-mkdir -p $T/linst/teams; for p in fabrikito lib roles plugin; do ln -s $SRC/$p $T/linst/$p; done; cp $T/team.yaml $T/linst/teams/team.yaml
+# fabrikito is copied, not linked: a link to the file is the real install (#263), so a linked file would make $SRC the install.
+mkdir -p $T/linst/teams; cp $SRC/fabrikito $T/linst/fabrikito; for p in lib roles plugin; do ln -s $SRC/$p $T/linst/$p; done; cp $T/team.yaml $T/linst/teams/team.yaml
 $T/linst/fabrikito -c $T/linst/teams/team.yaml check 2>&1 | grep -qxF "install   : $T/linst (not a git checkout)" && ok "check: an install outside any git checkout says so" || { bad "check: install line outside git"; $T/linst/fabrikito -c $T/linst/teams/team.yaml check 2>&1 | grep -E "^(install|error)"; }
 echo "$chk" | grep -qxF "bootstrap : $T/bin/boot (run in each new worktree before its seat starts)" && echo "$chk" | grep -qxF "copy      : .env.local, conf/dev.json, missing.txt (from the main checkout into each new worktree)" && ok "check: bootstrap and copy lines" || { bad "check: bootstrap and copy lines"; echo "$chk" | grep -E "^(bootstrap|copy) "; }
 echo "$chk" | grep -qE "^em +Manager .* bypassPermissions " && echo "$chk" | grep -qE "^w1 +Worker One .* default " && ok "check: MODE column per role" || { bad "check MODE column"; echo "$chk"; }
@@ -152,6 +153,14 @@ for sp in "$RT" "$T"; do
   echo "$w2deny" | grep -qxF "Read(/$sp/state/messages.log)" || lr="$lr w2-not-denied($sp)"
 done
 [ -z "$lr" ] && ok "messages.log: Read denied to w1 and w2 (both spellings), readable by em" || { bad "messages.log read rules:$lr"; rules $T/state/settings/w1.json deny | grep messages; }
+# say's records (#212) hold a pasted message until it is submitted: the folder has the log's deny, for the same seats.
+sd=""
+for sp in "$RT" "$T"; do
+  rules $T/state/settings/em.json deny | grep -qxF "Read(/$sp/state/say/**)" && sd="$sd em-denied($sp)"
+  rules $T/state/settings/w1.json deny | grep -qxF "Read(/$sp/state/say/**)" || sd="$sd w1-not-denied($sp)"
+  echo "$w2deny" | grep -qxF "Read(/$sp/state/say/**)" || sd="$sd w2-not-denied($sp)"
+done
+[ -z "$sd" ] && ok "say's record folder: Read denied to w1 and w2 (both spellings), readable by em" || { bad "say record read rules:$sd"; }
 # check names the Read deny for the seats that have it, and keeps it out of the protected-path count.
 # w1's team and role denies hold no Edit rule, so its protected paths are its Edit denies but the notes
 # and the auto-memory folder (#112) and the triage folder (#138), which check names on their own.

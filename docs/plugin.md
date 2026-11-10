@@ -4,8 +4,8 @@ The Claude Code plugin that carries fabrikito's skills into every seat, and how 
 
 `plugin/` is a Claude Code [plugin](https://code.claude.com/docs/en/plugins) (`.claude-plugin/plugin.json`
 and `skills/`) that `up` loads into every seat with `--plugin-dir <this checkout>/plugin`. Seats work in
-the target project's folders, where this repository's own `.claude/` is never read, so this is how the
-factory's skills reach them. Nothing is installed into your settings: a session fabrikito did not start
+the target project's folders, where this repository's own `.claude/` is never read, so this is how
+fabrikito's skills reach them. Nothing is installed into your settings: a session fabrikito did not start
 does not have the plugin. Its skills are namespaced by the plugin name and show as `/fabrikito:<skill>`.
 
 ## Its skills
@@ -20,11 +20,25 @@ procedure. The rules it applies (a brief's fields, the review bar) stay in the r
 skill points to rather than copies, and a skill stops if the prompt lacks them. `test/e2e/launch.sh`
 checks every skill's frontmatter, so adding one needs no new test code.
 
+### The security-audit skill
+
+`/fabrikito:security-audit` is a modified copy of the MIT-licensed
+[security-audit-skill](https://github.com/cloudflare/security-audit-skill) from Cloudflare. It is for the
+security engineer (`sec`) only: its description says so, and `teams/example.yaml` lists it for `sec` alone
+(`test/e2e/audit.sh` checks that no other role's prompt lists it). Every seat still loads it, as every
+seat loads every skill. It gives security guidance by default, which writes nothing. A full audit runs
+only with the owner's say-so passed through the EM, and its output goes to the team's triage folder,
+never into a repository, an issue or a pull request. The team's rules for it are in
+[`FABRIKITO-PROCESS.md`](../plugin/skills/security-audit/FABRIKITO-PROCESS.md) in the skill's folder,
+which wins over the upstream text where they differ. [`UPSTREAM.md`](../plugin/skills/security-audit/UPSTREAM.md)
+there names the upstream commit that was copied and lists every change, and
+[`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md) holds the copyright notice and license.
+
 ### Skills started by typing them
 
 Two skills set `disable-model-invocation`: `/fabrikito:ping` and `/fabrikito:merge-train`. A seat cannot
 start them with its Skill tool; they run when typed as the session's own input. That is not a boundary:
-any process running as you can type into a seat's pane (see [Safety](../README.md#safety)). For
+any process running as you can type into a seat's pane (see [Safety](safety.md)). For
 `merge-train` the e2e fails if the flag is missing, and the skill's step 1 checks for itself that the
 command arrived as the session's own input, with no `[from ...]` label.
 
@@ -41,7 +55,7 @@ typed `/fabrikito:merge-train` covers, are rules in that prompt; the skill is th
   `sessions.claude.plugin: false` to leave the flag out. `check` shows the plugin's path, or `off`.
 - A `--plugin-dir` of your own in `sessions.claude.args` is allowed: the flag repeats, so both load. Your
   installed plugins load as usual alongside it.
-- Seats get an `Edit` deny on `plugin/`, like `lib/` and `roles/` (see [Safety](../README.md#safety)),
+- Seats get an `Edit` deny on `plugin/`, like `lib/` and `roles/` (see [Safety](safety.md)),
   since it is code every seat runs at its next start, and on each plugin a team loads itself with
   `--plugin-dir` in `args` (the folder with everything under it, or the `.zip`; a relative path is taken
   from the seat's folder).

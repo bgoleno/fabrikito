@@ -233,11 +233,19 @@ for who in owner live-test; do
   if [ $who = owner ]; then
     rm -f $T/owner.rc
     tmux new-session -d -s ownerpane "env -u TEAM_ROLE $S -c $T/tp.yaml say ta \"\$(cat $T/m4.txt)\" >$T/tall.out 2>&1; echo \$? > $T/owner.rc; sleep 30"
-    for i in $(seq 1 80); do [ -s $T/owner.rc ] && break; sleep 0.25; done; tmux kill-session -t '=ownerpane' 2>/dev/null
-    rc=$(cat $T/owner.rc 2>/dev/null || echo none)
+    # Wait for say to finish, not for a fixed time: on a loaded host it took longer than the 20 s this once
+    # allowed (#210). The limit is a bound for a say that hung: E2E_SAY_WAIT seconds, default 180, polled
+    # every 0.25 s. Passing it is reported as a timeout, never as a wrong result.
+    say_wait=${E2E_SAY_WAIT:-180}; say_t=$(date +%s)
+    while [ ! -s $T/owner.rc ] && [ $(( $(date +%s) - say_t )) -lt "$say_wait" ]; do sleep 0.25; done
+    tmux kill-session -t '=ownerpane' 2>/dev/null
+    if [ -s $T/owner.rc ]; then rc=$(cat $T/owner.rc); say_to=; else rc=none; say_to="say as owner did not finish within ${say_wait}s (a timeout, not a wrong result: the run was stopped before say ended; E2E_SAY_WAIT sets the limit)"; fi
   else TEAM_ROLE=live-test $S -c $T/tp.yaml say ta "$m4" >$T/tall.out 2>&1; rc=$?; fi
   sleep 1
+  if [ -n "${say_to:-}" ] && [ $who = owner ]; then bad "say as owner timed out"; echo "$say_to"; cat $T/tall.out
+  else
   [ $rc = 0 ] && lastsub ta | grep -qE "^❯ \[from $who\] \[Pasted text #[0-9]+ \+3 lines\]$" && ok "say delivers a 4-line message as [from $who]" || { bad "say as $who (rc=$rc)"; cat $T/tall.out; lastsub ta; }
+  fi
   label_first ta "$k" "[from $who] " "the [from $who] label is pasted on its own too"
 done
 # A placeholder whose label did not reach the box (tn), or under another role's label (to), is
