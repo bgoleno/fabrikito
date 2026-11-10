@@ -66,13 +66,13 @@ smlog() { local n payload rs=${4:-}
 # format, with say's escaping, reversible with printf %b, and nothing printed (the tool result stands).
 hlogged() { smlog "$1" "$2" "${7:-}" "${8:-}"
   if [ $rc = 0 ] && [ -z "$out" ] && [ "$(printf '%s\n' "$line" | cut -f2-4)" = "w9	$3	$4" ] && [ "$(printf '%s\n' "$line" | cut -f5-)" = "$5" ] \
-    && [ "$(printf '%b' "$(printf '%s\n' "$line" | cut -f5-)")" = "$2" ] && printf '%s\n' "$line" | cut -f1 | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}$'; then
+    && { [ "$5" = '[body not logged: unresolved address]' ] && ! printf '%s' "$line" | grep -qF "$2" || [ "$(printf '%b' "$(printf '%s\n' "$line" | cut -f5-)")" = "$2" ]; } && printf '%s\n' "$line" | cut -f1 | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}$'; then
     ok "SendMessage log: $6"
   else bad "SendMessage log: $6 (rc=$rc)"; echo "$out"; printf '%s\n' "$line" | od -c | head -4; fi; }
 hlogged tt-w2 'hello w2' w2 sent 'hello w2' "a message to a roster session is logged with its role id, sent"
 hlogged 'tt-w1 [3fa9c1]' 'with a ref' w1 sent 'with a ref' "a session name with its [ref] is logged as the role id"
 hlogged other-team-fs1 'off roster' other-team-fs1 sent 'off roster' "a recipient that is not on the roster is logged as given"
-hlogged 'uds:/tmp/cc-socks/999999999.sock' 'to an address' 'uds:/tmp/cc-socks/999999999.sock' sent 'to an address' "a uds: address no seat holds is logged as given"
+hlogged 'uds:/tmp/cc-socks/999999999.sock' 'to an address' 'uds:/tmp/cc-socks/999999999.sock' sent '[body not logged: unresolved address]' "a uds: address no seat holds is logged as given, without its body (#227: it may be sec's)"
 hlogged tt-w2 'refused' w2 NOT-SENT 'refused' "a SendMessage that returned success false is NOT-SENT" PostToolUse '{"success":false,"message":"no such session"}'
 hlogged tt-w2 'failed' w2 NOT-SENT 'failed' "a SendMessage that failed (PostToolUseFailure) is NOT-SENT" PostToolUseFailure
 hlogged tt-w2 'string result' w2 sent 'string result' "a tool_response given as a JSON string is read" PostToolUse '"{\"success\":true}"'
@@ -88,7 +88,7 @@ hlogged "uds:/tmp/cc-socks/$empid.sock" 'reply by address' em sent 'reply by add
 # The uds: lookup has its own limit even when tmux hangs: the hook gives up on it in about 2s, kills
 # the stand-in, and logs the address as given (tl's review of #110: a block-form popen waited 20s).
 mkdir -p $T/hangtmux && printf '#!/bin/sh\necho $$ >> %s/hangtmux/pids\nexec sleep 30\n' $T > $T/hangtmux/tmux && chmod +x $T/hangtmux/tmux
-t0=$(date +%s); PATH=$T/hangtmux:$PATH hlogged "uds:/tmp/cc-socks/$empid.sock" 'tmux hangs' "uds:/tmp/cc-socks/$empid.sock" sent 'tmux hangs' "a hanging tmux: the address is logged as given"; t1=$(date +%s)
+t0=$(date +%s); PATH=$T/hangtmux:$PATH hlogged "uds:/tmp/cc-socks/$empid.sock" 'tmux hangs' "uds:/tmp/cc-socks/$empid.sock" sent '[body not logged: unresolved address]' "a hanging tmux: the address is logged as given, without its body"; t1=$(date +%s)
 hp=$(cat $T/hangtmux/pids 2>/dev/null); [ $((t1 - t0)) -lt 4 ] && [ -n "$hp" ] && ! kill -0 $hp 2>/dev/null \
   && ok "the uds: lookup is cut at its limit (the hook took $((t1 - t0))s) and the hung tmux is killed" || bad "uds: lookup limit ($((t1 - t0))s, stand-in pid ${hp:-none} $(kill -0 ${hp:-0} 2>/dev/null && echo alive))"
 # smraw <JSON text>: runs the hook on hook input as given, not built by JSON.generate.
@@ -146,4 +146,36 @@ o4=$(printf '{"hook_event_name":"PostToolUse","tool_name":"SendMessage","tool_in
   | $SRC/lib/log_message.sh $T/lstate/hard.log w9 tt-w2=w2 2>&1); r4=$?
 [ $r4 = 0 ] && [ -z "$o4" ] && cmp -s $T/sent-hlog $T/sent-hlog.want \
   && ok "SendMessage log: a hard link at messages.log is not written through (exit 0, nothing printed)" || { bad "SendMessage log through a hard link (rc=$r4)"; echo "$o4"; cat $T/sent-hlog; }
+# A message to or from sec is logged without its body (#227): the line keeps the time, sender, recipient and
+# outcome, with a fixed marker in place of the text. A sentinel in the text must not appear anywhere in the log.
+# sec1 is sender and recipient both: the recipient is the role id (a session name or a uds: address resolves to
+# it first), so a message to sec's session is caught whatever name it was sent to.
+SEC_MARK='[body not logged: sec]'
+SENT='SENTINEL-227-hook-body'
+secchk() { local what=$1 who=$2 to=$3 m=$4 want_from=$5 want_to=$6 n
+  n=$(wc -l < $LG)
+  printf '%s' "$(TO="$to" M="$m" ruby -rjson -e 'print JSON.generate({"hook_event_name"=>"PostToolUse","tool_name"=>"SendMessage","tool_input"=>{"to"=>ENV["TO"],"message"=>ENV["M"]},"tool_response"=>{"success"=>true}})')" \
+    | $SRC/lib/log_message.sh $LG $who tt-em=em tt-sec=sec tt-w2=w2 >/dev/null 2>&1
+  line=$(tail -n +$((n + 1)) $LG)
+  if [ "$(wc -l < $LG)" -eq $((n + 1)) ] && [ "$(printf '%s\n' "$line" | cut -f2-5)" = "$want_from	$want_to	sent	$SEC_MARK" ] && ! grep -qF "$SENT" $LG; then
+    ok "SendMessage log: $what is logged without its body"
+  else bad "SendMessage log: $what"; printf '%s\n' "$line"; fi; }
+secchk "a message to sec's session" w9 tt-sec "text $SENT" w9 sec
+secchk "a message to sec's session with a [ref]" w9 'tt-sec [3fa9c1]' "text $SENT" w9 sec
+secchk "a message from sec" sec tt-w2 "text $SENT" sec w2
+secchk "a message from sec to the owner's em" sec tt-em "text $SENT, tab	and newline
+more" sec em
+# Everything else stays in full, and sec's own line keeps the outcome: a failed send to sec is NOT-SENT, not hidden.
+hlogged tt-w2 "plain $SENT-other" w2 sent "plain $SENT-other" "a message between two other seats is still logged in full"
+n=$(wc -l < $LG)
+printf '%s' '{"hook_event_name":"PostToolUseFailure","tool_name":"SendMessage","tool_input":{"to":"tt-sec","message":"x SENTINEL-227-fail"},"error":"boom"}' | $SRC/lib/log_message.sh $LG w9 tt-sec=sec >/dev/null 2>&1
+[ "$(tail -n +$((n + 1)) $LG | cut -f2-5)" = "w9	sec	NOT-SENT	$SEC_MARK" ] && ! grep -qF SENTINEL-227-fail $LG && ok "SendMessage log: a failed send to sec is NOT-SENT with the marker, without its body" || { bad "SendMessage log: failed send to sec"; tail -n +$((n + 1)) $LG; }
+# An address that does not resolve fails closed (sec on #227): its body is not written, whoever it is for,
+# and the other fields are as before. A resolved non-sec seat (em's pane, above) and a named seat stay in full.
+n=$(wc -l < $LG)
+printf '%s' '{"hook_event_name":"PostToolUse","tool_name":"SendMessage","tool_input":{"to":"uds:/tmp/cc-socks/999999998.sock","message":"x SENTINEL-227-uds"},"tool_response":{"success":true}}' | $SRC/lib/log_message.sh $LG w9 tt-sec=sec tt-w2=w2 >/dev/null 2>&1
+[ "$(tail -n +$((n + 1)) $LG | cut -f2-5)" = "w9	uds:/tmp/cc-socks/999999998.sock	sent	[body not logged: unresolved address]" ] && ! grep -qF SENTINEL-227-uds $LG \
+  && ok "SendMessage log: a message to a uds: address that did not resolve is logged without its body, status unchanged" || { bad "SendMessage log: unresolved uds: address"; tail -n +$((n + 1)) $LG; }
+printf '%s' '{"hook_event_name":"PostToolUseFailure","tool_name":"SendMessage","tool_input":{"to":"uds:/tmp/cc-socks/999999998.sock","message":"x SENTINEL-227-uds-fail"},"error":"boom"}' | $SRC/lib/log_message.sh $LG w9 tt-sec=sec >/dev/null 2>&1
+[ "$(tail -n 1 $LG | cut -f4-5)" = "NOT-SENT	[body not logged: unresolved address]" ] && ! grep -qF SENTINEL-227-uds-fail $LG && ok "SendMessage log: a failed send to an unresolved uds: address keeps NOT-SENT, without its body" || { bad "SendMessage log: failed send to unresolved uds:"; tail -n 1 $LG; }
 e2e_end=hooks # the last line: test/e2e.sh checks that the file ran to here
