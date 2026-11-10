@@ -150,6 +150,14 @@ What the rules cannot do:
   writes, so they do not stop the same command run through another shell or a script (`sh -c 'cp …'`,
   which qa checked gets through), or a program that writes the file itself, such as a Python or Node
   script.
+- A subagent a seat starts with worktree isolation runs under the seat's own rules, not under the
+  `.claude/settings.json` in its worktree (checked on Claude Code 2.1.316, [#53](../../../issues/53)):
+  the worktree's file held a deny, yet the subagent's matching command ran with no denial, because the
+  parent session had no deny loaded. Editing a worktree's settings therefore does not change what such a
+  subagent may do. Two paths were not checked: `EnterWorktree`, which moves the session itself into a
+  worktree, and a separate `claude` process a seat starts from Bash. That process loads the project
+  settings of its own folder and does not get the seat's generated `--settings` file at all, which is
+  the general limit above: the rules guard against accidents. Severity as sec rated it: low.
 - "Never force-push a branch you did not create" cannot be written as a pattern. Engineers keep
   force-pushing their own branches; only the EM is asked.
 - Any process running as this user can type into a seat's pane, so an ask rule guards against
