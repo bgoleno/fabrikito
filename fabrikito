@@ -18,6 +18,7 @@
 #                              in rows on the right; the window is sized to its screen (display.window)
 #   status                     which seats are up, and where each one works
 #   say <role|all> <message>   type a message into a seat (this is how seats talk to each other)
+#   flush <role>               submit, with one Enter, a message fragment say itself left in a seat's input box
 #   attach <role>              attach your terminal to a seat (detach: ctrl-b d)
 #   migrate [role...]          remove clean worktrees that are not under the configured storage
 #                              volume, so `up` recreates them there (stop the seat first)
@@ -25,7 +26,7 @@
 #   run-exclusive -- <cmd...>  run a heavy command (a full gate, an e2e run) when no other run-exclusive
 #                              on this host runs one: waits, saying who holds the lock; needs no team file
 #
-# up, view, titles, say, attach and down refuse a team file outside teams/ on the default tmux
+# up, view, titles, say, flush, attach and down refuse a team file outside teams/ on the default tmux
 # server, where the real team runs: it looks like a throwaway copy. Run it on a private server
 # (test/live-env.sh), or pass --default-socket (say and attach: as the first argument) for a team
 # meant to run there.
@@ -817,6 +818,26 @@ cmd_status() {
     printf '%-5s %-36s %-18s %-6s %s  %s\n' "$r" "$(title "$r")" "$sess" "$(alive "$r" && echo up || echo down)" "$where" \
       "$(if alive "$r"; then seat_exe "$r"; else echo -; fi)"
   done
+  status_box_notices
+}
+
+# One notice per seat whose input box refused SAY_NOTICE_COUNT or more sends (#212), for the owner or the
+# EM reading status. It says when the last refusal was, because only a later say clears it: status does
+# not touch the pane. Nothing is typed into any seat.
+status_box_notices() {
+  local r k v first last count
+  for r in $ROLES; do
+    first=0 last=0 count=0
+    while IFS== read -r k v; do
+      case $k in first) first=$v ;; last) last=$v ;; count) count=$v ;; esac
+    done <<EOF
+$(say_state_get "box-$r")
+EOF
+    case $first$last$count in ''|*[!0-9]*) continue ;; esac
+    [ "$count" -ge "$SAY_NOTICE_COUNT" ] || continue
+    printf 'NOTICE %s: its input box held text when %s sends were refused between %s and %s (as of the last refusal: only a later say clears this). If it is a message fragment say left, run: %s flush %s\n' \
+      "$r" "$count" "$(date -r "$first" '+%Y-%m-%dT%H:%M:%S')" "$(date -r "$last" '+%Y-%m-%dT%H:%M:%S')" "$SELF" "$r"
+  done
 }
 
 # The claude executable seats run: the team's own copy of the shared install, made by up (#50).
@@ -1037,7 +1058,7 @@ box_state() {
 box_refusal() {
   case ${2%%	*} in
     empty) ;;
-    text) echo "the input box of $1 is not empty (someone typing, or an earlier message that was not sent): attach $1 and clear it ($SELF attach $1)" ;;
+    text) echo "the input box of $1 is not empty (someone typing, or an earlier message that was not sent): wait and try once more later, do not loop; its owner can submit or clear it ($SELF attach $1)" ;;
     copy-mode) echo "$1's pane is in copy mode (someone is scrolling): leave it with q ($SELF attach $1)" ;;
     unreadable) echo "could not read $1's screen" ;;
     diff-notice) echo "$1 shows Claude Code's diff panel notice (\"Resize your terminal to at least 110 columns to show the diff panel\") in a pane too short to show the input box under it: make the pane 110 columns wide or more (the panel then docks beside the transcript), or give it 16 rows or more, or close the diff panel in $1 ($SELF attach $1)" ;;
@@ -1220,6 +1241,128 @@ seat_lock() {
 }
 seat_unlock() { exec 9>&-; }
 
+# A box that holds text (#212). When say refuses because the receiver's input box is not empty, it
+# keeps a record per receiver in <state>/say/ (folder mode 700, files mode 600, written with a
+# temporary file and mv so a link put at the name is replaced, never followed; read only when a
+# regular file), so that senders back off, status shows one notice per seat, and flush has something
+# to go by. Everything here runs inside send_one, under the seat's lock.
+#   box-<role>    first and last refusal (epoch seconds), their count, and the hash of the text last
+#                 refused: sender, receiver and message, in the 600 file only, never in a log
+#   paste-<role>  what say pasted that has not been confirmed submitted: sender, time, label, body.
+#                 Written before the paste, removed after the Enter, so a crash or a partial paste
+#                 leaves it. A message to or from sec keeps no body in it (#227): flush then matches
+#                 only the label.
+#   <state>/say-refusals.log   time, sender, receiver and class of each refusal, with no text and no
+#                 hash: one write per line, appended
+SAY_RESEND_WINDOW=${FACTORY_SAY_RESEND_WINDOW:-300}   # seconds a refused text stays refused while the box still holds text
+SAY_NOTICE_COUNT=${FACTORY_SAY_NOTICE_COUNT:-3}       # refusals to one seat before status shows a notice
+SAY_SEEN_MAX=8                                         # refused texts remembered per seat
+# A value that is not a whole number would make every comparison below fail quietly and turn the feature
+# off (tl on #292), so it falls back to the default.
+case $SAY_RESEND_WINDOW in ''|*[!0-9]*) SAY_RESEND_WINDOW=300 ;; esac
+case $SAY_NOTICE_COUNT in ''|*[!0-9]*) SAY_NOTICE_COUNT=3 ;; esac
+
+say_state_dir() {
+  mkdir -p "$STATE/say" 2>/dev/null && chmod 700 "$STATE/say" 2>/dev/null
+}
+
+# say_state_put <file> <content>: replaces <state>/say/<file>. A temporary file in the same folder
+# and mv, which replaces a link at the name instead of writing through it. Fails soft (returns 1): the
+# record costs a back-off or a notice, never the delivery.
+say_state_put() {
+  local t
+  say_state_dir || return 1
+  # mv onto a link to a folder moves the file into the folder (sec on #292), so a name that is a link
+  # to a folder, or a folder, is refused before anything is written. A link to a file is replaced by
+  # mv, not followed.
+  if [ -d "$STATE/say/$1" ]; then return 1; fi
+  t=$(umask 077; mktemp "$STATE/say/.put.XXXXXXXX" 2>/dev/null) || return 1
+  if printf '%s' "$2" > "$t" 2>/dev/null && chmod 600 "$t" 2>/dev/null && mv -f "$t" "$STATE/say/$1" 2>/dev/null; then return 0; fi
+  rm -f "$t"; return 1
+}
+
+# say_state_get <file>: prints the file when it is a regular file, not a link. Always returns 0: under
+# set -e a failing command substitution would end the script.
+say_state_get() {
+  local f="$STATE/say/$1"
+  if [ -f "$f" ] && [ ! -L "$f" ]; then cat "$f" 2>/dev/null || true; fi
+  return 0
+}
+
+# The refusals' record of seat $1 is gone once its box is seen empty, or a delivery or a flush
+# succeeds, so the resend after the remedy is never blocked for the rest of the window (tl on #212).
+say_box_free() {
+  rm -f "$STATE/say/box-$1" "$STATE/say/paste-$1" 2>/dev/null
+  return 0
+}
+
+# say_refusal_log <sender> <receiver> <class>: one line, appended in one write, in
+# <state>/say-refusals.log (never through a link, as the message log, #194).
+say_refusal_log() {
+  local f="$STATE/say-refusals.log"
+  log_unsafe "$f" && return 0
+  printf '%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%dT%H:%M:%S')" "$(log_field "$1")" "$2" "$3" >> "$f" 2>/dev/null || true
+}
+
+# A box of seat $1 that holds text refused a message with label $2 and body $3 ($4: the refusal's
+# reason). Records it and prints the reason to show: the box's own, with the remedies, or, when this
+# same text (sender, receiver, body) was refused less than SAY_RESEND_WINDOW seconds ago, the one
+# that says to stop resending it. Only for the box-text class: other refusals (a dialog, a shell, a
+# busy seat) are not counted and never block a resend.
+say_box_blocked() {
+  local to=$1 label=$2 body=$3 why=$4 sender h now first=0 last=0 count=0 k t v class=box-text out lastseen="" kept="" n=0
+  sender=${label#\[from }; sender=${sender%\] }
+  h=$(printf '%s\n%s\n%s' "$sender" "$to" "$body" | shasum -a 256 2>/dev/null | cut -c1-64)
+  # No hash for a message to or from sec (sec on #292): a short text could be guessed from it. The cost
+  # is that such a message is not refused as a repeat; it is refused for the box, as the first time.
+  if [ "$to" = sec ] || [ "$sender" = sec ]; then h=""; fi
+  now=$(date +%s)
+  # The record holds first, last and count for the seat, and one "seen <time> <hash>" line for each of
+  # the last SAY_SEEN_MAX texts refused, newest first: the window is per text, so two senders, or one
+  # alternating two texts, do not hide each other's repeats (tl on #292).
+  while IFS=' ' read -r k t v; do
+    case $k in
+      first=*) first=${k#first=} ;;
+      last=*) last=${k#last=} ;;
+      count=*) count=${k#count=} ;;
+      seen)
+        case $t$v in ''|*[!0-9a-f]*) continue ;; esac
+        [ "$n" -lt "$SAY_SEEN_MAX" ] || continue
+        if [ -n "$h" ] && [ "$v" = "$h" ]; then lastseen=$t; else kept="$kept
+seen $t $v"; n=$((n + 1)); fi ;;
+    esac
+  done <<SAYBOX
+$(say_state_get "box-$to")
+SAYBOX
+  case $first$last$count in *[!0-9]*) first=0 last=0 count=0 kept="" lastseen="" ;; esac
+  case $lastseen in *[!0-9]*) lastseen="" ;; esac
+  [ "$first" -gt 0 ] 2>/dev/null || first=$now
+  out="$why: if the text is a message fragment say itself left there, $SELF flush $to submits it (nothing is deleted); text someone typed is theirs: they submit or clear it"
+  if [ -n "$lastseen" ] && [ $((now - lastseen)) -lt "$SAY_RESEND_WINDOW" ]; then
+    class=box-text-repeat
+    out="this exact text to $to was refused $((now - lastseen)) s ago and the input box of $to still holds text, so it is refused again without a retry: do not resend it, and do not loop. Tell the EM or the owner (status shows a notice for $to once this has happened $SAY_NOTICE_COUNT times); $why"
+  fi
+  [ -z "$h" ] || kept="
+seen $now $h$kept"
+  say_state_put "box-$to" "first=$first
+last=$now
+count=$((count + 1))$kept
+" || true
+  say_refusal_log "$sender" "$to" "$class"
+  printf '%s' "$out"
+}
+
+# say_paste_record <to> <label> <body>: what is about to be pasted into seat $1's box. A message to or
+# from sec keeps its label only, as no body of it is logged (#227).
+say_paste_record() {
+  local sender=${2#\[from }; sender=${sender%\] }
+  if [ "$1" = sec ] || [ "$sender" = sec ]; then set -- "$1" "$2" ""; fi
+  say_state_put "paste-$1" "$sender
+$(date +%s)
+$2
+$3" || true
+}
+
 # Deliver one message, label $2 ("[from <role>] ") and body $3, by bracketed paste (safe for
 # multi-line text), then Enter. If the seat is mid-turn the text queues in its input box and is
 # submitted by the Enter all the same.
@@ -1263,9 +1406,13 @@ deliver_one() {
     st=$(box_state "$to"); why=$(box_refusal "$to" "$st")
   fi
   if [ -n "$why" ]; then
+    # Only a box that holds text is counted and shown (#212); a dialog, copy mode and the rest are not.
+    if [ "${st%%	*}" = text ]; then why=$(say_box_blocked "$to" "$label" "$body" "$why"); fi
     echo "not delivered: $why" >&2
     return 1
   fi
+  say_box_free "$to"
+  say_paste_record "$to" "$label" "$body"
   # The label and the body go in as two pastes (#150). Claude Code shows a long body as "[Pasted text
   # #N ...]" and hands it to the seat inside <pasted_content> tags; a label inside that block made
   # seats doubt who sent it (fs1's live runs on #150: a seat declining a suspicious request replied to
@@ -1313,6 +1460,7 @@ deliver_one() {
     return 1
   fi
   tmux send-keys -t "=$sess:" Enter
+  say_box_free "$to"
 }
 
 # One messages.log field, escaped so a record stays on one line and the terminal reading the log
@@ -1566,6 +1714,83 @@ say_send() {
   if [ -n "$held" ]; then send_one "$@" 2>&7; else send_one "$@"; fi
 }
 
+# flush <role>: submits, with one Enter, a fragment of a message that say itself left in a seat's input
+# box (#212): a label or the start of a message, from a paste that did not end in a confirmed submit.
+# It deletes nothing and sends no other key. What the box holds must be, with white space left out, a
+# non-empty start of a recorded paste (the label alone, a part of the message, or all of it); anything
+# else, including text someone typed, is refused and left as it is. The same pane checks as say run first
+# (a seat at a shell or a dialog is refused), the box is read again right before the Enter and a change
+# since the first read is refused, and there is one Enter, no retry.
+cmd_flush() {
+  if [ "${1:-}" = --default-socket ]; then shift; else refuse_default_tmux flush "type into seats"; fi
+  local to=${1:-} from=${TEAM_ROLE:-} why="" rec sender when label body st st2 vis rtext v rt lab ph out="" status=NOT-FLUSHED sess
+  [ -n "$to" ] && [ $# -eq 1 ] || die "usage: flush <role>"
+  check_role "$to"
+  # The sender of the log line, as say decides it.
+  if [ -z "$from" ]; then
+    if from=$(caller_seat); then from=${from:-owner}; else why=$from; from='?'; fi
+  else
+    why=$(sender_refusal "$from")
+  fi
+  mkdir -p "$STATE"
+  sess=$(session "$to")
+  if [ -z "$why" ]; then
+    if ! alive "$to"; then why="$to is down ($sess)"
+    elif ! has_claude "$to"; then why="$to has no claude process running (its pane is at a shell): nothing is sent"
+    elif ! seat_lock "$to"; then why=$LOCK_WHY
+    fi
+  fi
+  if [ -z "$why" ]; then
+    rec=$(say_state_get "paste-$to")
+    st=$(box_state "$to")
+    if [ -z "$rec" ]; then
+      why="say has no record of leaving text in the input box of $to, so nothing there is say's to submit; text someone typed is theirs (the owner can attach: $SELF attach $to)"
+    else
+      sender=$(log_field "$(printf '%s\n' "$rec" | sed -n 1p)"); when=$(printf '%s\n' "$rec" | sed -n 2p); case $when in ''|*[!0-9]*) when=0 ;; esac; label=$(printf '%s\n' "$rec" | sed -n 3p)
+      body=$(printf '%s\n' "$rec" | sed -n '4,$p')
+      case ${st%%	*} in
+        text) ;;
+        empty) say_box_free "$to"; out="the input box of $to is empty: nothing to submit"; status=FLUSH-NOTHING ;;
+        *) why=$(box_refusal "$to" "$st") ;;
+      esac
+    fi
+    if [ -z "$why" ] && [ -z "$out" ]; then
+      IFS='	' read -r _ dim _ vis <<EOF
+$st
+EOF
+      v=$(printf '%s' "$vis" | LC_ALL=C tr -d '[:space:]'); rt=$(printf '%s%s' "$label" "$body" | LC_ALL=C tr -d '[:space:]')
+      lab=$(printf '%s' "$label" | LC_ALL=C tr -d '[:space:]'); ph='^\[Pastedtext#[0-9]+(\+[0-9]+lines?)?\]$'
+      if [ "$dim" != 0 ]; then
+        why="dim text is drawn in the box of $to (a hint or a suggestion from Claude Code), so it is not only say's text; nothing was sent"
+      elif [ -z "$v" ] || { [ "${rt#"$v"}" = "$rt" ] && ! { [ "${v#"$lab"}" != "$v" ] && [[ ${v#"$lab"} =~ $ph ]]; }; }; then
+        why="the input box of $to does not hold the start of a message say pasted (it is not what the record says), so it is not touched: it is someone's own text, or a message that was pasted another way; the owner can attach: $SELF attach $to"
+      else
+        # Right before the Enter: the box must read exactly as it did.
+        st2=$(box_state "$to")
+        if [ "$st2" != "$st" ]; then
+          why="the input box of $to changed between the check and the Enter, so no key was sent; run flush again"
+        else
+          tmux send-keys -t "=$sess:" Enter
+          say_box_free "$to"
+          status=FLUSHED
+          if [ "$v" = "$rt" ] || { [ "${v#"$lab"}" != "$v" ] && [[ ${v#"$lab"} =~ $ph ]]; }; then
+            out="the input box of $to held the whole message from $sender (at $(date -r "$when" '+%Y-%m-%dT%H:%M:%S')); it was submitted as it was"
+          else
+            out="the input box of $to held a fragment of a message from $sender (at $(date -r "$when" '+%Y-%m-%dT%H:%M:%S')); it was submitted as is: ask $sender to resend"
+          fi
+        fi
+      fi
+    fi
+    seat_unlock
+  fi
+  # The log line, as say writes one: the body is the fixed text [flush], never the box's.
+  if ! log_unsafe; then
+    printf '%s\t%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%dT%H:%M:%S')" "$(log_field "$from")" "$to" "$status" '[flush]' >> "$LOG" 2>/dev/null || true
+  fi
+  if [ -n "$why" ]; then echo "not flushed: $why" >&2; return 1; fi
+  echo "$out"
+}
+
 cmd_attach() {
   if [ "${1:-}" = --default-socket ]; then shift; else refuse_default_tmux attach "attach to a seat"; fi
   local r=${1:-}
@@ -1688,8 +1913,9 @@ case "${1:-}" in
   view) shift; cmd_view "$@" ;;
   titles) shift; cmd_titles "$@" ;;
   say) shift; cmd_say "$@" ;;
+  flush) shift; cmd_flush "$@" ;;
   attach) shift; cmd_attach "$@" ;;
   migrate) shift; cmd_migrate "$@" ;;
   down) shift; cmd_down "$@" ;;
-  *) sed -n '3,37p' "$0" | sed 's/^# \{0,1\}//'; exit 64 ;;
+  *) sed -n '3,38p' "$0" | sed 's/^# \{0,1\}//'; exit 64 ;;
 esac
