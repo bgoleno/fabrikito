@@ -5,7 +5,7 @@ session per seat, each told its role, each in its own git worktree, able to mess
 together in one iTerm tab. Read `README.md` for use and `teams/example.yaml` for every config key.
 
 ## Layout
-- `fabrikito`: the launcher (bash). Commands: check, up, view, titles, status, say, attach, migrate, down,
+- `fabrikito`: the launcher (bash). Commands: check, up, view, titles, status, say, flush, attach, migrate, down,
   run-exclusive.
 - `factory.sh`: the deprecated old name of the launcher (#261), a shim that prints a notice and execs `fabrikito`. Remove it after one release.
 - `lib/team_config.rb`: parses and validates a team YAML file for the script (system ruby, no gems).

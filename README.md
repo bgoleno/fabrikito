@@ -222,7 +222,8 @@ label, so a message never goes in without it. Anything else fails closed, with a
 - a seat that is not running claude (the text would run as a shell command);
 - any dialog, prompt or menu, known or not, the held-message approval dialog included ("screen not
   recognised as ready"), where the Enter would pick an answer;
-- an input box that already holds text (someone typing, or an earlier message that was not sent);
+- an input box that already holds text (someone typing, or an earlier message that was not sent): see
+  "A box that holds text" below for the back-off, the notice in `status` and `flush`;
 - a pane in copy mode (someone scrolling);
 - Claude Code's diff panel notice ("Resize your terminal to at least 110 columns to show the diff
   panel") in a pane of 13 rows or fewer, where it pushes the end of the input box off the screen.
@@ -245,6 +246,41 @@ screen no longer ends with the box, dim text was drawn next to the message, the 
 than it can and not just the message (as when someone typed after it), too little of the message's
 end is visible (under 40 characters, as with short last lines in a narrow pane), or the box does not
 end with the message.
+
+**A box that holds text ([#212](../../issues/212)).** A box that is not empty blocks every later
+message to that seat, and senders used to retry in a loop. Now:
+
+- the refusal is also written to `.state/<team>/say-refusals.log`, one line of time, sender, receiver
+  and class (`box-text`, or `box-text-repeat` below), with no message and no hash;
+- the same text from the same sender to the same seat, refused for its box and sent again within 300
+  seconds while the box still holds text, is refused as a repeat, with a message that says to stop
+  resending it and not to loop. Only a refusal for a box that holds text counts: a dialog, copy mode,
+  a shell or a busy seat do not, and a different text is refused for the box as before. The window is
+  kept per text (the last eight refused texts of each seat), so another sender's refusal in between, or
+  alternating two texts, does not hide a repeat. A message to or from `sec` is never hashed, so it is
+  refused for the box each time and not as a repeat. The `FACTORY_SAY_RESEND_WINDOW` environment variable
+  changes the 300 seconds (a value that is not a whole number means the default);
+- `status` prints one `NOTICE <role>` line for a seat once three sends to it were refused for its box
+  (`FACTORY_SAY_NOTICE_COUNT`), however many more are refused. It says when the last refusal was: only a
+  later `say` clears it, and `status` does not read the pane. Nothing is typed into any seat by it;
+- the records of that seat (what `say` keeps for the two points above, mode 600 files in
+  `.state/<team>/say/`, the hash of the text among them) are removed the moment its box is seen empty,
+  or a delivery or a `flush` succeeds, so the resend after the remedy is not held back for the rest of
+  the window.
+
+Recovery for text `say` itself left in a box (a label, or the start of a message whose paste did not
+finish) is `./fabrikito flush <role>`. It deletes nothing and sends no key but one Enter, so the
+fragment goes to the seat as a turn and the sender is told to resend: `say` writes what it is about to
+paste into `.state/<team>/say/paste-<role>` and removes it after the Enter, so a crash or a partial
+paste leaves it. `flush` submits only when the box, with white space left out, is a non-empty start of
+that record, or the record's label and one `[Pasted text #N]` placeholder. A message to or from `sec`
+keeps only its label in the record (no body of it is kept, [#227](../../issues/227)), so only a
+label left alone is matched there. Anything else is refused and left as it is: text someone typed is
+never cleared or submitted. `flush` runs the same pane checks as `say` (a seat at a shell or a dialog is
+refused), reads the box again right before the Enter and refuses if it changed, and sends one Enter, with
+no retry. It writes one line to `messages.log` from the caller, with the status `FLUSHED`, `NOT-FLUSHED`
+or `FLUSH-NOTHING` and the fixed message `[flush]`, never the box's text. Nothing here lets a seat edit
+another seat's box by hand; the owner can still attach and clear text they find.
 
 **Short panes ([#84](../../issues/84)).** A seat's pane takes the size of the iTerm pane attached to
 it, and the team view makes them small: 89x13 with ten seats on a 77-row display, about 10 rows with

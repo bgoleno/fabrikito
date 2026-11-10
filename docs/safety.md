@@ -32,7 +32,8 @@ role's (team first; a role can add or tighten a rule, never loosen one), plus wh
   deny on every other seat's note: a note is put into its seat's context at each start, so a seat
   that could write another's would have a lasting channel into it;
 - a `Read` deny on the message log, `.state/<team>/messages.log` (both spellings, when a symlink makes
-  them differ), for every seat but the role with id `em`: the log holds every `SendMessage` in full. A
+  them differ), and on the `say/` folder next to it (what `say` keeps of a message it has pasted and not
+  yet submitted, #212), for every seat but the role with id `em`: the log holds every `SendMessage` in full. A
   team with no `em` role has the deny on every seat. This is an accident guard, not a boundary: every
   seat runs as the same OS user (#29), and a command that reads the file some other way is not stopped;
 - rules on the security-triage record folder, `.state/<team>/triage/` (#138), where the
