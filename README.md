@@ -25,8 +25,8 @@ seats message each other, and one iTerm tab shows them all.
   verifying behavior, triaging a security point ([the plugin](docs/plugin.md)).
 - **Seats are isolated and persistent.** A seat can have a git worktree of its own, created detached at your
   base ref (the example gives one to every seat but the manager), so engineers do not overwrite each
-  other's files. Each runs in its own tmux session, so closing the
-  iTerm tab only detaches; `down` is what stops a seat, and it keeps the worktree.
+  other's files. Each runs in its own tmux session, so closing the iTerm tab only detaches; `down` is
+  what stops a seat, and it keeps the worktree.
 - **Seats talk, and the talk is on record.** Seats message each other by session name with Claude Code's
   own cross-session messaging. Every message a seat sends, and every message you send with `say`, is
   appended to a log, `.state/<team>/messages.log`.
