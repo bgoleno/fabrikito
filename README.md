@@ -72,8 +72,9 @@ can change any prompt.
    check, with evidence. The security seat reviews what is security-sensitive. A security point found in a
    review is sent privately to the security seat, and the PR gets a marker that the merge procedure
    treats as a hold until that seat clears it.
-6. **Your merge.** The owner merges. The manager merges only a PR the owner told it to, and the
-   `merge-train` skill that does it can be started only by the owner typing it in the manager's pane.
+6. **Your merge.** The owner merges. The manager merges only a PR the owner told it to: by a
+   `/fabrikito:merge-train` the owner typed in its pane, or under a standing instruction the owner gave
+   there. A seat cannot start the skill itself, and a message from another session does not count.
 
 ## The safety model
 
