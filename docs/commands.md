@@ -19,6 +19,8 @@ cp teams/example.yaml teams/team.yaml     then edit it: repo, project, storage, 
 ./fabrikito view                         open an iTerm tab with every running seat in a pane
 ./fabrikito titles                       set each running seat's terminal title (role | title | session)
 ./fabrikito say <role|all> "..."         type a message into a seat (seats use SendMessage)
+./fabrikito flush <role>                 submit, with one Enter, a message fragment say itself left in a seat's
+                                          input box (deletes nothing; refuses anything else)
 ./fabrikito attach <role>                attach your terminal (detach: ctrl-b d)
 ./fabrikito migrate [role...]            remove clean worktrees that are not on the storage volume
                                           (never one a running process works in)
