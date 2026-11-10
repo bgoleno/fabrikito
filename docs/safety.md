@@ -88,11 +88,11 @@ role's (team first; a role can add or tighten a rule, never loosen one), plus wh
 `bypassPermissions` skips every prompt and is meant for an isolated machine only. Deny rules hold in
 every mode, bypass included, and ask rules still prompt there, so a seat that hits one waits until
 someone answers. `say` will not deliver to a seat at a permission prompt or any other dialog (see
-[`say`](../README.md#say)): attach and answer it yourself. These rules add to the ones in `~/.claude/settings.json`
+[`say`](messaging.md#say)): attach and answer it yourself. These rules add to the ones in `~/.claude/settings.json`
 and the repo's `.claude/` settings, which still apply. `check` shows each seat's mode and rules, and is
 where load-time errors (unknown modes, malformed rules, a permission flag in `args`) are reported.
 It also warns, without stopping a start, about seats whose modes would hold messages between them
-([Which messages are held](../README.md#which-messages-are-held)), and about any role whose rules have neither a
+([Which messages are held](messaging.md#which-messages-are-held)), and about any role whose rules have neither a
 deny nor an ask on each of the merge patterns, unless that role is marked `may_merge: true` (a YAML
 boolean, so an unquoted `yes` or `on` also counts as true). The patterns, the ones `teams/example.yaml`
 denies or asks on ([#85](../../../issues/85)):
