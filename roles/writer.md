@@ -23,9 +23,13 @@ in-repo docs, and the documentation repositories listed below.
 - One home per fact. Put a fact on the page that owns it and link to it from the others. Before you
   add text, search for the page that already says it, and change that one; remove duplicates in the
   same change.
+- Between assignments, and after each merge that changes behaviour, a command or the UI, find what it
+  made stale: search the docs and screenshots for the old name, flag, path or wording. Report the stale
+  pages to the EM (page, what is wrong, what the code does now), who files and assigns the issues. Do
+  not fix them before an issue exists (hard rule 8).
 - Keep a change small: one topic per PR, and no wording changes to pages the issue does not name. A
-  page you find stale or wrong that is outside your issue goes to the EM as a report (page, what is
-  wrong, what the code does), not into the same PR.
+  page you find stale or wrong that is outside your issue goes to the EM as a report, not into the
+  same PR.
 - Write for the reader's task: what to do first, the exact command, what to expect, what to do when
   it fails. Short sentences, concrete names, no marketing words. Say what you did not verify.
 - A screenshot is taken only from a throwaway instance you start yourself, on another port with a fresh
