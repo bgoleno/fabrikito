@@ -341,7 +341,7 @@ R
 printf 'f = File.open(ARGV[0], File::RDWR | File::CREAT, 0o600)\nputs(f.flock(File::LOCK_EX | File::LOCK_NB) ? "free" : "busy")\n' > $rx/oldtry.rb
 out=$(rx_def sh -c 'echo "$FABRIKITO_RUN_EXCLUSIVE_HELD"; echo "$FACTORY_RUN_EXCLUSIVE_HELD"; cat "$1.holder"; echo; cat "$2.holder"; echo; ruby "$3" "$2"' x "$newlock" "$legacy" $rx/oldtry.rb 2>&1); rc=$?
 nh=$(echo "$out" | sed -n 1p); oh=$(echo "$out" | sed -n 2p); pid=${nh##*:}
-[ $rc = 0 ] && [ "$nh" = "$newlock:$pid" ] && [ "$oh" = "$legacy:$pid" ] && [ "$(echo "$out" | sed -n 3p | grep -c "\"pid\":$pid")" = 1 ] && [ "$(echo "$out" | sed -n 5p | grep -c "\"pid\":$pid")" = 1 ] && [ "$(echo "$out" | sed -n 7p)" = busy ] \
+[ $rc = 0 ] && [ "$nh" = "$newlock:$pid" ] && [ "$oh" = "$legacy:$pid" ] && [ "$(echo "$out" | sed -n 3p | grep -c "\"pid\":$pid")" = 1 ] && [ "$(echo "$out" | sed -n 4p | grep -c "\"pid\":$pid")" = 1 ] && [ "$(echo "$out" | sed -n 5p)" = busy ] \
   && ok "run-exclusive: on the default lock a run holds the new file and the old one, with a holder record and a variable at each name" || { bad "run-exclusive: default lock at both names (rc=$rc)"; echo "$out"; }
 [ -d "$fh/Library/Application Support/fabrikito" ] && [ ! -e "$newlock.holder" ] && [ ! -e "$legacy.holder" ] && [ "$(stat -f %Lp "$(dirname "$legacy")")" = 700 ] && [ "$(ruby $rx/oldtry.rb "$legacy")" = free ] \
   && ok "run-exclusive: both holder records are gone and the old lock is free again after the run, in a folder that is owner-only" || { bad "run-exclusive: after a run on the default lock"; ls -A "$fh/Library/Application Support/"*; }
