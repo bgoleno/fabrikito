@@ -57,7 +57,7 @@ session names, unknown placeholders and invalid UTF-8 stop the command before an
      work. Only its setup is redone, if it was never marked done. See
      [New worktrees](team-file.md#new-worktrees).
    - **Writes the seat's settings** to `.state/<team>/settings/<role>.json`, read-only. They hold the
-     merged permission rules, the hooks and a few environment settings. See [Safety](../README.md#safety).
+     merged permission rules, the hooks and a few environment settings. See [Safety](safety.md).
    - **Renders the seat's prompt:** `prompts.common`, then the role's prompt, then a Skills section
      when the role lists `skills`, with every `@@PLACEHOLDER@@` filled in for that seat (its title,
      session, working directory, the roster, the note's path and the rest). It also renders the
@@ -153,7 +153,7 @@ prompt tells seats to send with `SendMessage` to that name and to check `ListAge
   owner typing. See [The kickoff](../README.md#the-kickoff).
 - **The message log,** `.state/<team>/messages.log`, records every `say` with whether it was
   delivered, and every `SendMessage` a seat sends (through the hook above). Every seat but `em` has a
-  `Read` deny on it, an accident guard like the other rules (see [Safety](../README.md#safety)). See
+  `Read` deny on it, an accident guard like the other rules (see [Safety](safety.md)). See
   [The message log](../README.md#the-message-log).
 
 Session names and `[from …]` labels are claims, not identities. The prompt tells seats to act only on
@@ -188,4 +188,4 @@ and the skill points to them. See [The fabrikito plugin](plugin.md).
 The permission rules in each seat's settings, and the hard rules in the shared prompt, guard against
 accidents. They are not a security boundary: every seat runs as the owner's OS user, with the owner's
 GitHub credential, and a rule matches command text, so a command written another way gets past it.
-The launcher does not turn on Claude Code's sandbox. See [Safety](../README.md#safety).
+The launcher does not turn on Claude Code's sandbox. See [Safety](safety.md).

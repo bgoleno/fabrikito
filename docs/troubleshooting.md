@@ -46,7 +46,7 @@ The system ruby (2.6) does not accept an unquoted URL inside a YAML flow mapping
 
 A seat started in a folder Claude Code has not seen stops at a trust dialog until a human answers it
 once (and the first run in bypass mode shows a warning). Run `./fabrikito attach <role>`, answer the
-dialog, and detach with ctrl-b d. See [Safety](../README.md#safety).
+dialog, and detach with ctrl-b d. See [Safety](safety.md).
 
 ### The iTerm view does not open: "osascript timed out after 30s"
 
@@ -74,7 +74,7 @@ at the worktree volume from `repo.bootstrap`. See [Package stores](team-file.md#
 
 It may be waiting at a permission prompt: an ask rule still prompts in every mode, bypass
 included, and a seat at a prompt waits for a human. `say` will not deliver to it there. Attach to the
-seat and answer the prompt. See [Safety](../README.md#safety).
+seat and answer the prompt. See [Safety](safety.md).
 
 ### A prompt names a rule, but its reason is about parsing
 
@@ -82,7 +82,7 @@ A prompt such as `Permission rule ... requires confirmation`, with a reason like
 obfuscation" or "shell operators that require approval", means the command's text matched an ask
 rule. Claude Code could not parse the command, so it matched the rule against the whole text. Run
 `git push origin <branch>:<branch>` as a command of its own, and avoid a subshell `( ... )`. See
-[Safety](../README.md#safety).
+[Safety](safety.md).
 
 ### `status` shows a worktree as "(missing)"
 
