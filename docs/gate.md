@@ -32,7 +32,7 @@ Roles without the switch never run it. The example gives it to the engineers and
   note is shown to the user, not to the seat). Each new turn starts from zero, so a seat that lives
   for days is never gated off for good. The count is in the state folder, which seats cannot edit through Claude
   Code's tools; a passing gate or a clean tree resets it. A script can still write it, or run the hook
-  with made-up input, like every other "a script can do it" limit under [Safety](../README.md#safety). Run by hand
+  with made-up input, like every other "a script can do it" limit under [Safety](safety.md). Run by hand
   with no hook input, `lib/stop_gate.sh` runs the gate and reports but leaves the count alone. Claude
   Code also ends such a loop itself after 8 continuations with no tool call in between (raise it with
   `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`).

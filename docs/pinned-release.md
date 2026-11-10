@@ -103,7 +103,7 @@ sharing one would each deny it in the other's file, and so block each other's no
 The shared `<state>` folder, which holds the pinned team's notes, log and records, needs the same care
 in both directions, and fabrikito finds neither direction itself. It finds another team's state only
 as a real folder beside its own: `<state>` is not beside the other teams' folders, and the pinned
-team's checkout holds only a link to it, which is never followed. So list them under `other_teams` (see [Safety](../README.md#safety)), in **both** team files:
+team's checkout holds only a link to it, which is never followed. So list them under `other_teams` (see [Safety](safety.md)), in **both** team files:
 
 - in every other team's file, the pinned team's `<state>`:
   `other_teams: [{ state: /path/to/state }]`;
