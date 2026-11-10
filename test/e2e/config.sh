@@ -214,8 +214,8 @@ for n in acme/widgets-docs acme/handbook; do
   echo "$out" | grep -qF "Documentation repositories you may also change: acme/widgets-docs, acme/handbook." && echo "$out" | grep -qF "$n" \
     && ok "docs_repos: the writer prompt names $n in one line" || { bad "docs_repos: the writer prompt does not name $n"; echo "$out" | grep -F "Documentation repositories"; }
 done
-dwmk; echo "$(dwr)" | grep -qF "Documentation repositories you may also change: none." && ok "docs_repos: without the key the writer prompt says none" || bad "docs_repos: no key does not render none"
-REPO_EXTRA='docs_repos: []' dwmk; echo "$(dwr)" | grep -qF "Documentation repositories you may also change: none." && ok "docs_repos: an empty list renders none" || bad "docs_repos: an empty list does not render none"
+dwmk; dwr | grep -qF "Documentation repositories you may also change: none." && ok "docs_repos: without the key the writer prompt says none" || bad "docs_repos: no key does not render none"
+REPO_EXTRA='docs_repos: []' dwmk; dwr | grep -qF "Documentation repositories you may also change: none." && ok "docs_repos: an empty list renders none" || bad "docs_repos: an empty list does not render none"
 REPO_EXTRA='docs_repos: [acme/a]' mk "" "" ', prompt_text: "docs @@DOCS_REPOS@@ end"'
 TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml render em 2>&1 | grep -qxF "docs acme/a end" && ok "docs_repos: @@DOCS_REPOS@@ is defined for a seat that is not the writer" || bad "docs_repos: placeholder in another seat"
 # The writer prompt restates hard rules 2 and 8 for each listed repository: common.md names only repo.github.
