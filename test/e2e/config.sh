@@ -204,4 +204,45 @@ mkdir -p $T/inst/lib && cp $SRC/lib/team_config.rb $T/inst/lib/
 mk; out=$(TEAM_STATE_DIR=$T/state ruby $T/inst/lib/team_config.rb $T/v.yaml validate 2>&1); rc=$?
 [ $rc != 0 ] && echo "$out" | grep -qF "plugin.json is missing" && ok "rejects plugin on with no plugin manifest in the install" || { bad "missing plugin manifest (rc=$rc)"; echo "$out"; }
 mk "plugin: false"; TEAM_STATE_DIR=$T/state ruby $T/inst/lib/team_config.rb $T/v.yaml validate >/dev/null 2>&1 && ok "accepts plugin: false with no plugin manifest in the install" || bad "plugin: false with no manifest"
+# repo.docs_repos (#226): documentation repositories a writer may also change. Validated like repo.github,
+# shown by check, and rendered as the one-line @@DOCS_REPOS@@ in every seat's prompt (the writer's uses it).
+dwmk() { mk "" "prompts: { common: $SRC/roles/common.md }"; echo "  dw: { title: Technical Writer, workdir: { type: worktree }, prompt: $SRC/roles/writer.md }" >> $T/v.yaml; }
+dwr() { TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml render dw 2>&1; }
+REPO_EXTRA='docs_repos: [acme/widgets-docs, acme/handbook]' dwmk
+out=$(dwr)
+for n in acme/widgets-docs acme/handbook; do
+  echo "$out" | grep -qF "Documentation repositories you may also change: acme/widgets-docs, acme/handbook." && echo "$out" | grep -qF "$n" \
+    && ok "docs_repos: the writer prompt names $n in one line" || { bad "docs_repos: the writer prompt does not name $n"; echo "$out" | grep -F "Documentation repositories"; }
+done
+dwmk; echo "$(dwr)" | grep -qF "Documentation repositories you may also change: none." && ok "docs_repos: without the key the writer prompt says none" || bad "docs_repos: no key does not render none"
+REPO_EXTRA='docs_repos: []' dwmk; echo "$(dwr)" | grep -qF "Documentation repositories you may also change: none." && ok "docs_repos: an empty list renders none" || bad "docs_repos: an empty list does not render none"
+REPO_EXTRA='docs_repos: [acme/a]' mk "" "" ', prompt_text: "docs @@DOCS_REPOS@@ end"'
+TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/v.yaml render em 2>&1 | grep -qxF "docs acme/a end" && ok "docs_repos: @@DOCS_REPOS@@ is defined for a seat that is not the writer" || bad "docs_repos: placeholder in another seat"
+# The writer prompt restates hard rules 2 and 8 for each listed repository: common.md names only repo.github.
+REPO_EXTRA='docs_repos: [acme/a]' dwmk; flat=$(dwr | tr '\n' ' ' | tr -s ' ')
+echo "$flat" | grep -qF 'Hard rules 2 and 8 apply to every listed repository' && echo "$flat" | grep -qF 'run `git remote -v` and check that it is the repository you mean to change' \
+  && echo "$flat" | grep -qF 'never commit to or push to anything else' && echo "$flat" | grep -qF 'Have an issue in the repository you change before you change it there' \
+  && echo "$flat" | grep -qF "Push a branch, never the repository's default branch" && echo "$flat" | grep -qF 'Never merge.' && echo "$flat" | grep -qF 'Clone it under your own `$TMPDIR`' \
+  && ok "docs_repos: the writer prompt restates rules 2 and 8 for each listed repository, never merges, and clones under TMPDIR" || bad "docs_repos: the writer prompt lacks the restated rules 2 and 8"
+REPO_EXTRA='docs_repos: [acme/a]' dwmk; $S -c $T/v.yaml check 2>&1 | grep -qxF "docs repos : acme/a" && ok "docs_repos: check lists them" || bad "docs_repos: check does not list them"
+REPO_EXTRA='docs_repos: [acme/a, acme/b]' mk; $S -c $T/v.yaml check 2>&1 | grep -qxF "docs repos : acme/a, acme/b" && ok "docs_repos: check lists two joined by a comma" || bad "docs_repos: check does not list two"
+mk; $S -c $T/v.yaml check 2>&1 | grep -q "^docs repos" && bad "docs_repos: check prints a line without the key" || ok "docs_repos: check prints no line without the key"
+REPO_EXTRA='docs_repos: [acme/a, "not a repo"]' reject "a docs_repos entry that is not owner/name" "repo.docs_repos entry 'not a repo' must be owner/name"
+REPO_EXTRA='docs_repos: [acme/a, acme/a]' reject "a duplicate docs_repos entry" "repo.docs_repos lists 'acme/a' twice"
+REPO_EXTRA='docs_repos: [local/origin.git]' reject "repo.github listed in docs_repos" "repo.docs_repos must not list repo.github (local/origin.git)"
+REPO_EXTRA='docs_repos: acme/a' reject "a docs_repos that is not a list" "repo.docs_repos must be a list of owner/name"
+REPO_EXTRA='docs_repos: [a/1, a/2, a/3, a/4, a/5, a/6, a/7, a/8, a/9, a/10, a/11]' reject "more than 10 docs_repos" "repo.docs_repos lists 11 repositories (at most 10)"
+# The writer seat in teams/example.yaml is commented. Uncommented, it must be a valid seat that renders under the
+# #117 line limit, with the skills the issue lists, the merge denies and no warning about merging.
+mkdir -p $T/exw/teams; sed -e "s#/path/to/your/checkout#$T/repo#g" -e 's#^  \# \(dw:\)#  \1#; /^  #   /s/^  #   /    /' -e 's#^  \# docs_repos:#  docs_repos:#' -e "s#\.\./roles#$SRC/roles#" $SRC/teams/example.yaml > $T/exw/teams/t.yaml
+exc="ruby $SRC/lib/team_config.rb $T/exw/teams/t.yaml"; nw=$(TEAM_STATE_DIR=$T/state $exc render dw 2>&1 | wc -l | tr -d ' ')
+$exc validate >/dev/null 2>&1 && [ "$($exc role dw title)" = "Technical Writer" ] && [ "${nw:-0}" -gt 0 ] && [ "$nw" -lt 200 ] && ! $exc warnings 2>&1 | grep -q . \
+  && TEAM_STATE_DIR=$T/state $exc render dw 2>&1 | grep -qF 'Documentation repositories you may also change: owner/name-docs, owner/handbook.' \
+  && ok "the commented writer seat in the example team file, uncommented, validates, has no warning, and renders a prompt under 200 lines ($nw) with its docs repos" || { bad "the commented writer seat in teams/example.yaml (render $nw lines)"; $exc validate 2>&1 | tail -2; $exc warnings 2>&1 | tail -2; }
+for sk in fabrikito:start-task fabrikito:ready-for-review fabrikito:handoff superpowers:verification-before-completion superpowers:receiving-code-review; do
+  TEAM_STATE_DIR=$T/state $exc render dw 2>&1 | grep -qF -- "- \`$sk\`:" && ok "the example writer seat lists skill $sk" || bad "the example writer seat lacks skill $sk"
+done
+for sk in fabrikito:merge-train fabrikito:review-pr fabrikito:verify-behavior fabrikito:security-triage fabrikito:assign; do
+  TEAM_STATE_DIR=$T/state $exc render dw 2>&1 | grep -qF "\`$sk\`" && bad "the example writer seat lists $sk, which a writer must not use" || ok "the example writer seat does not list $sk"
+done
 e2e_end=config # the last line: test/e2e.sh checks that the file ran to here

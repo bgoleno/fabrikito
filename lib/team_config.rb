@@ -64,7 +64,10 @@ TOP_KEYS = %w[team owner repo project storage state sessions display prompts kic
 DISPLAY_KEYS = %w[iterm primary window].freeze
 PROJECT_KEYS = %w[name url].freeze
 EFFORTS = %w[low medium high xhigh max].freeze
-REPO_KEYS = %w[path github base gate gate_timeout gate_max_blocks bootstrap copy].freeze
+REPO_KEYS = %w[path github base gate gate_timeout gate_max_blocks bootstrap copy docs_repos].freeze
+# repo.docs_repos (#226): extra repositories a writer may change, written as repo.github is; at most this many.
+DOCS_REPOS_MAX = 10
+REPO_RE = %r{\A[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\z}.freeze
 STORAGE_KEYS = %w[volume root].freeze
 SESSION_KEYS = %w[prefix claude].freeze
 CLAUDE_KEYS = %w[wrapper args model effort permission_mode plugin auto_memory].freeze
@@ -290,6 +293,26 @@ class TeamConfig
     repo['github'].to_s
   end
 
+  # repo.docs_repos as written, or []. validate checks the shape first.
+  def docs_repos
+    (repo['docs_repos'] || []).map(&:to_s)
+  end
+
+  def validate_docs_repos
+    return unless repo.key?('docs_repos')
+
+    list = repo['docs_repos']
+    die 'repo.docs_repos must be a list of owner/name, e.g. [acme/widgets-docs]' unless list.is_a?(Array)
+    die "repo.docs_repos lists #{list.size} repositories (at most #{DOCS_REPOS_MAX})" if list.size > DOCS_REPOS_MAX
+    seen = {}
+    list.each do |e|
+      die "repo.docs_repos entry '#{e}' must be owner/name, e.g. acme/widgets-docs" unless e.is_a?(String) && e =~ REPO_RE
+      die "repo.docs_repos must not list repo.github (#{github}): it is already the project's repository" if e == github
+      die "repo.docs_repos lists '#{e}' twice" if seen[e]
+      seen[e] = true
+    end
+  end
+
   def storage
     section('storage', STORAGE_KEYS)
   end
@@ -422,7 +445,8 @@ class TeamConfig
       'REPO' => repo_path, 'WORKDIR' => workdir(id), 'WORKTREE_ROOT' => worktree_root,
       'VOLUME' => volume, 'GITHUB_REPO' => github, 'GITHUB_URL' => "https://github.com/#{github}",
       'PROJECT_NAME' => project['name'].to_s, 'PROJECT_URL' => project['url'].to_s, 'TEAM' => @c['team'].to_s, 'OWNER' => owner, 'ROSTER' => roster,
-      'GATE_MAX_BLOCKS' => gate_max_blocks.to_s, 'NOTE' => note_real_path(id)
+      'GATE_MAX_BLOCKS' => gate_max_blocks.to_s, 'NOTE' => note_real_path(id),
+      'DOCS_REPOS' => docs_repos.empty? ? 'none' : docs_repos.join(', ')
     }
   end
 
@@ -1477,7 +1501,8 @@ class TeamConfig
     die "unknown top-level key(s): #{bad.join(', ')} (allowed: #{TOP_KEYS.join(', ')})" unless bad.empty?
     die "'team' is required" unless @c['team'].is_a?(String) && @c['team'] =~ PREFIX_RE
     die "repo.path is required" unless repo['path']
-    die "repo.github must be owner/name, e.g. acme/widgets" unless github =~ %r{\A[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\z}
+    die "repo.github must be owner/name, e.g. acme/widgets" unless github =~ REPO_RE
+    validate_docs_repos
     die "project.name is required" if project['name'].to_s.empty?
     die "project.url must be an https://github.com/ URL" unless project['url'].to_s.start_with?('https://github.com/')
     die "repo.path is not a directory: #{repo_path}" unless File.directory?(repo_path)
@@ -1589,6 +1614,7 @@ when 'get'
   when 'team' then puts cfg.instance_variable_get(:@c)['team']
   when 'repo.path' then puts cfg.repo_path
   when 'repo.github' then puts cfg.github
+  when 'repo.docs_repos' then puts cfg.docs_repos.join(', ')
   when 'project.name' then puts cfg.project['name']
   when 'project.url' then puts cfg.project['url']
   when 'repo.base' then puts(cfg.repo['base'] || 'origin/main')

@@ -428,6 +428,8 @@ cmd_check() {
   echo "team file : $CONFIG"
   echo "team      : $TEAM (tmux prefix '$PREFIX')"
   echo "repo      : $GITHUB at $REPO (origin must contain '$GITHUB', base $BASE)"
+  docs_repos=$(cfg get repo.docs_repos)
+  [ -z "$docs_repos" ] || echo "docs repos : $docs_repos"
   echo "project   : $PROJECT_NAME $PROJECT_URL"
   echo "worktrees : $WT_ROOT   [volume $VOLUME: $on]"
   echo "wrapper   : ${WRAPPER:-none (claude runs directly)}"
