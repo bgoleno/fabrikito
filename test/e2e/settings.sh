@@ -153,6 +153,14 @@ for sp in "$RT" "$T"; do
   echo "$w2deny" | grep -qxF "Read(/$sp/state/messages.log)" || lr="$lr w2-not-denied($sp)"
 done
 [ -z "$lr" ] && ok "messages.log: Read denied to w1 and w2 (both spellings), readable by em" || { bad "messages.log read rules:$lr"; rules $T/state/settings/w1.json deny | grep messages; }
+# say's records (#212) hold a pasted message until it is submitted: the folder has the log's deny, for the same seats.
+sd=""
+for sp in "$RT" "$T"; do
+  rules $T/state/settings/em.json deny | grep -qxF "Read(/$sp/state/say/**)" && sd="$sd em-denied($sp)"
+  rules $T/state/settings/w1.json deny | grep -qxF "Read(/$sp/state/say/**)" || sd="$sd w1-not-denied($sp)"
+  echo "$w2deny" | grep -qxF "Read(/$sp/state/say/**)" || sd="$sd w2-not-denied($sp)"
+done
+[ -z "$sd" ] && ok "say's record folder: Read denied to w1 and w2 (both spellings), readable by em" || { bad "say record read rules:$sd"; }
 # check names the Read deny for the seats that have it, and keeps it out of the protected-path count.
 # w1's team and role denies hold no Edit rule, so its protected paths are its Edit denies but the notes
 # and the auto-memory folder (#112) and the triage folder (#138), which check names on their own.

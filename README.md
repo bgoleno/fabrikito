@@ -184,8 +184,11 @@ message to that seat, and senders used to retry in a loop. Now:
 - the same text from the same sender to the same seat, refused for its box and sent again within 300
   seconds while the box still holds text, is refused as a repeat, with a message that says to stop
   resending it and not to loop. Only a refusal for a box that holds text counts: a dialog, copy mode,
-  a shell or a busy seat do not, and a different text is refused for the box as before. The
-  `FACTORY_SAY_RESEND_WINDOW` environment variable changes the 300 seconds;
+  a shell or a busy seat do not, and a different text is refused for the box as before. The window is
+  kept per text (the last eight refused texts of each seat), so another sender's refusal in between, or
+  alternating two texts, does not hide a repeat. A message to or from `sec` is never hashed, so it is
+  refused for the box each time and not as a repeat. The `FACTORY_SAY_RESEND_WINDOW` environment variable
+  changes the 300 seconds (a value that is not a whole number means the default);
 - `status` prints one `NOTICE <role>` line for a seat once three sends to it were refused for its box
   (`FACTORY_SAY_NOTICE_COUNT`), however many more are refused. It says when the last refusal was: only a
   later `say` clears it, and `status` does not read the pane. Nothing is typed into any seat by it;
@@ -380,7 +383,8 @@ role's (team first; a role can add or tighten a rule, never loosen one), plus wh
   deny on every other seat's note: a note is put into its seat's context at each start, so a seat
   that could write another's would have a lasting channel into it;
 - a `Read` deny on the message log, `.state/<team>/messages.log` (both spellings, when a symlink makes
-  them differ), for every seat but the role with id `em`: the log holds every `SendMessage` in full. A
+  them differ), and on the `say/` folder next to it (what `say` keeps of a message it has pasted and not
+  yet submitted, #212), for every seat but the role with id `em`: the log holds every `SendMessage` in full. A
   team with no `em` role has the deny on every seat. This is an accident guard, not a boundary: every
   seat runs as the same OS user (#29), and a command that reads the file some other way is not stopped;
 - rules on the security-triage record folder, `.state/<team>/triage/` (#138), where the

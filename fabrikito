@@ -1256,6 +1256,11 @@ seat_unlock() { exec 9>&-; }
 #                 hash: one write per line, appended
 SAY_RESEND_WINDOW=${FACTORY_SAY_RESEND_WINDOW:-300}   # seconds a refused text stays refused while the box still holds text
 SAY_NOTICE_COUNT=${FACTORY_SAY_NOTICE_COUNT:-3}       # refusals to one seat before status shows a notice
+SAY_SEEN_MAX=8                                         # refused texts remembered per seat
+# A value that is not a whole number would make every comparison below fail quietly and turn the feature
+# off (tl on #292), so it falls back to the default.
+case $SAY_RESEND_WINDOW in ''|*[!0-9]*) SAY_RESEND_WINDOW=300 ;; esac
+case $SAY_NOTICE_COUNT in ''|*[!0-9]*) SAY_NOTICE_COUNT=3 ;; esac
 
 say_state_dir() {
   mkdir -p "$STATE/say" 2>/dev/null && chmod 700 "$STATE/say" 2>/dev/null
@@ -1267,6 +1272,10 @@ say_state_dir() {
 say_state_put() {
   local t
   say_state_dir || return 1
+  # mv onto a link to a folder moves the file into the folder (sec on #292), so a name that is a link
+  # to a folder, or a folder, is refused before anything is written. A link to a file is replaced by
+  # mv, not followed.
+  if [ -d "$STATE/say/$1" ]; then return 1; fi
   t=$(umask 077; mktemp "$STATE/say/.put.XXXXXXXX" 2>/dev/null) || return 1
   if printf '%s' "$2" > "$t" 2>/dev/null && chmod 600 "$t" 2>/dev/null && mv -f "$t" "$STATE/say/$1" 2>/dev/null; then return 0; fi
   rm -f "$t"; return 1
@@ -1301,26 +1310,43 @@ say_refusal_log() {
 # that says to stop resending it. Only for the box-text class: other refusals (a dialog, a shell, a
 # busy seat) are not counted and never block a resend.
 say_box_blocked() {
-  local to=$1 label=$2 body=$3 why=$4 sender h now first=0 last=0 count=0 oh="" k v class=box-text out
+  local to=$1 label=$2 body=$3 why=$4 sender h now first=0 last=0 count=0 k t v class=box-text out lastseen="" kept="" n=0
   sender=${label#\[from }; sender=${sender%\] }
   h=$(printf '%s\n%s\n%s' "$sender" "$to" "$body" | shasum -a 256 2>/dev/null | cut -c1-64)
+  # No hash for a message to or from sec (sec on #292): a short text could be guessed from it. The cost
+  # is that such a message is not refused as a repeat; it is refused for the box, as the first time.
+  if [ "$to" = sec ] || [ "$sender" = sec ]; then h=""; fi
   now=$(date +%s)
-  while IFS== read -r k v; do
-    case $k in first) first=$v ;; last) last=$v ;; count) count=$v ;; hash) oh=$v ;; esac
-  done <<EOF
+  # The record holds first, last and count for the seat, and one "seen <time> <hash>" line for each of
+  # the last SAY_SEEN_MAX texts refused, newest first: the window is per text, so two senders, or one
+  # alternating two texts, do not hide each other's repeats (tl on #292).
+  while IFS=' ' read -r k t v; do
+    case $k in
+      first=*) first=${k#first=} ;;
+      last=*) last=${k#last=} ;;
+      count=*) count=${k#count=} ;;
+      seen)
+        case $t$v in ''|*[!0-9a-f]*) continue ;; esac
+        [ "$n" -lt "$SAY_SEEN_MAX" ] || continue
+        if [ -n "$h" ] && [ "$v" = "$h" ]; then lastseen=$t; else kept="$kept
+seen $t $v"; n=$((n + 1)); fi ;;
+    esac
+  done <<SAYBOX
 $(say_state_get "box-$to")
-EOF
-  case $first$last$count in *[!0-9]*) first=0 last=0 count=0 oh="" ;; esac
+SAYBOX
+  case $first$last$count in *[!0-9]*) first=0 last=0 count=0 kept="" lastseen="" ;; esac
+  case $lastseen in *[!0-9]*) lastseen="" ;; esac
   [ "$first" -gt 0 ] 2>/dev/null || first=$now
   out="$why: if the text is a message fragment say itself left there, $SELF flush $to submits it (nothing is deleted); text someone typed is theirs: they submit or clear it"
-  if [ -n "$h" ] && [ "$oh" = "$h" ] && [ "$last" -gt 0 ] && [ $((now - last)) -lt "$SAY_RESEND_WINDOW" ]; then
+  if [ -n "$lastseen" ] && [ $((now - lastseen)) -lt "$SAY_RESEND_WINDOW" ]; then
     class=box-text-repeat
-    out="this exact text to $to was refused $((now - last)) s ago and the input box of $to still holds text, so it is refused again without a retry: do not resend it, and do not loop. Tell the EM or the owner (status shows a notice for $to once this has happened $SAY_NOTICE_COUNT times); $why"
+    out="this exact text to $to was refused $((now - lastseen)) s ago and the input box of $to still holds text, so it is refused again without a retry: do not resend it, and do not loop. Tell the EM or the owner (status shows a notice for $to once this has happened $SAY_NOTICE_COUNT times); $why"
   fi
+  [ -z "$h" ] || kept="
+seen $now $h$kept"
   say_state_put "box-$to" "first=$first
 last=$now
-count=$((count + 1))
-hash=$h
+count=$((count + 1))$kept
 " || true
   say_refusal_log "$sender" "$to" "$class"
   printf '%s' "$out"
@@ -1720,7 +1746,7 @@ cmd_flush() {
     if [ -z "$rec" ]; then
       why="say has no record of leaving text in the input box of $to, so nothing there is say's to submit; text someone typed is theirs (the owner can attach: $SELF attach $to)"
     else
-      sender=$(printf '%s\n' "$rec" | sed -n 1p); when=$(printf '%s\n' "$rec" | sed -n 2p); label=$(printf '%s\n' "$rec" | sed -n 3p)
+      sender=$(log_field "$(printf '%s\n' "$rec" | sed -n 1p)"); when=$(printf '%s\n' "$rec" | sed -n 2p); case $when in ''|*[!0-9]*) when=0 ;; esac; label=$(printf '%s\n' "$rec" | sed -n 3p)
       body=$(printf '%s\n' "$rec" | sed -n '4,$p')
       case ${st%%	*} in
         text) ;;

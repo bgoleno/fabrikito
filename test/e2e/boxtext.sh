@@ -5,7 +5,7 @@
 # left, and nothing else. Its own team (tx), on the same tmux server and state.
 echo "--- say: a box that holds text (#212)"
 roles=""
-for r in em n1 n2 n3 bl f1 f2 f3 f4 f5 fsh; do roles="$roles  $r: { title: Seat $r, workdir: { type: project, path: $T/proj }, prompt_text: \"$r prompt\" }
+for r in em n1 n2 n3 bl f1 f2 f3 f4 f5 fsh sec; do roles="$roles  $r: { title: Seat $r, workdir: { type: project, path: $T/proj }, prompt_text: \"$r prompt\" }
 "; done
 cat > $T/tx.yaml <<Y
 team: tx
@@ -109,5 +109,28 @@ rm -f $T/fshim.n; touch $T/keys-f5.log; kk=$(wc -c < $T/keys-f5.log)
 fo=$(PATH=$T/fshim:$PATH TEAM_ROLE=em $S -c $T/tx.yaml flush f5 2>&1); frc=$?; sleep 0.5
 [ $frc -ne 0 ] && echo "$fo" | grep -qF "changed between" && ! tail -c +$((kk + 1)) $T/keys-f5.log | LC_ALL=C grep -q $'\r' \
   && ok "flush sends no Enter when the box changed between its check and the Enter" || { bad "flush with the box changing (rc=$frc)"; echo "$fo"; tail -c +$((kk + 1)) $T/keys-f5.log | od -c | head -3; }
+# The resend limit is per text (tl on #292): two senders interleaved, or one sender alternating two texts,
+# do not hide each other's repeats.
+txsayas() { out=$(TEAM_ROLE=$1 $S -c $T/tx.yaml say "$2" "$3" 2>&1); rc=$?; sleep 0.5; }
+txsayas em n1 "INTERLEAVED text X"; txsayas f1 n1 "INTERLEAVED text Y"; txsayas em n1 "INTERLEAVED text X"
+[ $rc -ne 0 ] && echo "$out" | grep -qF "exact text" && [ "$(tail -1 $RL | cut -f2-4)" = "em	n1	box-text-repeat" ] \
+  && ok "a resend is refused as a repeat although another sender's text was refused in between" || { bad "interleaved senders (rc=$rc)"; echo "$out"; tail -3 $RL; }
+txsayas em n1 "ALTERNATE text A"; txsayas em n1 "ALTERNATE text B"; txsayas em n1 "ALTERNATE text A"
+[ $rc -ne 0 ] && echo "$out" | grep -qF "exact text" && [ "$(tail -1 $RL | cut -f4)" = "box-text-repeat" ] \
+  && ok "a resend is refused as a repeat when one sender alternates two texts" || { bad "alternating texts (rc=$rc)"; echo "$out"; tail -3 $RL; }
+# A link to a folder at a record's name: nothing is moved into the folder, and the refusal goes out as before.
+mkdir -p $T/linkdir; rm -rf $T/state/say/box-n3; ln -s $T/linkdir $T/state/say/box-n3
+txsayas em n3 "FOLDERLINK text"
+[ $rc -ne 0 ] && echo "$out" | grep -qF "input box" && [ -z "$(ls -A $T/linkdir)" ] && [ -z "$(find $T/state/say -name '.put.*')" ] \
+  && ok "a link to a folder at a record's name receives nothing, leaves no temporary file, and the refusal goes out as before" || { bad "a link to a folder at a record's name (rc=$rc)"; echo "$out"; ls -A $T/linkdir; ls -a $T/state/say; }
+rm -f $T/state/say/box-n3
+# A message to or from sec leaves no body and no hash in say's state (sec on #292): the box holds text, the
+# say is refused, and neither the record nor the box state holds the sentinel or a hash of it.
+echo prefill > $T/fake-sec-mode.txt
+tmux kill-session -t '=tx-sec:' 2>/dev/null; TEAM_VIEW=0 $S -c $T/tx.yaml up --no-view >/dev/null 2>&1; sleep 2
+txsay sec "SECSENTINEL-292 body"; txsay sec "SECSENTINEL-292 body"
+[ $rc -ne 0 ] && ! echo "$out" | grep -qF "exact text" && [ "$(tail -1 $RL | cut -f4)" = "box-text" ] \
+  && ! grep -rqF SECSENTINEL $T/state/say $RL && ! grep -q '^hash=.' $T/state/say/box-sec 2>/dev/null \
+  && ok "a say to sec that is refused for the box leaves no body and no hash in say's state, and is not refused as a repeat" || { bad "a refused say to sec leaves nothing (rc=$rc)"; echo "$out"; ls $T/state/say; cat $T/state/say/box-sec 2>/dev/null; }
 $S -c $T/tx.yaml down --yes >/dev/null 2>&1
 e2e_end=boxtext # the last line: test/e2e.sh checks that the file ran to here
