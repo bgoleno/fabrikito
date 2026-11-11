@@ -43,18 +43,40 @@ export TMUX_TMPDIR=$T/tmux TEAM_STATE_DIR=$T/state FACTORY_RUN_LOCK=$T/rx-lock/r
 # (TEAM_VIEW=0), and every up says --no-view too, so dropping either one still opens no window.
 printf '#!/bin/sh\necho "osascript $*" >> %s/osascript.log\nexit 1\n' "$T" > $T/bin/osascript; chmod +x $T/bin/osascript
 export PATH=$T/bin:$PATH TEAM_VIEW=0
+# The run's own tmux server, named by its socket (#306). The exit trap and the cleanup at the end stop it
+# with e2e_stop_server and nothing else: never a bare `tmux kill-server`, which finds its server through
+# TMUX_TMPDIR, and tmux falls back to /tmp, silently, when that folder does not exist. That is the default
+# server, where a real team runs, and the folder is one this run removes. -S names the socket outright, so
+# no other server can be reached, and a socket that is not there is skipped. Nothing on the way to it may
+# be a link either, as tmux connects through links (test/live-env.sh down checks the same).
+E2E_SOCK=$T/tmux/tmux-$(id -u)/default
+e2e_own_server() { [ -S "$E2E_SOCK" ] && [ ! -L "$E2E_SOCK" ] && [ ! -L "${E2E_SOCK%/*}" ] && [ ! -L "$T/tmux" ]; }
+e2e_stop_server() { e2e_own_server && tmux -S "$E2E_SOCK" kill-server 2>/dev/null; }
+# True only in the shell that started the run. $$ is that shell's pid in every child too, and
+# BASH_SUBSHELL is still 0 in the child that matters below, so this asks the kernel: the parent of a
+# process that this shell starts is this shell. If /bin/sh cannot be started the answer is no, and nothing
+# is cleaned up, which is the safe way to be wrong.
+e2e_top() { [ "$(exec /bin/sh -c 'echo "$PPID"')" = "$$" ]; }
 # Stopped early (a gate timeout kills this test's process group, a setup step exits, set -u trips):
 # stop the private tmux server, which has left that group, and remove what the test made, as the
 # cleanup at the end does. Not every assertion ran, so the exit status is never 0. The exit code is
 # what a gate reads (repo.gate, lib/stop_gate.sh): only a run that reaches the end with fail=0 is 0.
+# Invariant, here and in the cleanup at the end: the server is stopped before its folder is removed, and
+# no tmux command runs once the folder is gone.
 finished=
 on_exit() {
   local rc=$?
   [ -n "$finished" ] && return
+  # Only the shell that started the run cleans up (#306). bash 3.2 expands the words of a simple command
+  # in the child it forked for a pipeline or for &, before that child drops this trap: an unset variable
+  # there (`echo "$out" | grep -q "$unset"`) ends the child, and the child runs this function. It used to
+  # stop the server and remove the scratch folder under a run that carried on, and the next one found
+  # TMUX_TMPDIR gone. A child removes nothing and stops nothing, and exits with the status it had.
+  e2e_top || return 0
   # Under run-exclusive a signal to the process group reaches this shell twice (lib/run_exclusive.rb
   # passes it on as well), and the second would run the trap below inside this cleanup and end it early.
   trap '' TERM INT
-  tmux kill-server 2>/dev/null
+  e2e_stop_server
   [ -n "${LIVE_D:-}" ] && $SRC/test/live-env.sh down "$LIVE_D" 2>/dev/null
   for w in "$VOL/$ROOT"/*; do [ -d "$w" ] && git -C $T/repo worktree remove --force "$w" 2>/dev/null; done
   [ -n "${TD:-}" ] && rm -rf "$TD"; rmdir "$VOL/$ROOT" 2>/dev/null; rm -rf "$T_TOP"
@@ -165,7 +187,8 @@ done
 echo "--- iTerm"
 [ ! -e $T/osascript.log ] && ok "nothing in this run called osascript, so no iTerm window was opened" || { bad "osascript was called $(wc -l < $T/osascript.log | tr -d ' ') time(s)"; cut -c1-120 $T/osascript.log | head -5; }
 echo "--- cleanup"
-$S -c $T/team.yaml down --yes >/dev/null 2>&1; tmux kill-server 2>/dev/null
+# down finds its server through TMUX_TMPDIR, so it runs only while the run's own socket is there (#306).
+e2e_own_server && $S -c $T/team.yaml down --yes >/dev/null 2>&1; e2e_stop_server
 for w in team-w1 team-w2; do git -C $T/repo worktree remove --force $VOL/$ROOT/$w 2>/dev/null; git -C $T/repo worktree remove --force $T/repo/.claude/worktrees/$w 2>/dev/null; done
 rmdir $VOL/$ROOT 2>/dev/null; [ ! -e $VOL/$ROOT ] && ok "test folder removed from the volume" || bad "test folder removed from the volume ($(ls -A $VOL/$ROOT 2>&1 | head -3))"
 rm -rf "$T_TOP"; [ ! -e "$T_TOP" ] && ok "the scratch folder under TMPDIR is removed, and the link in it" || bad "the scratch folder is still there: $T_TOP"

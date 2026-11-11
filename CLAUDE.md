@@ -18,6 +18,8 @@ together in one iTerm tab. Read `README.md` for use and `teams/example.yaml` for
   more than one area uses) and `fake-claude.c` (the stand-in). A new case goes in its area's file, with a
   name no other assertion prints (the run fails on a repeat); a new area file goes in `AREAS` and ends with
   `e2e_end=<its name>`.
+- `test/e2e-exit-trap.sh`: checks that the exit trap and the cleanup of `test/e2e.sh` reach no tmux server but
+  the run's own (#306). Stand-in tmux only, so it starts no server and can run alone; one e2e case runs it.
 - `test/live-env.sh`: a private tmux server and state folder for a live test (README: Tests).
 - Git-ignored, local to each project: `teams/*` other than the example, `projects/`, `.state/`.
 
@@ -37,6 +39,11 @@ together in one iTerm tab. Read `README.md` for use and `teams/example.yaml` for
 ## Things that cost time
 - tmux: a session target written `=name` needs a trailing colon (`=name:`) for pane and option commands,
   and zsh expands an unquoted `=name`, so quote it.
+- tmux falls back to `/tmp`, the default server, when `TMUX_TMPDIR` names a folder that is not there. A test
+  that stops a server names its socket (`tmux -S`), after checking the socket is there (#306).
+- bash 3.2 runs the EXIT trap in the child forked for a pipeline or `&` when an unset variable ends a simple
+  command there under `set -u`, and `BASH_SUBSHELL` is 0 in it. A trap that cleans up checks it is the top
+  shell by pid (`e2e_top` in `test/e2e.sh`).
 - `pane_current_command` says `bash` while claude runs under a bash launcher; detect claude from the
   processes on the pane's tty.
 - `say` pastes into a pane. It must refuse a pane at a shell (the text would run) or at a startup dialog
