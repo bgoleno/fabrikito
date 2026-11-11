@@ -186,6 +186,29 @@ linked "socket" 'xt_socket "$T/os"; ln -s "$T/os" "$xt_sock"'
 linked "tmux-<uid>" 'rmdir "${xt_sock%/*}"; mkdir -m 700 "$T/od"; xt_socket "$T/od/default"; ln -s "$T/od" "${xt_sock%/*}"'
 linked "tmux/" 'rmdir "${xt_sock%/*}" "$T/tmux"; mkdir -p -m 700 "$T/ot/tmux-$(id -u)"; xt_socket "$T/ot/tmux-$(id -u)/default"; ln -s "$T/ot" "$T/tmux"'
 
+# A signal must not end the cleanup of the run's own shell before it starts (tl on #318). Neither case
+# depends on timing: the fixture puts a wrapper around a function of the file under test, which sends the
+# TERM at the exact point, to the run's own shell ($$), and then runs the real function.
+echo "--- a TERM arrives while the exit trap works out which shell it is in"
+nested 'xt_socket "$xt_sock"; xt_mark "at the start"
+eval "xt_orig_$(declare -f e2e_top)"; e2e_top() { kill -TERM $$; xt_orig_e2e_top; }
+: "$xt_unset_top"'
+[ "$marks" = "at the start: kept" ] && [ "$rc" != 0 ] && [ "$(aborted)" = 1 ]; check "TERM in the exit trap: the cleanup still runs to its end, one ABORTED line (exit $rc)" $?
+killed_own_once; check "TERM in the exit trap: the server is still stopped, once, through its socket" $?
+[ -n "$top" ] && [ ! -e "$top" ]; check "TERM in the exit trap: the scratch folder is still removed" $?
+finish
+
+echo "--- a TERM ends the run, and a second one arrives as the exit trap starts (run-exclusive passes it on too)"
+nested 'xt_socket "$xt_sock"; xt_mark "at the start"
+xt_status() { return "$1"; }
+eval "xt_orig_$(declare -f on_exit)"; on_exit() { local xt_rc=$?; kill -TERM $$; xt_status $xt_rc; xt_orig_on_exit; }
+kill -TERM $$
+xt_mark "after the TERM"'
+[ "$marks" = "at the start: kept" ] && [ "$rc" = 143 ] && [ "$(aborted)" = 1 ]; check "second TERM: the cleanup still runs to its end, one ABORTED line, exit 143 (exit $rc)" $?
+killed_own_once; check "second TERM: the server is still stopped, once, through its socket" $?
+[ -n "$top" ] && [ ! -e "$top" ]; check "second TERM: the scratch folder is still removed" $?
+finish
+
 echo "--- the caller's environment has LIVE_D and TD, and the run ends before an area sets them"
 mkdir "$X/td-marker" "$X/live-marker"
 nested 'xt_socket "$xt_sock"; xt_mark "at the start"

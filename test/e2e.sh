@@ -72,15 +72,17 @@ finished=
 on_exit() {
   local rc=$?
   [ -n "$finished" ] && return
+  # Under run-exclusive a signal to the process group reaches this shell twice (lib/run_exclusive.rb
+  # passes it on as well), and the second would run the trap below inside this cleanup and end it early.
+  # This comes before e2e_top, which starts a process: a TERM while it ran would end the shell there, with
+  # no cleanup at all (tl on #318). In a child it changes nothing, as the child returns on the next line.
+  trap '' TERM INT
   # Only the shell that started the run cleans up (#306). bash 3.2 expands the words of a simple command
   # in the child it forked for a pipeline or for &, before that child drops this trap: an unset variable
   # there (`echo "$out" | grep -q "$unset"`) ends the child, and the child runs this function. It used to
   # stop the server and remove the scratch folder under a run that carried on, and the next one found
   # TMUX_TMPDIR gone. A child removes nothing and stops nothing, and exits with the status it had.
   e2e_top || return 0
-  # Under run-exclusive a signal to the process group reaches this shell twice (lib/run_exclusive.rb
-  # passes it on as well), and the second would run the trap below inside this cleanup and end it early.
-  trap '' TERM INT
   e2e_stop_server
   [ -n "${LIVE_D:-}" ] && $SRC/test/live-env.sh down "$LIVE_D" 2>/dev/null
   for w in "$VOL/$ROOT"/*; do [ -d "$w" ] && git -C $T/repo worktree remove --force "$w" 2>/dev/null; done
@@ -89,7 +91,10 @@ on_exit() {
   [ "$rc" -eq 0 ] && rc=1; exit "$rc"
 }
 trap on_exit EXIT
-trap 'exit 143' TERM INT
+# The first signal ends the run, through on_exit. It ignores the next ones before it does: a second TERM a
+# few milliseconds later would otherwise run `exit` again while on_exit starts, and end the shell before
+# its cleanup (tl on #318).
+trap 'trap "" TERM INT; exit 143' TERM INT
 # Every name is kept, so the run can check, after the last assertion, that no two assertions print the
 # same name (#163): a diff of the PASS lines of two runs could not tell them apart.
 # An empty or whitespace-only name is a failure of its own (#169), reported at the file and line of the
