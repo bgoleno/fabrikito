@@ -7,9 +7,10 @@
 # It starts no tmux server and runs no tmux command, so it is safe on any machine, on the old code too:
 #   git show <base>:test/e2e.sh > "$TMPDIR/old-e2e.sh" && test/e2e-exit-trap.sh "$TMPDIR/old-e2e.sh"
 # It runs the file under test as it is, from a scratch tree where every area is a stub and the first one
-# is a fixture, with two stand-ins that record their call and do nothing else: a tmux first on PATH, and
-# the tree's fabrikito. The fixture makes a socket file where the run's tmux server would have its own (a
-# file only, nothing listens), so the cleanup has a socket to find.
+# is a fixture, with three stand-ins that record their call and do nothing else: a tmux first on PATH, and
+# the tree's fabrikito and test/live-env.sh. The fixture makes a socket file where the run's tmux server
+# would have its own (a file only, nothing listens), so the cleanup has a socket to find. The caller's
+# LIVE_D and TD, which the exit trap of the old code acts on, are kept out of every nested run.
 #
 # What trips is the shape seen on 2026-11-10, `echo x | grep -q "$unset"` under set -u. bash 3.2 (the bash
 # of macOS) expands a simple command's words in the child it forked for a pipeline or for &, before that
@@ -42,7 +43,11 @@ cat > "$X/src/fabrikito" <<'EOF'
 s=no; [ -S "${TMUX_TMPDIR-}/tmux-$(id -u)/default" ] && s=yes
 printf 'fabrikito\tsock=%s\t%s\n' "$s" "$*" >> "${0%/*}/../calls.log"
 EOF
-chmod +x "$X/bin/tmux" "$X/src/fabrikito"
+cat > "$X/src/test/live-env.sh" <<'EOF'
+#!/bin/sh
+printf 'live-env\t%s\n' "$*" >> "${0%/*}/../../calls.log"
+EOF
+chmod +x "$X/bin/tmux" "$X/src/fabrikito" "$X/src/test/live-env.sh"
 # Nothing below runs unless tmux, on the PATH the run under test gets, is the stand-in, and it records.
 # Without that, the old code would reach a real server, and a log that stays empty would prove nothing.
 xt_path=$X/bin:$PATH
@@ -54,9 +59,13 @@ env PATH="$xt_path" TMUX_TMPDIR="$X/none" tmux self-test
 n=0; f=0
 # check <name> <status>: one check, passed when the status is 0
 check() { n=$((n+1)); if [ "$2" = 0 ]; then echo "ok   $1"; else f=$((f+1)); echo "FAIL $1"; fi; }
-# nested <fixture>: run the file under test with this fixture as its first area. Sets out and rc, and what
-# the fixture wrote down: t and top (the run's $T and $T_TOP), own (its server's socket), marks.
+# nested <fixture> [NAME=value ...]: run the file under test with this fixture as its first area, and
+# with these variables in its environment. Sets out and rc, and what the fixture wrote down: t and top (the
+# run's $T and $T_TOP), own (its server's socket), marks. LIVE_D and TD are the names the exit trap reads
+# that only an area sets: the caller's own values never reach a nested run, so not even the old code under
+# test can act on them. The one case that sets them names folders in this test's scratch folder.
 nested() {
+  local fixture=$1; shift
   rm -f "$X/t" "$X/top" "$X/marks"; : > "$LOG"; f0=$f
   { cat <<'EOF'
 xt_x=$SRC/..; echo "$T" > "$xt_x/t"; echo "$T_TOP" > "$xt_x/top"
@@ -64,8 +73,8 @@ xt_sock=$T/tmux/tmux-$(id -u)/default; mkdir -p -m 700 "${xt_sock%/*}"
 xt_socket() { ruby -rsocket -e 'UNIXServer.new(ARGV[0])' "$1"; }
 xt_mark() { if [ -d "$T/bin" ] && [ -S "$xt_sock" ]; then echo "$1: kept"; else echo "$1: gone"; fi >> "$xt_x/marks"; }
 EOF
-    printf '%s\n' "$1"; } > "$X/src/test/e2e/$first.sh"
-  out=$(env PATH="$xt_path" TEST_VOLUME="$X/vol" "$BASH" "$X/src/test/e2e.sh" 2>&1); rc=$?
+    printf '%s\n' "$fixture"; } > "$X/src/test/e2e/$first.sh"
+  out=$(env -u LIVE_D -u TD PATH="$xt_path" TEST_VOLUME="$X/vol" ${1+"$@"} "$BASH" "$X/src/test/e2e.sh" 2>&1); rc=$?
   t=$(cat "$X/t" 2>/dev/null); top=$(cat "$X/top" 2>/dev/null); own=$t/tmux/tmux-$uid/default
   marks=$(cat "$X/marks" 2>/dev/null)
 }
@@ -161,12 +170,30 @@ e2e_end='"$first"
 [ -n "$top" ] && [ ! -e "$top" ]; check "tmux folder gone: the scratch folder is still removed" $?
 finish
 
-echo "--- the socket is a link to another server's"
-nested 'xt_socket "$T/other-socket"; ln -s "$T/other-socket" "$xt_sock"; xt_mark "at the start"
+# tmux connects through a link at any of the three places below the scratch folder, so each one is a case:
+# the socket there leads to another server's (a socket file elsewhere in the scratch folder, with short
+# names, so that no socket path is longer than the run's own).
+linked() { # linked <what is a link> <fixture lines that make it one>
+  echo "--- $1 is a link to another server's"
+  nested "$2"'; xt_mark "at the start"
 : "$xt_unset_top"'
-[ "$marks" = "at the start: kept" ] && [ "$rc" != 0 ] && [ "$(aborted)" = 1 ]; check "linked socket: the exit trap ran, in the run's own shell (exit $rc)" $?
-[ "$(calls tmux)" = 0 ]; check "linked socket: skipped, no tmux call at all (tmux would follow the link)" $?
-[ -n "$top" ] && [ ! -e "$top" ]; check "linked socket: the scratch folder is still removed" $?
+  [ "$marks" = "at the start: kept" ] && [ "$rc" != 0 ] && [ "$(aborted)" = 1 ]; check "linked $1: the exit trap ran, in the run's own shell (exit $rc)" $?
+  [ "$(calls tmux)" = 0 ]; check "linked $1: skipped, no tmux call at all (tmux would follow the link)" $?
+  [ -n "$top" ] && [ ! -e "$top" ]; check "linked $1: the scratch folder is still removed" $?
+  finish
+}
+linked "socket" 'xt_socket "$T/os"; ln -s "$T/os" "$xt_sock"'
+linked "tmux-<uid>" 'rmdir "${xt_sock%/*}"; mkdir -m 700 "$T/od"; xt_socket "$T/od/default"; ln -s "$T/od" "${xt_sock%/*}"'
+linked "tmux/" 'rmdir "${xt_sock%/*}" "$T/tmux"; mkdir -p -m 700 "$T/ot/tmux-$(id -u)"; xt_socket "$T/ot/tmux-$(id -u)/default"; ln -s "$T/ot" "$T/tmux"'
+
+echo "--- the caller's environment has LIVE_D and TD, and the run ends before an area sets them"
+mkdir "$X/td-marker" "$X/live-marker"
+nested 'xt_socket "$xt_sock"; xt_mark "at the start"
+: "$xt_unset_top"' LIVE_D="$X/live-marker" TD="$X/td-marker"
+[ "$marks" = "at the start: kept" ] && [ "$rc" != 0 ] && [ "$(aborted)" = 1 ]; check "caller's LIVE_D and TD: the exit trap ran, in the run's own shell (exit $rc)" $?
+[ -d "$X/td-marker" ]; check "caller's TD: the exit trap does not remove the folder it names" $?
+[ "$(calls live-env)" = 0 ]; check "caller's LIVE_D: the exit trap does not run live-env.sh down on it" $?
+[ -n "$top" ] && [ ! -e "$top" ]; check "caller's LIVE_D and TD: the run's own scratch folder is still removed" $?
 finish
 
 rm -rf "$X"

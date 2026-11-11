@@ -63,6 +63,11 @@ e2e_top() { [ "$(exec /bin/sh -c 'echo "$PPID"')" = "$$" ]; }
 # what a gate reads (repo.gate, lib/stop_gate.sh): only a run that reaches the end with fail=0 is 0.
 # Invariant, here and in the cleanup at the end: the server is stopped before its folder is removed, and
 # no tmux command runs once the folder is gone.
+# LIVE_D (say-sender.sh) and TD (tmpdir.sh) are the two names the trap reads that an area sets later. They
+# start empty, and not exported, so a run that ends before those areas acts on nothing: with a value from
+# the caller's environment the trap would stop a live-test server and remove a folder that are not this
+# run's (sec on #306). The scrub above covers the launcher's variables, not these.
+unset LIVE_D TD; LIVE_D=; TD=
 finished=
 on_exit() {
   local rc=$?
