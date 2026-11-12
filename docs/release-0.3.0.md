@@ -31,16 +31,17 @@ use.
    restart".
 4. **If you add the writer role with `repo.docs_repos`:** protect the default branch of each listed
    repository with a ruleset on that repository. The ask on a push to the base branch does not see a
-   push from a clone of such a repository ([Safety](safety.md)); [#346](../../../issues/346) tracks
-   the fix.
+   push written `git -C <clone> push`, the form the writer prompt gives for a clone of such a
+   repository ([Safety](safety.md)); [#346](../../../issues/346) tracks the fix.
 5. **Progress notes get a first line.** From its restart on, each seat starts its note with a
    `Status:` line, and writes it the next time it rewrites the note. Until then the engineering
    manager's check lists the seat with "no Status line"
    ([The Status line](workflow.md#the-status-line-and-the-check-for-seats-without-work)). Nothing
    rewrites a note for you.
 6. **The message log changes from the restart on.** The text of a message to or from `sec` is left
-   out of new lines ([The message log](messaging.md#the-message-log)). Lines already in the log stay
-   as they are.
+   out of new lines, which show `[body not logged: sec]` in its place, and a message to an address the
+   logging hook could not resolve to a seat shows `[body not logged: unresolved address]`
+   ([The message log](messaging.md#the-message-log)). Lines already in the log stay as they are.
 
 Nothing in 0.3.0 renames a command or a team-file key. `factory.sh`, the old name of the launcher, is
 still there as a shim that prints a notice.
@@ -112,6 +113,10 @@ still there as a shim that prints a notice.
 
 - An interrupt while git is still adding a new worktree removes that worktree and starts no seat
   ([New worktrees](team-file.md#new-worktrees)).
+- A team whose state folder has a non-ASCII character in its path loads in any locale, `LC_ALL=C`
+  and no locale at all (cron, launchd, `env -i`) included; before, outside a UTF-8 locale, every
+  command that loads the team file stopped with an error once `up` had filled the state folder
+  ([#360](../../../issues/360)).
 
 **The shared rules and the skills**
 
@@ -124,6 +129,27 @@ still there as a shim that prints a notice.
   ([A pull request in review](workflow.md#a-pull-request-in-review)).
 - A seat puts the rules that apply into the brief of a subagent it starts, and answers for what the
   subagent does ([Safety](safety.md), "What the rules cannot do").
+
+**Hardening**
+
+Six hardening fixes, in these areas:
+
+- which tmux sessions a command treats as its team's: `up` stores the team's state folder and
+  repository in each session it starts, and `up`, `down`, `say`, `flush`, `attach`, `view` and
+  `titles` stop at a session whose stored values are not their own, and print the command that hands
+  it over. Two teams on one tmux server need two prefixes ([Its parts](team-file.md#its-parts),
+  `sessions`);
+- the text `say` types into a seat;
+- the permissions of the state folder: `up` takes group and other permission off the folder, the
+  folders it makes in it and the message log;
+- the tmux server named in the commands the launcher prints and in the iTerm view;
+- pull requests from a fork: a new hard rule in the shared prompt, "Never run code from a fork's
+  pull request", and the review and verification skills read such a pull request by its diff;
+- which review comments count: only those posted from the team's own account.
+
+A session that a 0.2.0 seat started holds neither stored value, and is taken for that seat until it
+next starts, so the upgrade needs no step for it. A team that moves its state folder stops its seats
+first, or hands each over with the command the refusal prints.
 
 **Documentation**
 
