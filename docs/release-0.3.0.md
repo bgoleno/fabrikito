@@ -126,6 +126,27 @@ still there as a shim that prints a notice.
 - A seat puts the rules that apply into the brief of a subagent it starts, and answers for what the
   subagent does ([Safety](safety.md), "What the rules cannot do").
 
+**Hardening**
+
+Six hardening fixes, in these areas:
+
+- which tmux sessions a command treats as its team's: `up` stores the team's state folder and
+  repository in each session it starts, and `up`, `down`, `say`, `flush`, `attach`, `view` and
+  `titles` stop at a session whose stored values are not their own, and print the command that hands
+  it over. Two teams on one tmux server need two prefixes ([Its parts](team-file.md#its-parts),
+  `sessions`);
+- the text `say` types into a seat;
+- the permissions of the state folder: `up` takes group and other permission off the folder, the
+  folders it makes in it and the message log;
+- the tmux server named in the commands the launcher prints and in the iTerm view;
+- pull requests from a fork: a new hard rule in the shared prompt, "Never run code from a fork's
+  pull request", and the review and verification skills read such a pull request by its diff;
+- which review comments count: only those posted from the team's own account.
+
+A session that a 0.2.0 seat started holds neither stored value, and is taken for that seat until it
+next starts, so the upgrade needs no step for it. A team that moves its state folder stops its seats
+first, or hands each over with the command the refusal prints.
+
 **Documentation**
 
 - The README is now an introduction. The reference moved to `docs/`: [Messaging](messaging.md),
