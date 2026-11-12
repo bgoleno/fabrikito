@@ -30,11 +30,15 @@ together in one iTerm tab. Read `README.md` for use and `teams/example.yaml` for
 - Issues first: every change to this repository starts as a GitHub issue, filed before work begins. Its PR
   links it with `Closes #<n>` when the PR completes the issue (`Refs #<n>` when it does not) and fills in
   `.github/pull_request_template.md`.
-- Gates: `bash -n fabrikito factory.sh test/e2e.sh test/e2e-exit-trap.sh lib/stop_gate.sh lib/session_start.sh lib/log_message.sh`, `ruby -c lib/team_config.rb`, and
+- Gates: `bash -c 'rc=0; for f in "$@"; do bash -n "$f" || rc=1; done; exit $rc' gate fabrikito factory.sh lib/*.sh test/*.sh test/e2e/*.sh`,
+  `bash -c 'rc=0; for f in "$@"; do ruby -c "$f" || rc=1; done; exit $rc' gate lib/*.rb`
+  (one check for each file: `bash -n a b` and `ruby -c a b` check only `a`), and
   `TEST_VOLUME=/Volumes/<a mounted, writable volume> test/e2e.sh` (all assertions must pass).
 - Do not run the e2e test, or any experiment, against the user's real tmux server: unset `TMUX` and use
   `TMUX_TMPDIR`, as the test does. Never kill or restart seats of a running team without being asked.
-- Commit or push only when asked. The remote is a private repository.
+- Commit or push only when asked. The repository is public: write issue, PR, comment and commit text for a
+  public reader, with no local paths, drive names, user names or other projects' names. Use the placeholders
+  the docs use, such as `/Volumes/YourDrive`.
 
 ## Things that cost time
 - tmux: a session target written `=name` needs a trailing colon (`=name:`) for pane and option commands,
@@ -57,5 +61,3 @@ together in one iTerm tab. Read `README.md` for use and `teams/example.yaml` for
 - Under heavy load, an e2e run can fail one assertion with `echo: write error: Interrupted system call`
   from fabrikito: macOS bash 3.2 does not restart a pipe write interrupted by SIGCHLD (#101). Rerun
   only for that exact message; for any other failure a green rerun is not evidence.
-- Durable knowledge about this project lives in the Obsidian vault under `projects/software-factory/`,
-  not in Claude Code's own memory files.
