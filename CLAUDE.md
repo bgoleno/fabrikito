@@ -20,6 +20,9 @@ together in one iTerm tab. Read `README.md` for use and `teams/example.yaml` for
   `e2e_end=<its name>`.
 - `test/e2e-exit-trap.sh`: checks that the exit trap and the cleanup of `test/e2e.sh` reach no tmux server but
   the run's own (#306). Stand-in tmux only, so it starts no server and can run alone; one e2e case runs it.
+- `test/guard/tmux`: the tmux guard (#307), first on the PATH of an e2e run and of `test/live-env.sh run`: it
+  passes a tmux call on only to a socket inside the run's own folders (`TMUX_GUARD_ROOTS`), by `-S`, and
+  fails any other, naming it. `test/e2e-tmux-guard.sh` checks it with a stand-in as the real tmux.
 - `test/live-env.sh`: a private tmux server and state folder for a live test (README: Tests).
 - Git-ignored, local to each project: `teams/*` other than the example, `projects/`, `.state/`.
 
@@ -30,7 +33,7 @@ together in one iTerm tab. Read `README.md` for use and `teams/example.yaml` for
 - Issues first: every change to this repository starts as a GitHub issue, filed before work begins. Its PR
   links it with `Closes #<n>` when the PR completes the issue (`Refs #<n>` when it does not) and fills in
   `.github/pull_request_template.md`.
-- Gates: `bash -n fabrikito factory.sh test/e2e.sh test/e2e-exit-trap.sh lib/stop_gate.sh lib/session_start.sh lib/log_message.sh`, `ruby -c lib/team_config.rb`, and
+- Gates: `bash -n fabrikito factory.sh test/e2e.sh test/e2e-exit-trap.sh test/e2e-tmux-guard.sh test/guard/tmux lib/stop_gate.sh lib/session_start.sh lib/log_message.sh`, `ruby -c lib/team_config.rb`, and
   `TEST_VOLUME=/Volumes/<a mounted, writable volume> test/e2e.sh` (all assertions must pass).
 - Do not run the e2e test, or any experiment, against the user's real tmux server: unset `TMUX` and use
   `TMUX_TMPDIR`, as the test does. Never kill or restart seats of a running team without being asked.
@@ -41,6 +44,9 @@ together in one iTerm tab. Read `README.md` for use and `teams/example.yaml` for
   and zsh expands an unquoted `=name`, so quote it.
 - tmux falls back to `/tmp`, the default server, when `TMUX_TMPDIR` names a folder that is not there. A test
   that stops a server names its socket (`tmux -S`), after checking the socket is there (#306).
+- In an e2e run and under `test/live-env.sh run`, `tmux` is the guard (#307): a call whose socket is outside
+  the run's folders fails with `tmux-guard: refused`. A case that means to reach another server names that
+  folder in `TMUX_GUARD_ROOTS`, and a command run with `env -i` passes the variable on.
 - bash 3.2 runs the EXIT trap in the child forked for a pipeline or `&` when an unset variable ends a simple
   command there under `set -u`, and `BASH_SUBSHELL` is 0 in it. A trap that cleans up checks it is the top
   shell by pid (`e2e_top` in `test/e2e.sh`).

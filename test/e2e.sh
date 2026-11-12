@@ -8,6 +8,9 @@ set -u
 [ -n "${TEST_VOLUME:-}" ] || { echo "set TEST_VOLUME to a mounted volume that can be written to, e.g. /Volumes/MyDrive" >&2; exit 64; }
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 S=$SRC/fabrikito
+# The tmux guard (#307, below): without it this run makes nothing and starts nothing.
+E2E_GUARD=$SRC/test/guard
+[ -f "$E2E_GUARD/tmux" ] && [ -x "$E2E_GUARD/tmux" ] || { echo "test/guard/tmux is missing or cannot be run: without the tmux guard a tmux call of this run could reach a server that is not its own (see docs/testing.md)" >&2; exit 2; }
 # The scratch folder. Cases in settings.sh and skills.sh check that a rule is written for a path both as
 # configured ($T) and as its real path ($RT), so the two spellings must differ wherever TMPDIR is. They
 # used to differ only by luck, through the /var and /tmp symlinks on macOS, and a TMPDIR on a volume has
@@ -42,7 +45,22 @@ export TMUX_TMPDIR=$T/tmux TEAM_STATE_DIR=$T/state FACTORY_RUN_LOCK=$T/rx-lock/r
 # the machine, so tmux could no longer start the test's own seats. The view is off for the whole run
 # (TEAM_VIEW=0), and every up says --no-view too, so dropping either one still opens no window.
 printf '#!/bin/sh\necho "osascript $*" >> %s/osascript.log\nexit 1\n' "$T" > $T/bin/osascript; chmod +x $T/bin/osascript
-export PATH=$T/bin:$PATH TEAM_VIEW=0
+# No tmux call of this run may reach a server that is not the run's own (#307). TMUX_TMPDIR above is
+# configuration, not a boundary: tmux follows TMUX when it is set, and falls back to /tmp, the user's own
+# server, when TMUX_TMPDIR is empty or names a folder that is not there. So the tmux first on PATH, for
+# this shell, every area, the launcher under test and every stand-in seat (they inherit PATH through the
+# run's tmux server), is the guard, test/guard/tmux: it passes a call on only to a socket inside this
+# run's scratch folder, by -S, and fails any other with a message that names it. It is in the tree and not
+# in $T/bin on purpose: once the scratch folder is removed, a tmux in it is gone and the next on PATH is
+# the real one, which is where a job this run left behind would land. With the folder gone the guard
+# refuses everything. An area that puts its own stand-in tmux first builds it on `command -v tmux`, which
+# is the guard, so its calls come through here too. A call that goes to another server on purpose (the
+# second server of say-sender.sh) says so where it is made: test/live-env.sh run, or TMUX_GUARD_ROOTS.
+# The refusals are recorded, and the run fails at the end if there is one that no case asked for.
+e2e_real=$(command -v tmux)
+if [ -n "$e2e_real" ] && [ ! "$e2e_real" -ef "$E2E_GUARD/tmux" ]; then export TMUX_GUARD_REAL=$e2e_real; fi
+export PATH=$E2E_GUARD:$T/bin:$PATH TEAM_VIEW=0 TMUX_GUARD_ROOTS=$T_TOP TMUX_GUARD_LOG=$T/tmux-guard.log
+[ "$(command -v tmux)" = "$E2E_GUARD/tmux" ] || { echo "tmux on PATH is $(command -v tmux), not the guard $E2E_GUARD/tmux: refusing to run" >&2; rm -rf "$T_TOP"; exit 2; }
 # The run's own tmux server, named by its socket (#306). The exit trap and the cleanup at the end stop it
 # with e2e_stop_server and nothing else: never a bare `tmux kill-server`, which finds its server through
 # TMUX_TMPDIR, and tmux falls back to /tmp, silently, when that folder does not exist. That is the default
@@ -115,7 +133,7 @@ bad(){ echo "FAIL $1"; fail=$((fail+1)); e2e_blank "$1" || e2e_names="$e2e_names
 # return, continue or break ends the file (continue and break also act on the loop that sources it).
 # So each file's last line is e2e_end=<its name>, checked after it is sourced, and the list of files
 # that got there is checked after the loop, which catches the continue and break that skip the check.
-AREAS="launch settings say say-sender worktrees tmpdir view delivery boxtext config skills warnings gate hooks claude-copy prompts audit exclusive live"
+AREAS="launch settings say say-sender guard worktrees tmpdir view delivery boxtext config skills warnings gate hooks claude-copy prompts audit exclusive live"
 E2E_DIR=$SRC/test/e2e
 for e2e_f in "$E2E_DIR"/*.sh; do e2e_a=${e2e_f##*/}; e2e_a=${e2e_a%.sh}; [ "$e2e_a" = lib ] && continue
   case " $AREAS " in *" $e2e_a "*) ;; *) echo "test/e2e/$e2e_a.sh is not in AREAS in test/e2e.sh: add it there, or it never runs" >&2; exit 2 ;; esac
@@ -180,7 +198,6 @@ roles:
         permissions: { deny: ["Bash(gh pr merge *)", "Read(//**/.env)"], allow: ["Bash(make *)"] } }
   w2: { title: Worker Two, auto_memory: true, workdir: { type: worktree }, prompt_text: "w2 prompt" }
 Y
-export PATH=$T/bin:$PATH
 # legacy worktree for w2, internal disk
 git -C $T/repo worktree add -q --detach $T/repo/.claude/worktrees/team-w2 origin/main
 e2e_done=
@@ -196,6 +213,10 @@ done
   echo "test/e2e/$e2e_x.sh did not run to its last line (these did:$e2e_done): a top-level continue or break" >&2; exit 2; }
 echo "--- iTerm"
 [ ! -e $T/osascript.log ] && ok "nothing in this run called osascript, so no iTerm window was opened" || { bad "osascript was called $(wc -l < $T/osascript.log | tr -d ' ') time(s)"; cut -c1-120 $T/osascript.log | head -5; }
+# The guard's record of this run (#307): a line there is a tmux call that would have gone to a server
+# that is not the run's. The cases that ask for a refusal keep a record of their own.
+echo "--- tmux guard"
+[ "$(command -v tmux)" = "$E2E_GUARD/tmux" ] && [ ! -s $T/tmux-guard.log ] && ok "the tmux guard was first on PATH to the end, and refused no tmux call of this run but those its own cases made" || { bad "the tmux guard refused $(wc -l < $T/tmux-guard.log 2>/dev/null | tr -d ' ') tmux call(s) of this run that no case asked for (tmux on PATH: $(command -v tmux))"; head -8 $T/tmux-guard.log 2>/dev/null | cut -c1-300; }
 echo "--- cleanup"
 # down finds its server through TMUX_TMPDIR, so it runs only while the run's own socket is there (#306).
 e2e_own_server && $S -c $T/team.yaml down --yes >/dev/null 2>&1; e2e_stop_server

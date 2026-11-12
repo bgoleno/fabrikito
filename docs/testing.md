@@ -25,6 +25,12 @@ shell each time. Setting `TMUX_TMPDIR` by hand is easy to get wrong: tmux 3.7 fo
 and falls back to the default server, silently, when `TMUX_TMPDIR` is empty or names a folder that does not
 exist. A throwaway team's worktrees on the volume are not removed by `down`; remove them by their paths.
 
+`run` also puts the [tmux guard](#the-tmux-guard) first on `PATH`, for that folder: a tmux call the command
+makes, or anything it starts, gets through only to a socket inside `$d`, whatever `TMUX`, `TMUX_TMPDIR`,
+`-L` or `-S` it comes with. Any other call fails with a message that names it
+(`tmux-guard: refused: tmux kill-server: ...`). A command that runs tmux by its full path, or changes
+`PATH`, is not held.
+
 ## The end-to-end test
 
 `TEST_VOLUME=/Volumes/YourDrive test/e2e.sh` runs the launcher against a throwaway repo with a stand-in
@@ -89,6 +95,47 @@ exit trap in a child too, when an unset variable ends a command in a pipeline
 scratch tree where the areas are stubs, with a stand-in `tmux` that records each call and runs nothing. It
 starts no tmux server, so it can run alone, and against another copy of the file:
 `test/e2e-exit-trap.sh /path/to/an/older/e2e.sh`.
+
+### The tmux guard
+
+Exporting `TMUX_TMPDIR` keeps a run's tmux calls private only while nothing goes wrong: one bare `tmux`
+call after the folder is gone, or with `TMUX` set, reaches the default server. So the `tmux` first on the
+`PATH` of a run is a guard, `test/guard/tmux` ([#307](../../../issues/307)). It is the tmux of the test's
+own shell, of every area file, of the launcher under test and of every stand-in seat, which inherit `PATH`
+through the run's tmux server. A new area file gets it without doing anything.
+
+- It works out the socket a call would use as tmux does (`-S`, else `-L`, else the one `TMUX` names, else
+  `tmux-<uid>/default` under `TMUX_TMPDIR`), without tmux's fallback to `/tmp`.
+- The call is passed on to the real tmux only when that socket is inside one of the run's own folders
+  (`TMUX_GUARD_ROOTS`: the scratch folder for `test/e2e.sh`, the environment's folder for
+  `test/live-env.sh run`), every link resolved, and always with `-S` and that socket. The folder of the
+  user's own servers, `/tmp/tmux-<uid>`, is never accepted, whatever the roots.
+- Any other call fails, with a message that names it and the reason, and is recorded
+  (`TMUX_GUARD_LOG`). A run fails at its end if the guard refused a call that no case asked for.
+- With no root that exists, every call is refused. The guard is in the tree and not in the scratch folder,
+  so it is still the tmux on `PATH` after the scratch folder is removed, for a job the run left behind too.
+- A stand-in `tmux` that an area puts first on `PATH` and that passes calls on is built on
+  `command -v tmux`, which is the guard, so its calls are judged too.
+- A call that goes to another server on purpose says so where it is made: through `test/live-env.sh run`,
+  or with `TMUX_GUARD_ROOTS` naming the other folder beside the `TMUX_TMPDIR` that sends it there.
+- A command run with `env -i` loses the guard's variables and is refused, so it passes
+  `TMUX_GUARD_ROOTS` on, as it passes `TMUX_TMPDIR`.
+
+It guards against mistakes, not against a process that means to get out: a call to the real tmux by its
+full path is not held.
+
+`test/e2e-tmux-guard.sh` checks the guard call by call, for `tmux ls` and `tmux kill-server`: what it
+refuses and what it passes on, and the same through `test/live-env.sh run` and `down`. The real tmux
+behind the guard is a stand-in that records and runs nothing, so it starts no server and can run alone, on
+another copy of the guard too: `test/e2e-tmux-guard.sh /path/to/a/guard`. `test/e2e-exit-trap.sh` has the
+cases with the run's folders removed mid-run and with a job left behind after the exit trap. The run
+includes both scripts, and its `guard` area checks the guard with the real tmux behind it, with calls that
+only read.
+
+The launcher's own refusal of the default server (`up`, `down`, `say` and the others, for a team file
+outside `teams/`) is tested without the guard in the way: those cases put a stand-in tmux of their own
+before it on `PATH`, one that records and runs nothing or passes on to the run's socket, and they look for
+the launcher's message, which the guard never prints.
 
 ### The one failure to rerun
 

@@ -72,7 +72,7 @@ See [SECURITY.md](SECURITY.md).
 
 Every change starts as a GitHub issue, and its pull request links the issue and fills in the pull request
 template. Nothing tracked may name a specific project, person, drive or path. Before a pull request, run
-the gate: `bash -n fabrikito factory.sh test/e2e.sh test/e2e-exit-trap.sh lib/stop_gate.sh lib/session_start.sh lib/log_message.sh`,
+the gate: `bash -n fabrikito factory.sh test/e2e.sh test/e2e-exit-trap.sh test/e2e-tmux-guard.sh test/guard/tmux lib/stop_gate.sh lib/session_start.sh lib/log_message.sh`,
 `ruby -c lib/team_config.rb`, and `env -u TMUX TEST_VOLUME=/Volumes/<a mounted, writable volume> test/e2e.sh`.
 See [Testing](docs/testing.md).
 

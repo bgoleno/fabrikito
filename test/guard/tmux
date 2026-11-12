@@ -1,0 +1,158 @@
+#!/bin/sh
+# The tmux guard of the tests (#307): a stand-in named tmux, first on the PATH of an e2e run (test/e2e.sh)
+# and of a live test (test/live-env.sh run). It passes a call on to the real tmux only when the socket the
+# call would use is inside one of the run's own folders, and always with -S and that socket, so the real
+# tmux never chooses a socket itself. Any other call fails here, with a message that names it.
+#
+# Why: exporting TMUX_TMPDIR keeps a test's tmux calls private only while everything goes well. tmux
+# follows TMUX when it is set, and falls back to /tmp, silently, when TMUX_TMPDIR is empty or names a
+# folder that is not there. /tmp is where the user's own server is, with a working team's seats on it,
+# and one bare `tmux kill-server` at the wrong moment stopped them all (2026-11-10).
+#
+#   TMUX_GUARD_ROOTS   the run's folders, separated by colons. With none that exists, every call is
+#                      refused: a run whose scratch folder is removed leaves no way through, for a job
+#                      it left running either. That is why the guard lives in the tree, not in the
+#                      scratch folder: a tmux there would be gone with it, and the next one on PATH is real.
+#   TMUX_GUARD_REAL    the real tmux. Without it: the next tmux on PATH after this one.
+#   TMUX_GUARD_LOG     a file each refusal is appended to, as printed.
+#
+# The socket is worked out as tmux 3.7 does, minus the fallback: -S, else -L under TMUX_TMPDIR, else the
+# one TMUX names, else tmux-<uid>/default under TMUX_TMPDIR. Its folder is resolved through every link
+# (tmux connects through links) and must then be inside a root, and must never be /tmp/tmux-<uid>, the
+# folder of the user's own servers, whatever the roots are. A socket the caller named (-S, TMUX) is
+# passed on as written; one from TMUX_TMPDIR by its resolved path, as tmux itself would use it.
+#
+# It guards against mistakes, not against a process that means to get out: one that runs the real tmux by
+# its path, or sets these variables, is not held.
+# Its messages must not hold the words the launcher's own refusals are recognised by in the tests
+# ("default tmux server", "--default-socket"): test/e2e-tmux-guard.sh checks that.
+call="tmux $*"
+refuse() {
+  msg="tmux-guard: refused: $call: $1"
+  echo "$msg" >&2
+  if [ -n "${TMUX_GUARD_LOG:-}" ]; then { echo "$msg" >> "$TMUX_GUARD_LOG"; } 2>/dev/null; fi
+  exit 1
+}
+nl='
+'
+# split <socket path>: sets dir and name, as dirname and basename would for a path that does not end in /
+split() {
+  case $1 in */*) dir=${1%/*}; [ -n "$dir" ] || dir=/ ;; *) dir=. ;; esac
+  name=${1##*/}
+}
+
+# The real tmux: the one named, unless that is this guard again; else the first one on PATH after this
+# guard (after, so that two copies of the guard on one PATH do not call each other for ever), or the
+# first one at all when the guard was not reached through PATH.
+real=${TMUX_GUARD_REAL:-}
+if [ -z "$real" ] || [ ! -x "$real" ] || [ -d "$real" ] || [ "$real" -ef "$0" ]; then
+  real=; first=; seen=
+  oifs=$IFS; IFS=:; set -f
+  for d in $PATH; do
+    c=${d:-.}/tmux
+    [ -x "$c" ] && [ ! -d "$c" ] || continue
+    if [ "$c" -ef "$0" ]; then seen=1; continue; fi
+    if [ -n "$seen" ]; then real=$c; break; fi
+    [ -n "$first" ] || first=$c
+  done
+  IFS=$oifs; set +f
+  [ -n "$real" ] || [ -n "$seen" ] || real=$first
+  [ -n "$real" ] || refuse "no tmux but this guard is on PATH, and TMUX_GUARD_REAL names none"
+fi
+
+# tmux's own options, up to the command. -V and -h print and exit, and reach no server.
+flags=; path=; label=; conf=; shcmd=; feat=; has_s=; has_l=; has_f=; has_c=; has_t=
+OPTIND=1
+while getopts ':2CDhlNuVvc:f:L:S:T:' o; do
+  case $o in
+    V|h) exec "$real" "$@" ;;
+    2|C|D|l|N|u|v) flags=$flags$o ;;
+    S) path=$OPTARG; has_s=1 ;;
+    L) label=$OPTARG; has_l=1 ;;
+    f) [ -z "$has_f" ] || refuse "more than one -f, which this guard does not pass on"
+       conf=$OPTARG; has_f=1 ;;
+    c) shcmd=$OPTARG; has_c=1 ;;
+    T) feat=$OPTARG; has_t=1 ;;
+    :) refuse "the option -$OPTARG lacks its value" ;;
+    *) refuse "the option -$OPTARG is not one this guard knows" ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+uid=${UID:-$(id -u)}
+case ${TMUX_GUARD_ROOTS:-} in
+  "") refuse "TMUX_GUARD_ROOTS is not set, so no folder is this run's" ;;
+  *"$nl"*) refuse "TMUX_GUARD_ROOTS holds a line break" ;;
+esac
+# Where the user's own servers have their sockets. Compared by what it is (-ef: the same folder,
+# whatever the spelling and whatever links lead to it), not by its name.
+forbidden=/tmp/tmux-$uid
+
+# resolve <folder>: sets pdir to the folder with every link in its path resolved (nothing, when it cannot
+# be entered) and roots to the run's folders, resolved the same way, one to a line. A root that is not
+# absolute or is not there is left out. One child does all of it, as this runs for every tmux call.
+resolve() {
+  r=$(
+    CDPATH=
+    { cd -P -- "$1" 2>/dev/null && pwd -P; } || echo
+    IFS=:; set -f
+    # (/*) with both parentheses: bash 3.2 takes a lone ) inside $( ) for the end of the substitution
+    for d in $TMUX_GUARD_ROOTS; do case $d in (/*) cd -P -- "$d" 2>/dev/null && pwd -P ;; esac; done
+  )
+  case $r in *"$nl"*) pdir=${r%%"$nl"*}; roots=${r#*"$nl"} ;; *) pdir=$r; roots= ;; esac
+  # A folder whose resolved path holds a line break would be cut short above: it must be the same folder.
+  [ -z "$pdir" ] || [ "$pdir" -ef "$1" ] || pdir=
+}
+# inside <folder, resolved>: it is one of the roots or below one. / is no root.
+inside() {
+  oifs=$IFS; IFS=$nl; set -f
+  for p in $roots; do
+    [ "$p" != / ] || continue
+    case $1/ in "$p"/*) IFS=$oifs; set +f; return 0 ;; esac
+  done
+  IFS=$oifs; set +f; return 1
+}
+
+if [ -n "$has_s" ]; then
+  # -S: the socket as written. tmux makes no folder for it, and neither does the guard.
+  [ -n "$path" ] || refuse "-S names no socket"
+  sock=$path; split "$path"; resolve "$dir"
+  [ -n "$pdir" ] || refuse "the folder of the socket -S names is not there ($dir)"
+elif [ -z "$has_l" ] && [ -n "${TMUX:-}" ] && [ "${TMUX#,}" = "$TMUX" ]; then
+  # Inside a pane: the socket TMUX names, which tmux follows before it looks at TMUX_TMPDIR.
+  path=${TMUX%%,*}
+  sock=$path; split "$path"; resolve "$dir"
+  [ -n "$pdir" ] || refuse "the folder of the socket TMUX names is not there ($dir)"
+else
+  # No socket named: tmux-<uid>/<name> under TMUX_TMPDIR. Here tmux would take /tmp for an empty value or
+  # a folder that is not there, and a value with a colon is a list to it; the guard takes none of these.
+  name=${label:-default}
+  [ -z "$has_l" ] || [ -n "$label" ] || refuse "-L names no socket"
+  case $name in */*) refuse "the socket name -L gives holds a slash ($name)" ;; esac
+  t=${TMUX_TMPDIR:-}
+  [ -n "$t" ] || refuse "TMUX_TMPDIR is not set or is empty, and tmux would then use /tmp, which is not this run's"
+  case $t in *:*) refuse "TMUX_TMPDIR holds a colon ($t), which tmux reads as a list of folders" ;; esac
+  [ -d "$t" ] || refuse "TMUX_TMPDIR names a folder that is not there ($t), and tmux would then use /tmp, which is not this run's"
+  [ ! "$t" -ef /tmp ] || refuse "TMUX_TMPDIR ($t) is /tmp, where the user's own servers have their sockets"
+  dir=$t/tmux-$uid
+  # tmux makes tmux-<uid> itself when it picks the socket; with -S it does not, so the guard does, once
+  # the folder it goes into is known to be the run's.
+  if [ ! -e "$dir" ] && [ ! -L "$dir" ]; then
+    resolve "$t"
+    [ -n "$pdir" ] && inside "$pdir" || refuse "TMUX_TMPDIR ($t) is not inside this run's folders ($TMUX_GUARD_ROOTS), or none of them is there any more"
+    mkdir -m 700 "$pdir/tmux-$uid" 2>/dev/null || [ -d "$pdir/tmux-$uid" ] || refuse "cannot make $pdir/tmux-$uid"
+  fi
+  resolve "$dir"
+  [ -n "$pdir" ] || refuse "the socket's folder cannot be entered ($dir)"
+  sock=$pdir/$name
+fi
+[ ! "$pdir" -ef "$forbidden" ] || refuse "the socket ($sock) is in $forbidden, the folder of the user's own servers"
+[ -n "$name" ] || refuse "the socket path ends in a slash ($sock)"
+inside "$pdir" || refuse "the socket ($sock) is not inside this run's folders ($TMUX_GUARD_ROOTS), or none of them is there any more"
+[ ! -L "$pdir/$name" ] || refuse "the socket ($sock) is a link, which tmux would follow to another server's"
+
+[ -z "$has_t" ] || set -- -T "$feat" "$@"
+[ -z "$has_c" ] || set -- -c "$shcmd" "$@"
+[ -z "$has_f" ] || set -- -f "$conf" "$@"
+[ -z "$flags" ] || set -- "-$flags" "$@"
+exec "$real" -S "$sock" "$@"

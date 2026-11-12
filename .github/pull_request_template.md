@@ -11,7 +11,7 @@ gh pr view <pr> --json closingIssuesReferences -->
 
 ## How it was tested
 <!-- The commands you ran and what they printed. This repository's gate is all three of:
-bash -n fabrikito factory.sh test/e2e.sh test/e2e-exit-trap.sh lib/stop_gate.sh lib/session_start.sh lib/log_message.sh
+bash -n fabrikito factory.sh test/e2e.sh test/e2e-exit-trap.sh test/e2e-tmux-guard.sh test/guard/tmux lib/stop_gate.sh lib/session_start.sh lib/log_message.sh
 ruby -c lib/team_config.rb
 env -u TMUX TEST_VOLUME=/Volumes/<a mounted, writable volume> test/e2e.sh   (all assertions must pass)
 Run the e2e with TMUX unset, as CLAUDE.md requires, so it never touches the tmux server you work in. -->

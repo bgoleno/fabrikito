@@ -6,7 +6,8 @@
 #
 #   test/live-env.sh new                 make one; prints its folder (/tmp/sf-live.XXXXXX)
 #   test/live-env.sh run <dir> <cmd...>  run cmd in it: TMUX_TMPDIR=<dir>/tmux, TEAM_STATE_DIR=<dir>/state
-#                                        (both absolute), TEAM_VIEW=0, TEAM_ROLE=live-test; TMUX, TEAM_CONFIG/SCRIPT unset
+#                                        (both absolute), TEAM_VIEW=0, TEAM_ROLE=live-test; TMUX, TEAM_CONFIG/SCRIPT unset;
+#                                        the tmux guard first on PATH, for <dir>
 #   test/live-env.sh down <dir>          stop its tmux server and remove the folder
 #
 # For example:
@@ -18,8 +19,11 @@
 #
 # Each call is checked on its own, so it works from a fresh shell each time (as a seat's tool calls
 # are). run and down refuse a folder that new did not make, or whose tmux folder resolves to /tmp,
-# where tmux keeps the default server. Two things are outside its reach: a command that sets its own
-# TMUX_TMPDIR, -L or -S, and worktrees a throwaway team made on a volume (down --yes keeps them).
+# where tmux keeps the default server. A command that sets its own TMUX, TMUX_TMPDIR, -L or -S is held
+# by the tmux guard (test/guard/tmux, #307), which run puts first on PATH: a tmux call gets through only
+# to a socket inside <dir>, and any other fails with a message that names it. Outside its reach: a
+# command that runs tmux by its full path or changes PATH, and worktrees a throwaway team made on a
+# volume (down --yes keeps them).
 #
 # run sets TEAM_ROLE=live-test, the driver label (#115): say run through it sends as [from live-test],
 # whichever seat drives the test, and never as [from owner]. say refuses that label on the default
@@ -36,7 +40,7 @@ unset CDPATH
 
 MARK=.live-env
 die() { echo "live-env: $*" >&2; exit 1; }
-usage() { sed -n '7,10p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64; }
+usage() { sed -n '7,11p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64; }
 
 # Print environment $1's folder, resolved once and physically (cd -P: as the kernel and rm see it, so
 # <link>/.. is the parent of where the link leads), or stop with the reason it is not a private one.
@@ -74,6 +78,17 @@ own_socket_dir() {
   echo "$u"
 }
 
+# Put the tmux guard (test/guard/tmux, #307) first on PATH, for environment folder $1 and no other: from
+# here on a tmux call gets through only to a socket inside that folder, whatever TMUX, TMUX_TMPDIR, -L
+# or -S it comes with, and any other call fails with a message that names it. TMUX_GUARD_ROOTS is set, not
+# added to: the folders of a guarded run around this one are not this environment's.
+guard_on() {
+  local g
+  g=$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/guard
+  [ -f "$g/tmux" ] && [ -x "$g/tmux" ] || die "the tmux guard is missing: $g/tmux"
+  export PATH=$g:$PATH TMUX_GUARD_ROOTS=$1
+}
+
 case ${1:-} in
   new)
     d=$(mktemp -d /tmp/sf-live.XXXXXX)
@@ -93,6 +108,7 @@ case ${1:-} in
     s=$(cd -P -- "$r/state" && pwd -P) || die "$r/state does not exist"
     unset TMUX TEAM_CONFIG TEAM_SCRIPT
     export TMUX_TMPDIR=$r/tmux TEAM_STATE_DIR=$s TEAM_VIEW=0 TEAM_ROLE=live-test
+    guard_on "$r"
     exec "$@"
     ;;
   down)
@@ -102,6 +118,9 @@ case ${1:-} in
     # Checked again right before the kill (own_socket_dir: a real folder of yours, no links), then -S
     # names that socket outright, so only this environment's own server can be reached.
     u=$(own_socket_dir "$r/tmux")
+    # Through the guard too, for this folder: called from a guarded run (an e2e run), the guard on PATH
+    # knows that run's folders only, and would refuse this environment's socket.
+    guard_on "$r"
     if [ -S "$u/default" ]; then tmux -S "$u/default" kill-server 2>/dev/null || true; fi
     rm -rf "$r"
     ;;
