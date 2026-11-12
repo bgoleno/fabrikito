@@ -52,6 +52,8 @@ the reference for each key, and the file to copy.
 - `roles`: ordered; each has `title`, `workdir` (`project` folder or `worktree`), a prompt, and
   optional `model`, `effort`, `session`, `kickoff`, `summary`, `skills`, `tmpdir`
   (see [Temp files](#temp-files)).
+  A role added while the team runs is started by the next `up`, but the seats already running do not
+  know it until they are restarted: see [What `up` does](how-it-works.md#what-up-does), step 4.
 - `skills` (per role): skills to name in that seat's prompt, each a name (`plugin:name` for a plugin's
   skill) with an optional note on when to use it. They are listed after the role's prompt with a note
   that a skill may not be installed; naming one installs nothing. The example team lists commonly
@@ -97,8 +99,9 @@ folder. A running seat keeps what it started with and picks up a change at its n
 
 Owner-only (mode 700) guards against other OS users, and only on a volume that honours ownership. It
 keeps out nobody on a volume mounted `noowners` (Finder's "ignore ownership on this volume"), and every
-seat runs as the same user in any case. Separate folders keep two teams' temp files apart by accident
-guard only, as with the other rules in [Safety](safety.md): this is not a security boundary.
+seat runs as the same user in any case. Separate folders keep two seats' temp files apart, and two
+teams', by accident guard only, as with the other rules in [Safety](safety.md): this is not a security
+boundary between seats, and any seat can read and write another seat's folder.
 
 In a permission mode that prompts, a `Write` outside a seat's working directory would wait for a human, so
 the generated settings give each seat an `Edit` allow on everything in its own `tmpdir`
@@ -130,7 +133,10 @@ command ([docs](https://code.claude.com/docs/en/worktrees)):
   tmux variables of a seat that runs `up`: every variable whose name starts with
   `CLAUDE_CODE_MESSAGING_` (today `CLAUDE_CODE_MESSAGING_SOCKET` and `CLAUDE_CODE_MESSAGING_TOKEN`,
   and any that a later Claude Code adds), `CLAUDECODE`, `TMUX` and `TMUX_PANE`. So a seat's messaging
-  token does not reach an install script. Every other variable of the shell that runs `up` does reach it, and an
+  token does not reach an install script. A role with a `tmpdir` ([Temp files](#temp-files)) has that
+  folder as the bootstrap's `TMPDIR`, as its seat does, so an install's temp files go to the same place
+  ([#253](../../../issues/253)); a role without one keeps the `TMPDIR` of the shell that runs `up`.
+  Every other variable of the shell that runs `up` does reach it, and an
   install command runs third-party scripts (package install hooks, for example) with them. There is no
   time limit. If it fails, or `up` is interrupted meanwhile
   (Ctrl-C, TERM, HUP), `up` stops the bootstrap and stops before starting the seat; a worktree it has
@@ -142,6 +148,10 @@ before the seat starts when the mark is missing: after a start that was killed o
 when `repo.copy` or `repo.bootstrap` was added after the worktree was made. A failure there leaves
 that existing worktree as it is (it may hold work). Neither runs for a `project` workdir. `check`
 shows them.
+
+An interrupt (Ctrl-C, TERM, HUP) while git is still adding a new worktree is handled the same way, with
+or without a setup: once git returns, `up` removes that worktree by its exact path and starts no seat
+([#198](../../../issues/198)).
 
 `up` starts the roles in file order and stops at the first one it cannot start, this setup included:
 the seats started before it keep running, and the next `up` starts the rest (it skips running seats).

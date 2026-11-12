@@ -38,10 +38,13 @@ Options:
 - `down` without `--yes` lists the seats it would kill and kills nothing.
 - `attach` with no role attaches to the first role in the team file. Run from inside tmux, it switches
   your tmux client to the seat instead of attaching.
-- `--default-socket` (on `up`, `down`, `say`, `attach`, `view` and `titles`) lets a team file outside
-  `teams/` run on the default tmux server: see [Throwaway teams](#throwaway-teams). On `say` and
-  `attach` it must be the first argument.
+- `--default-socket` (on `up`, `down`, `say`, `flush`, `attach`, `view` and `titles`) lets a team file
+  outside `teams/` run on the default tmux server: see [Throwaway teams](#throwaway-teams). On `say`,
+  `flush` and `attach` it must be the first argument.
 - `-c` (or `--config`) comes before the command.
+- `fabrikito` can be run through a symlink to its file (relative or absolute, or a chain of links, for
+  example one in a folder on your `PATH`): it follows the links to the real file and finds its `lib/`
+  beside that one ([#263](../../../issues/263)).
 - `run-exclusive` takes the command after `--`, as an argument list. See
   [One heavy run at a time](gate.md#one-heavy-run-at-a-time) for the lock and what it covers.
 
@@ -57,7 +60,7 @@ and point the team file at them.
 `up` takes a team file outside `teams/` for a throwaway one (a test) and will not start its seats on your
 default tmux server, where a real team runs: run it on a private server (see
 [Live tests](testing.md#live-tests)), or pass `up --default-socket` if that team is meant to run there. `down`
-(with or without `--yes`), `say`, `attach`, `view` and `titles` apply the same rule before any tmux call,
+(with or without `--yes`), `say`, `flush`, `attach`, `view` and `titles` apply the same rule before any tmux call,
 because a copy of a real team file shares its session prefix and would reach the real seats: kill them,
 type into them, show them or relabel them ([#105](../../../issues/105), [#124](../../../issues/124)).
 `status` only reads, and `migrate` keeps any worktree a running process works in, on whatever server
