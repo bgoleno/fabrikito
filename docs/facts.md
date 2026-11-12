@@ -62,6 +62,10 @@ and `run-exclusive`. Source: [Commands](commands.md); the `case` at the end of `
 - Each role can have its own model, effort, permission mode, permission rules, skills, kickoff message
   and temp folder. Source: [The team file](team-file.md#its-parts); `teams/example.yaml` documents every
   key.
+- A seat with a temp folder of its own may edit files there without being asked, in a permission mode
+  that prompts: its settings carry an `Edit` allow on that folder and on no other role's. A temp folder
+  that overlaps another role's, the state folder, the repository, a working directory or the worktree
+  folder is refused when the team file loads. Source: [Temp files](team-file.md#temp-files).
 - Your own team files and project prompts are git-ignored, so a project's specifics stay out of the
   fabrikito repository. Source: [Which team file](commands.md#which-team-file).
 
@@ -139,7 +143,7 @@ Say these as the docs say them. Do not strengthen them.
 - The latest release is the git tag `v0.2.0`. There is no GitHub Release entry and nothing to download:
   the way to get it is to clone the repository and check out the tag
   ([Set up a release checkout](pinned-release.md#set-up-a-release-checkout)). The `main` branch holds
-  changes made since then that are in no release yet. The launcher has no version command of its own: `check` prints the checkout it
+  changes made since then that are in no release yet; [Release notes: 0.3.0](release-0.3.0.md) lists them. The launcher has no version command of its own: `check` prints the checkout it
   runs from and its `git describe`. Source: `git tag`; `install_line` in `fabrikito`.
 - The repository is public, at <https://github.com/bgoleno/fabrikito>, under the Apache License 2.0.
   The `security-audit` skill is a modified copy of an MIT-licensed skill. Source:
