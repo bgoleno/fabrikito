@@ -306,6 +306,8 @@ rmdir $qd/00000000000000000003-3; rmdir $qd 2>/dev/null
 echo "--- test/e2e.sh takes the run lock itself (#309)"
 el=$rx/el; mkdir -p $el/src/test/e2e $el/vol
 cp $SRC/test/e2e.sh $el/src/test/e2e.sh; ln -s $SRC/fabrikito $el/src/fabrikito
+# The tmux guard too (#307): test/e2e.sh starts nothing from a tree that has none, as test/e2e-exit-trap.sh's tree shows.
+mkdir $el/src/test/guard && cp $SRC/test/guard/tmux $el/src/test/guard/tmux && chmod +x $el/src/test/guard/tmux
 echo 'int main(void) { return 0; }' > $el/src/test/e2e/fake-claude.c
 for el_a in lib $AREAS; do echo "e2e_end=$el_a" > $el/src/test/e2e/$el_a.sh; done
 { echo "el_d=$el; el_lock=$FACTORY_RUN_LOCK"; cat <<'EOF'
