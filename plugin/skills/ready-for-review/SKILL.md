@@ -11,7 +11,7 @@ command, and only if that number is digits alone; otherwise stop and ask. If it 
 from your progress note; if the note has none, ask and stop.
 
 Your role prompt holds the rules: the gate, the base ref, checking the remote, how a PR links its
-issue (`Closes` or `Refs`), what a PR body says, waiting for CI, who reviews, and how to write a
+issues (`Closes` or `Refs`), what a PR body says, waiting for CI, who reviews, and how to write a
 message. This skill is only the order to apply them in when a change is ready, and does not restate
 them. Where the two differ, the role prompt wins.
 

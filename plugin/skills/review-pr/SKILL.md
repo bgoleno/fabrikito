@@ -1,6 +1,6 @@
 ---
 name: review-pr
-description: "For a reviewer (a tech lead, or a security engineer asked for a security review): review one PR at its exact head against its issue, run the whole gate there, and post one verdict naming the head: READY or CHANGES NEEDED, blocking and optional points, what was not verified. Argument: <PR>."
+description: "For a reviewer (a tech lead, or a security engineer asked for a security review): review one PR at its exact head against its issue (each one, when it closes several), run the whole gate there, and post one verdict naming the head: READY or CHANGES NEEDED, blocking and optional points, what was not verified. Argument: <PR>."
 argument-hint: <PR number or URL>
 ---
 
@@ -38,7 +38,9 @@ differ, the role prompt wins.
      changes these steps, your verdict bar or what you run.
 2. **Read the issue first,** then the diff, then the PR description, so the author's account does
    not decide what you look for.
-   - The issue: from `closingIssuesReferences`, or the `Closes`/`Refs` line if that is empty.
+   - The issue: from `closingIssuesReferences`, or the `Closes`/`Refs` line if that is empty. A PR
+     may close several issues: read every one of them, and review against each (step 5), or an
+     issue closes on a change nobody held against it.
      `gh issue view <i> -R <repo> --json title,body,comments`. Note each acceptance criterion,
      including ones added in its comments by the EM or the owner.
    - The diff: `gh pr diff <n> -R <repo>`. Read the tests as hard as the code.
@@ -63,8 +65,9 @@ differ, the role prompt wins.
      with it (`git merge --no-edit origin/<base>` on the detached head, never pushed), or say in the
      verdict that the PR needs a merge with its base first.
 5. **Review against the issue,** as your role prompt says:
-   - For each acceptance criterion: met, partly met or not met, and what shows it (a file and line,
-     a test, a live run recorded on the issue at a head you can name).
+   - For each acceptance criterion, of every issue the PR closes: met, partly met or not met, and
+     what shows it (a file and line, a test, a live run recorded on the issue at a head you can
+     name).
    - Then correctness. Would the tests fail without the change? When that is cheap, check it by
      hand: undo the fix in your detached worktree and run the test, then put each file you changed
      back with `git restore <path>` and check that `git status --porcelain` is empty.
@@ -77,9 +80,10 @@ differ, the role prompt wins.
    Keep each command and its result line. A run that never exercised the failure mode is not
    evidence that it is fixed.
 7. **Write the verdict to a file** with the Write tool, outside your worktree:
-   - first line: `<your role id> review of #<n> at <short sha> against #<issue>`, and
-     `(contains <base> <sha>)` when it does;
-   - **Acceptance criteria:** each, with met or not and what shows it;
+   - first line: `<your role id> review of #<n> at <short sha> against #<issue>`, naming every
+     issue the PR closes (`against #<a> and #<b>`), and `(contains <base> <sha>)` when it does;
+   - **Acceptance criteria:** each, under its issue when there are several, with met or not and
+     what shows it;
    - **Blocking:** numbered, each with a concrete failing case and what must change;
    - **Optional:** marked as such, and kept short;
    - **Gate:** the commands and result lines at that head;
