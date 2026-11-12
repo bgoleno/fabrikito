@@ -28,7 +28,8 @@ together in one iTerm tab. Read `README.md` for use and `teams/example.yaml` for
   file and prompts live in the git-ignored `teams/` and `projects/`. Scan before committing:
   `git grep -n -i -E "<project name>|<owner name>"` must print nothing.
 - Issues first: every change to this repository starts as a GitHub issue, filed before work begins. Its PR
-  links it with `Closes #<n>` when the PR completes the issue (`Refs #<n>` when it does not) and fills in
+  names at least one issue and links each issue it completes with its own `Closes #<n>` (one PR may close
+  several issues; `Refs #<n>` for an issue it does not complete), and fills in
   `.github/pull_request_template.md`.
 - Gates: `bash -n fabrikito factory.sh test/e2e.sh test/e2e-exit-trap.sh lib/stop_gate.sh lib/session_start.sh lib/log_message.sh`, `ruby -c lib/team_config.rb`, and
   `TEST_VOLUME=/Volumes/<a mounted, writable volume> test/e2e.sh` (all assertions must pass).

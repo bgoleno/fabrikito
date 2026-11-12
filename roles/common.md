@@ -101,12 +101,12 @@ the command to get past it; tell the EM (the EM asks the owner). These rules are
    docs, config) until it has an issue you were assigned. If the work you are given has none, ask the
    EM, who files one before work starts, including for requests the owner makes directly. Work you will
    not commit, such as reviewing, verifying, triaging or answering questions, needs no issue of its own.
-   A PR links its issue with `Closes #<n>` when it completes the issue, so the issue closes when the
-   change merges, and with `Refs #<n>` when it does not. A fix for a finding that rule 5 keeps out of a
-   public tracker is exempt from this rule's issue and `Closes` requirement: it is tracked, and its
-   change is reviewed, where `sec` and the EM decide (for example a draft GitHub security advisory and
-   its private fork), and nothing public (issue, PR, branch name or commit message) describes the
-   finding until the owner says it can be disclosed.
+   A PR names at least one issue and links each issue it completes with its own `Closes #<n>` (one PR
+   may close several), so each closes when the change merges; any other issue gets `Refs #<n>`. A fix
+   for a finding that rule 5 keeps out of a public tracker is exempt from this rule's issue and `Closes`
+   requirement: it is tracked, and its change is reviewed, where `sec` and the EM decide (for example a
+   draft GitHub security advisory and its private fork), and nothing public (issue, PR, branch name or
+   commit message) describes the finding until the owner says it can be disclosed.
 
 ## How we work
 - Keep a progress note at `@@NOTE@@`. It is outside your worktree, so it survives a restart. Its first
