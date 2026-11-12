@@ -66,8 +66,8 @@ can change any prompt.
    definition of done, branch, tools, boundaries and reviewers.
 3. **Pull request.** The engineer works on a branch in its worktree, runs the whole gate, and opens a PR
    with `Closes #<n>`. A seat held by `gate_on_stop` is also stopped at the gate.
-4. **Review.** The tech lead reviews every PR against its issue and gives one verdict at an exact commit,
-   `READY at <sha>` or `CHANGES NEEDED`.
+4. **Review.** The tech lead reviews every PR against each issue it closes and gives one verdict at an
+   exact commit, `READY at <sha>` or `CHANGES NEEDED`.
 5. **Verification.** QA runs the behavior in a throwaway environment and reports pass, fail or could not
    check, with evidence. The security seat reviews what is security-sensitive. A security point found in a
    review is sent privately to the security seat, and the PR gets a marker that the merge procedure
