@@ -915,7 +915,7 @@ class TeamConfig
   # runs under now: each path as configured and, when a symlink makes it differ, its real path too,
   # so neither spelling (nor the link itself) is left open. Every seat
   # gets an Edit deny on each (Edit also covers Write, NotebookEdit and shell redirects). This is not
-  # a boundary: a script can still write them (see README, Safety, and #29).
+  # a boundary: a script can still write them (see docs/safety.md and #29).
   def protected_paths(id)
     [
       # what fabrikito regenerates for each start (settings, launchers, prompts) and the message log
@@ -1170,7 +1170,7 @@ class TeamConfig
     # Claude Code's auto-updater reinstalls its package under a running seat, and macOS then cannot
     # tell which process the seat's claude is, so its privacy grants (the worktree volume) stop
     # working until a restart (#50). The launch script exports this too; a value here also outranks
-    # one in a project's .claude/settings.json. Update deliberately instead (README).
+    # one in a project's .claude/settings.json. Update deliberately instead (docs/updating-claude-code.md).
     out['env'] = { 'DISABLE_AUTOUPDATER' => '1' }
     unless auto_memory?(id)
       # Both documented switches (same page as #auto_memory?): --settings outranks user, project and
@@ -1466,7 +1466,7 @@ class TeamConfig
       out << '  Messages from a bypass seat to a prompting seat, and from a prompting seat to a bypass seat, wait at an ' \
              "approval dialog in the receiver's pane and are dropped when it expires (dialogExpiry, 5 minutes by default). " \
              'Messages between seats of the same class are delivered.'
-      out << '  Give every seat a permission_mode of the same class, or set crossSessionInbound (README: Which messages are held).'
+      out << '  Give every seat a permission_mode of the same class, or set crossSessionInbound (docs/messaging.md: Which messages are held).'
     end
     if by[nil] && (by['bypass'] || by['prompting'])
       out << "note: check cannot see the permission mode of #{by[nil].join(', ')} (inherited from settings), so it " \
