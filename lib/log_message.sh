@@ -117,10 +117,11 @@ ruby --disable-gems -rjson -e '
   # link at the log, or into anything there but a regular file (#194, as say): NOFOLLOW makes the
   # open fail on a symlink, NONBLOCK keeps it from waiting on a FIFO, and what was opened must be a
   # regular file with one link: a hard link passes the other two (tl and sec on #206). A refused
-  # open raises, which costs the line, as any other failure here does.
+  # open raises, which costs the line, as any other failure here does. A log this creates is for the
+  # owner only (0600, whatever the umask), as the one say creates is: it holds every message.
   def append(log, fields)
     return unless File.directory?(File.dirname(log))
-    File.open(log, File::WRONLY | File::APPEND | File::CREAT | File::NOFOLLOW | File::NONBLOCK, 0o666) do |f|
+    File.open(log, File::WRONLY | File::APPEND | File::CREAT | File::NOFOLLOW | File::NONBLOCK, 0o600) do |f|
       st = f.stat
       f.write(fields.join("\t") + "\n") if st.file? && st.nlink == 1
     end

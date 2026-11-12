@@ -432,14 +432,28 @@ uchk=$(TEAM_STATE_DIR=$T/uroot/u $S -c $T/sec.yaml check 2>&1); rc=$?; chmod 700
 # this runs in a state folder and session prefix of its own, leaving the test team's alone. Only sec
 # is started; its session and worktree are removed afterwards.
 sed 's/^  prefix: tt$/  prefix: ts/' $T/sec.yaml > $T/sec2.yaml
-TEAM_STATE_DIR=$T/secstate $S -c $T/sec2.yaml up --no-view sec >/dev/null 2>&1
+(umask 022; TEAM_STATE_DIR=$T/secstate $S -c $T/sec2.yaml up --no-view sec >/dev/null 2>&1)
 [ -d $T/secstate/triage ] && [ "$(stat -f %Lp $T/secstate/triage)" = 700 ] && ok "up makes the triage folder (mode 700) for a team with a sec role" || { bad "up: triage folder"; ls -la $T/secstate; }
+# State files are created for the owner only, whatever the umask (022 for the up above and the say here):
+# the state folder, the notes folder and every generated folder are 700, and the message log, which the
+# first say makes, is 600. The say is one that is refused (an empty message), so no seat is typed into.
+(umask 022; TEAM_ROLE=sec TEAM_STATE_DIR=$T/secstate $S -c $T/sec2.yaml say em " " >/dev/null 2>&1)
+# loose_state <state folder>: each of those paths that has a group or other permission bit, or is missing.
+loose_state() { local p m a
+  for p in "$1" "$1/notes" $(for a in $(TEAM_STATE_DIR=$1 ruby $SRC/lib/team_config.rb $T/sec2.yaml get state.generated_dirs); do echo "$1/$a"; done) "$1/messages.log"; do
+    m=$(stat -f %Lp "$p" 2>/dev/null); case $m in [0-7]00) ;; *) printf ' %s:%s' "${p#$1}" "${m:-missing}" ;; esac
+  done; }
+loose=$(loose_state $T/secstate)
+[ -d $T/secstate/settings ] && [ -z "$loose" ] && ok "up and say under umask 022 make the state folder, notes, the generated folders and messages.log with no group or other permission" || bad "state paths open to group or other (path:mode):$loose"
 # An existing folder with a looser mode gets 700 too, and its records are left alone. sec is still
 # running, so this up only writes settings and folders and skips the seat.
 chmod 755 $T/secstate/triage; echo record > $T/secstate/triage/pr-1.md
+chmod 755 $T/secstate $T/secstate/notes $T/secstate/settings; chmod 644 $T/secstate/messages.log; cp $T/secstate/messages.log $T/secstate-log.want
 TEAM_STATE_DIR=$T/secstate $S -c $T/sec2.yaml up --no-view sec >/dev/null 2>&1
 [ "$(stat -f %Lp $T/secstate/triage)" = 700 ] && [ "$(cat $T/secstate/triage/pr-1.md 2>/dev/null)" = record ] \
   && ok "up gives an existing triage folder mode 700 and leaves its records" || { bad "up: existing triage folder"; ls -la $T/secstate/triage; }
+loose=$(loose_state $T/secstate)
+[ -z "$loose" ] && cmp -s $T/secstate/messages.log $T/secstate-log.want && ok "up takes group and other permission off a state folder, its folders and a message log that were there already, and leaves the log's lines" || bad "existing state paths left open to group or other (path:mode):$loose"
 # up refuses a symlink, or anything else that is not a real folder, at every folder it makes or
 # writes under the state folder, naming it: triage and notes (#148), the generated folders, the
 # hooks' gate folder and the folder of the team's claude copy (#168). It makes, writes or chmods
@@ -580,7 +594,14 @@ senv=$(tmux show-environment -t '=tk-em:' TEAM_STATE_DIR 2>&1)
 env -u TEAM_STATE_DIR TEAM_CONFIG=$T/k.yaml TEAM_ROLE=em TEAM_SCRIPT=$S TEAM_VIEW=0 $S say em "hello-from-key-state" >/dev/null 2>&1; sleep 1
 grep -qF "hello-from-key-state" $T/ks3/messages.log 2>/dev/null && [ ! -e $SRC/.state/tk ] \
   && ok "state: a seat's say (TEAM_CONFIG and TEAM_SCRIPT, no TEAM_STATE_DIR) logs in the key's folder, outside the install" || { bad "state: a seat's say"; ls $T/ks3 $SRC/.state 2>&1 | head; }
-$S -c $T/k.yaml down --yes >/dev/null 2>&1
+# The seat was started with the key's folder. A down with the same team file and another state folder
+# (this run's TEAM_STATE_DIR) is not that team's down: the seat reads and writes the folder it was started
+# with. It stops nothing and names both folders; the down with the seat's own folder stops it.
+out=$($S -c $T/k.yaml down --yes 2>&1); rc=$?
+[ $rc -ne 0 ] && tmux has-session -t '=tk-em' 2>/dev/null && echo "$out" | grep -qF "its state folder is $RT/ks3, this team's is $RT/state" && echo "$out" | grep -qF "one team file run with two state folders (TEAM_STATE_DIR)" \
+  && echo "$out" | grep -qF "is another team's (started with this same team file), not this team's ($T/k.yaml)" \
+  && ok "state: down with the seat's team file and another state folder stops nothing, and names both folders and TEAM_STATE_DIR" || { bad "state: down with another state folder than the seat's (rc=$rc)"; echo "$out" | tail -2; }
+nos $S -c $T/k.yaml down --yes >/dev/null 2>&1
 # up with TEAM_STATE_DIR set: the seat gets that folder (it wins over the key), so its say reads what up wrote.
 up=$(TEAM_STATE_DIR=$T/ks4 TEAM_VIEW=0 $S -c $T/k.yaml up --no-view em 2>&1); rc=$?; sleep 1
 senv=$(tmux show-environment -t '=tk-em:' TEAM_STATE_DIR 2>&1)

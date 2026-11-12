@@ -37,6 +37,38 @@ logged all delivered $'to all,\nfrom em' 'to all,\nfrom em' "a multi-line say al
 # C1 controls (CSI, OSC, ST) and bidi overrides are escaped by code point, as their UTF-8 bytes.
 logged w2 NOT-DELIVERED $'csi \xc2\x9b31m osc \xc2\x9d0;x\xc2\x9c rlo \xe2\x80\xae isolate \xe2\x81\xa6.' 'csi \xC2\x9B31m osc \xC2\x9D0;x\xC2\x9C rlo \xE2\x80\xAE isolate \xE2\x81\xA6.' "a message with C1 controls and bidi overrides"
 logged w2 NOT-DELIVERED $'not utf-8: \x9b, \xff' 'not utf-8: \x9B, \xFF' "a message that is not valid UTF-8"
+# say delivers a message body with control bytes as plain text. What the seat receives for one say is two
+# pastes (the label, then the body) and the Enter: four ESC, all of them the paste marks, and one CR, the
+# Enter. A control byte of the body other than a tab or a newline is not sent: an ESC there could end the
+# paste early or drive the seat's terminal, and a CR is an Enter. The printable text arrives as it was, the
+# message is delivered, and the log keeps the message as it was given, escaped.
+ctl_say() { # ctl_say <what> <body> <the text the seat must receive>
+  local k0 n rc esc cr other line
+  k0=$(wc -c < $T/keys-w1.log | tr -d ' '); n=$(wc -l < $T/state/messages.log)
+  TEAM_ROLE=em $S -c $T/team.yaml say w1 "$2" >/dev/null 2>&1; rc=$?; sleep 1
+  tail -c +$((k0 + 1)) $T/keys-w1.log > $T/ctl-keys
+  esc=$(LC_ALL=C tr -cd '\033' < $T/ctl-keys | wc -c | tr -d ' '); cr=$(LC_ALL=C tr -cd '\r' < $T/ctl-keys | wc -c | tr -d ' ')
+  other=$(keytext $T/ctl-keys | LC_ALL=C tr -d '\r' | LC_ALL=C tr -cd '\000-\010\013-\037\177' | wc -c | tr -d ' ')
+  line=$(tail -n +$((n + 1)) $T/state/messages.log)
+  if [ $rc = 0 ] && [ "$esc" = 4 ] && [ "$cr" = 1 ] && [ "$other" = 0 ] && [ "$(keytext $T/ctl-keys | LC_ALL=C tr -d '\r')" = "[from em] $3" ] \
+    && [ "$(printf '%s\n' "$line" | cut -f2-4)" = "em	w1	delivered" ] && [ "$(printf '%b' "$(printf '%s\n' "$line" | cut -f5-)")" = "$2" ]; then
+    ok "say delivers $1 as plain text: two pastes and one Enter reach the seat, and the log keeps the message as given"
+  else bad "say with $1 (rc=$rc, ESC=$esc, CR=$cr, other controls=$other)"; od -c $T/ctl-keys | head -6; printf '%s\n' "$line" | cut -c1-200
+    # A say that was refused after its paste leaves the text in the box, where it would fail every later
+    # case that sends to w1: submit it, so one failure here stays one failure.
+    tmux send-keys -t '=tt-w1:' Enter; sleep 1; fi
+}
+ctl_say "a body that holds ESC, an end-of-paste mark, BEL, CR and DEL" $'ctl \e[201~after \e]0;t\a cr\rdel\x7f end' 'ctl [201~after ]0;t crdel end'
+ctl_say "a body that holds C1 controls (CSI and OSC as code points)" $'c1 \xc2\x9b31m and \xc2\x9d0;t\xc2\x9c, utf-8 é ✓ kept' 'c1 31m and 0;t, utf-8 é ✓ kept'
+# A body that is not valid UTF-8 is refused before anything is pasted. No byte of it reaches the seat, so
+# the C1 controls written as UTF-8 in it do not either, and nothing is left in the seat's box.
+k0=$(wc -c < $T/keys-w1.log | tr -d ' '); n=$(wc -l < $T/state/messages.log)
+out=$(TEAM_ROLE=em $S -c $T/team.yaml say w1 $'bad \xff byte, c1 \xc2\x9b31m and \xc2\x9d0;t\xc2\x9c' 2>&1); rc=$?; sleep 1
+line=$(tail -n +$((n + 1)) $T/state/messages.log)
+if [ $rc -ne 0 ] && [ "$(wc -c < $T/keys-w1.log | tr -d ' ')" = "$k0" ] && echo "$out" | grep -qF "not valid UTF-8" && [ "$(printf '%s\n' "$line" | cut -f2-4)" = "em	w1	NOT-DELIVERED" ]; then
+  ok "say refuses a body that is not valid UTF-8, with C1 controls written as UTF-8 in it, before any paste: no byte reaches the seat, logged NOT-DELIVERED"
+else bad "say with a body that is not valid UTF-8 (rc=$rc)"; echo "$out" | tail -2; tail -c +$((k0 + 1)) $T/keys-w1.log | od -c | head -4; printf '%s\n' "$line" | cut -c1-200
+  tmux send-keys -t '=tt-w1:' Enter; sleep 1; fi
 # An empty or whitespace-only message is refused before any tmux call (#157), instead of a bare label
 # going out as a turn of its own. A tmux stand-in first on PATH logs each call and runs the real tmux,
 # so a say that did reach tmux would deliver as before and fail here.
@@ -126,6 +158,93 @@ for l in C none; do
   [ "$(wc -l < $T/state/messages.log)" -eq $((n + 1)) ] && tail -1 $T/state/messages.log | grep -qF "from a non-ASCII team ($l)" \
     && ok "say from a team with a non-ASCII workdir, owner and home ($l)" || { bad "say from a non-ASCII team ($l)"; tail -1 $T/state/messages.log; }
 done
+# What the file system returns is tagged by the locale too (#360): outside a UTF-8 locale a listed name
+# with a non-ASCII byte came back as a binary string, which is never equal to the UTF-8 path of the team's
+# own state folder, cannot be joined to a folder with a non-ASCII name and cannot be normalized, and the
+# mount table came back as US-ASCII. The state folder above is empty, so nothing takes it for a team's
+# state and those cases never met this. up fills it (settings/, launch/, prompts/), and from then on
+# every command that loads the team file ended in a Ruby backtrace.
+# The four names below steer the helpers. A caller's own value would change what the cases compare (with
+# NRL exported, the UTF-8 locale with itself), so none comes in from the environment (tl on #362).
+unset NRL NRD NSL NSANY
+# nr <C | latin1 | none> <team file> <command> [VAR=value ...]: as rn, on any team file and without this
+# run's TEAM_STATE_DIR; latin1 is en_US.ISO8859-1. With NRL set it runs under that locale instead: the
+# UTF-8 reference, same environment. With NRD set it runs in that folder (for a relative team file path).
+nr() { local l=$1 f=$2 c=$3 loc=C; shift 3
+  set -- HOME="$T/home$E" CLAUDE_CONFIG_DIR="$T/home$E/.claude" "$@"
+  [ $l = latin1 ] && loc=en_US.ISO8859-1
+  ( [ -z "${NRD:-}" ] || cd "$NRD" || exit 1
+    if [ $l = none ]; then env -i PATH="$PATH" ${NRL:+LC_ALL=$NRL} "$@" ruby $SRC/lib/team_config.rb "$f" $c em 2>&1
+    else env -u TEAM_STATE_DIR LC_ALL=${NRL:-$loc} "$@" ruby $SRC/lib/team_config.rb "$f" $c em 2>&1; fi ); }
+# nsame <what> <team file> <lines the output must hold, one a line> [VAR=value ...]: validate, check's
+# report and em's settings come out under LC_ALL=C and with no locale exactly as under a UTF-8 locale,
+# each status included, with no Ruby error and with those lines (an empty line asks for nothing). NSL
+# names other locales to run under, in nr's words.
+nsame() { local what=$1 f=$2 want=$3 l c w out ref good; shift 3
+  for l in ${NSL:-C none}; do
+    out=$(for c in validate permissions_report settings; do nr $l "$f" $c "$@"; echo "$c: status $?"; done)
+    ref=$(for c in validate permissions_report settings; do NRL=en_US.UTF-8 nr $l "$f" $c "$@"; echo "$c: status $?"; done)
+    good=1; [ "$out" = "$ref" ] && { [ -n "${NSANY:-}" ] || ! echo "$out" | grep -q 'Error)'; } || good=0
+    while IFS= read -r w; do echo "$out" | grep -qF -- "$w" || good=0; done <<< "$want"
+    [ $good = 1 ] && ok "$what ($l)" || { bad "$what ($l)"; echo "$out" | grep -E 'Error\)|status|^other teams|^skipped|^team config error' | head -8; }
+  done; }
+nf() { mkdir -p "$1/settings" "$1/launch" "$1/prompts"; } # what up leaves in a state folder
+NA=$T/na; nf "$NA/alone/s$E"; nf "$NA/two/s$E"; nf "$NA/two/other"; nf "$NA/beside/own"; nf "$NA/beside/o$E"
+nsame "a filled state folder with a non-ASCII name, alone in its parent, is the team's own" "$NT" "validate: status 0
+other teams: none" TEAM_STATE_DIR="$NA/alone/s$E"
+nsame "a filled state folder with a non-ASCII name beside another team's" "$NT" "validate: status 0
+other teams: $NA/two/other (found)" TEAM_STATE_DIR="$NA/two/s$E"
+nsame "another team's state folder with a non-ASCII name is found and denied" "$NT" "validate: status 0
+other teams: $NA/beside/o$E (found)
+\"Edit(/$NA/beside/o$E/**)\"" TEAM_STATE_DIR="$NA/beside/own"
+# Under a locale that is neither UTF-8 nor C the fault was silent: every command exited 0, and the other
+# team's folder was not found, so the seats got no deny for it (tl and sec2 on #362).
+NSL=latin1 nsame "another team's state folder with a non-ASCII name is found and denied, as under a UTF-8 locale" "$NT" "validate: status 0
+other teams: $NA/beside/o$E (found)
+\"Edit(/$NA/beside/o$E/**)\"" TEAM_STATE_DIR="$NA/beside/own"
+# The team file's own path comes from the command line, which the locale tags whatever the line in the
+# parser says, and a relative one is joined to the working folder, which that line makes UTF-8: the two
+# must not meet before the argument is read as UTF-8 too (tl on #362).
+nf "$NA/plain/own"
+NRD="$T/dir$E" nsame "a team file named by a relative path with a non-ASCII character, from a folder with one" "../dir$E/team.yaml" "validate: status 0
+other teams: none" TEAM_STATE_DIR="$NA/plain/own"
+# A state root with a non-ASCII name: joining any listed non-ASCII name to it raised, a plain file's too.
+nf "$NA/root$E/s$E"; nf "$NA/root$E/o$E"; : > "$NA/root$E/note$E.txt"
+nsame "a state root with a non-ASCII name that holds non-ASCII names" "$NT" "validate: status 0
+other teams: $NA/root$E/o$E (found)" TEAM_STATE_DIR="$NA/root$E/s$E"
+# A link is compared by its real path before anything says what it leads to.
+nf "$NA/link/own"; ln -s "$NA/link/own" "$NA/link/l$E"
+nsame "a link with a non-ASCII name to the team's own state folder is passed over" "$NT" "validate: status 0
+skipped   : $NA/link/l$E (a symlink to this team's own state folder, or to a folder holding it)" TEAM_STATE_DIR="$NA/link/own"
+# state: lists the folder it names when that is not a team's state yet (validate_state_key).
+mkdir -p "$NA/key$E/c$E"; nf "$NA/held$E/c$E"
+{ printf 'state: "%s"\n' "$NA/key$E"; cat "$NT"; } > "$NA/key.yaml"; { printf 'state: "%s"\n' "$NA/held$E"; cat "$NT"; } > "$NA/held.yaml"
+nsame "state: a folder with a non-ASCII name that holds one" "$NA/key.yaml" "validate: status 0"
+nsame "state: a folder with a non-ASCII name that holds a team's state is refused, naming both" "$NA/held.yaml" "validate: status 1
+state: $NA/held$E holds another team's state folder ($NA/held$E/c$E)"
+# state: on a volume is looked up in the mount table. The stand-in prints $NA/mounts: volumes no machine has.
+mkdir -p "$NA/bin"; printf '#!/bin/sh\ncat "%s"\n' "$NA/mounts" > "$NA/bin/mount"; chmod +x "$NA/bin/mount"
+{ printf 'state: "%s"\n' "/Volumes/e2e-V$E/st"; cat "$NT"; } > "$NA/vol.yaml"
+printf '/dev/disk9s1 on /Volumes/e2e-V\303\251 (apfs, local)\n' > "$NA/mounts"
+nsame "state: on a mounted volume with a non-ASCII name" "$NA/vol.yaml" "validate: status 0" PATH="$NA/bin:$PATH"
+# A name that is not valid UTF-8 (tl on #360) is read as under a UTF-8 locale too, so the result is that
+# locale's. In the mount table: a volume listed beside it is still found, and one not listed is still
+# not mounted.
+printf '/dev/disk8s1 on /Volumes/e2e-\377 (apfs, local)\n/dev/disk9s1 on /Volumes/e2e-V\303\251 (apfs, local)\n' > "$NA/mounts"
+nsame "state: the volume is found in a mount table that holds a name that is not valid UTF-8" "$NA/vol.yaml" "validate: status 0" PATH="$NA/bin:$PATH"
+printf '/dev/disk8s1 on /Volumes/e2e-\377 (apfs, local)\n' > "$NA/mounts"
+nsame "state: a volume missing from a mount table that holds a name that is not valid UTF-8 is not mounted" "$NA/vol.yaml" "validate: status 1
+state: /Volumes/e2e-V$E/st is on /Volumes/e2e-V$E, which is not mounted" PATH="$NA/bin:$PATH"
+# In a listing: a folder with such a name that holds a team's state, beside the team's own. APFS and most
+# disks refuse the name, and then there is nothing to list; where a disk takes it, the outcome only has
+# to be the UTF-8 locale's, whatever that is (NSANY: a Ruby error there is compared, not refused).
+nf "$NA/bad/own"
+if nf "$NA/bad/o"$'\xff' 2>/dev/null; then NSANY=1 nsame "a listed name that is not valid UTF-8 gives the UTF-8 locale's result" "$NT" "" TEAM_STATE_DIR="$NA/bad/own"
+else for l in C none; do ok "a listed name that is not valid UTF-8: this disk refuses such a name, so nothing was compared ($l)"; done; fi
+# Through the launcher: every command validates the team file first.
+out=$(LC_ALL=C HOME="$T/home$E" TEAM_STATE_DIR="$NA/alone/s$E" $S -c "$NT" check 2>&1); rc=$?
+[ $rc = 0 ] && echo "$out" | grep -qxF "other teams: none" && ! echo "$out" | grep -q 'Error)' \
+  && ok "check under LC_ALL=C with a filled state folder whose name is not ASCII" || { bad "check under LC_ALL=C, filled non-ASCII state folder (rc=$rc)"; echo "$out" | tail -3; }
 # The sender comes from TEAM_ROLE, which nothing validates: it is escaped like the message.
 n=$(wc -l < $T/state/messages.log)
 TEAM_ROLE=$'e\tm\nx' $S -c $T/team.yaml say w2 "from an odd sender" >/dev/null 2>&1
@@ -154,6 +273,12 @@ rm $T/state/messages.log && mv $T/msglog.real $T/state/messages.log
 echo "--- say: sec's messages are logged without their body (#227)"
 sed 's|^  w2: .*|&\n  sec: { title: Security, workdir: { type: project, path: '$T'/proj }, prompt_text: "sec prompt" }|' $T/team.yaml > $T/team-sec.yaml
 mkdir -p $T/secstate
+# em and w1 were started with the state folder $T/state, and a command acts only on its own team's sessions:
+# one whose state folder or repository is another is another team's, whatever its name. team-sec.yaml runs
+# with a state folder of its own, so for this section the two seats are handed to it, the way the owner
+# hands a session over after a state folder was moved (the refusal gives the command), and back at its end.
+say_hand() { local s d; d=$(cd "$1" && pwd -P); for s in tt-em tt-w1; do tmux set-environment -t "=$s" TEAM_STATE_REAL "$d"; done; }
+say_hand $T/secstate
 SECLOG=$T/secstate/messages.log; : > $SECLOG
 SEC_MARK='[body not logged: sec]'
 # secsay <what> <from> <to> <message>: one line with time, sender, recipient, status, marker; the sentinel is nowhere in the log.
@@ -183,4 +308,5 @@ echo \$SAY_RESEND_WINDOW \$SAY_NOTICE_COUNT"; }
 [ "$(say_set)" = "300 3" ] && [ "$(say_set FABRIKITO_SAY_RESEND_WINDOW=11 FABRIKITO_SAY_NOTICE_COUNT=5)" = "11 5" ] \
   && [ "$(say_set FACTORY_SAY_RESEND_WINDOW=12 FACTORY_SAY_NOTICE_COUNT=6)" = "12 6" ] && [ "$(say_set FABRIKITO_SAY_RESEND_WINDOW=13 FACTORY_SAY_RESEND_WINDOW=14 FABRIKITO_SAY_NOTICE_COUNT=7 FACTORY_SAY_NOTICE_COUNT=8)" = "13 7" ] \
   && ok "say: FABRIKITO_SAY_RESEND_WINDOW and _NOTICE_COUNT set the window and the count, the old FACTORY_SAY_ names still do, and the new ones win" || { bad "say: the names of the window and count settings"; say_set; say_set FACTORY_SAY_RESEND_WINDOW=12; }
+say_hand $T/state
 e2e_end=say # the last line: test/e2e.sh checks that the file ran to here
