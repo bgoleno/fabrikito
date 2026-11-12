@@ -150,4 +150,63 @@ m=$(grep -n '\$(mktemp' $S | grep -vE '\$\(mktemp "[^"]*\.X{6,}"')
 [ -z "$m" ] && grep -q '\$(mktemp' $S && ok "every mktemp in fabrikito has an explicit template" || { bad "a mktemp in fabrikito with no template"; echo "$m"; }
 tp=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml render em)
 echo "$tp" | grep -qF 'mktemp "$TMPDIR/name.XXXXXX"' && echo "$tp" | grep -qF "EPERM there" && echo "$tp" | grep -qF "never work" && ok "a seat's prompt says where temp files go and that EPERM is reported, not worked around" || { bad "the prompt on temp files"; echo "$tp" | grep -n -i "temp\|EPERM"; }
+
+echo "--- two team files with one session prefix: a command acts only on sessions its own team file started"
+# Two team files that share sessions.prefix give the same session names on one tmux server. up stores
+# the path of its team file in each session it starts, and every command that reaches a seat compares
+# it with its own file: the second file's up does not take the first's seats for its own, its down
+# stops none of them, and its say, flush, titles, attach and view leave them alone, each naming the
+# session and the file that started it. Where the second file lies makes no difference on a private
+# server, so both are in the scratch folder. oa is started by the first file only.
+own_team() { # own_team <file> <team name> <first word of its seats' titles>
+  mkdir -p "$(dirname "$1")"
+  cat > "$1" <<Y
+team: $2
+repo: { path: $T/repo, github: local/origin.git }
+project: { name: B, url: "https://github.com/users/x/projects/9" }
+storage: { volume: $VOL, root: $ROOT }
+sessions: { prefix: ow, claude: { wrapper: $T/bin/wrap } }
+roles:
+  oa: { title: $3 A, workdir: { type: project, path: $T/proj }, prompt_text: "oa" }
+  ob: { title: $3 B, workdir: { type: project, path: $T/proj }, prompt_text: "ob" }
+Y
+}
+OA=$T/own/a/team.yaml; OB=$T/own/b/team.yaml
+own_team $OA toa Seat; own_team $OB tob Other
+oa() { TEAM_STATE_DIR=$T/own/sa "$@"; }; ob() { TEAM_STATE_DIR=$T/own/sb "$@"; }
+oa $S -c $OA up --no-view oa >/dev/null 2>&1
+own_seat() { tmux list-sessions -F '#{session_name} #{session_created} #{pane_pid}' 2>/dev/null | grep '^ow-'; tmux show-options -v -t '=ow-oa:' set-titles-string 2>/dev/null; cat $T/keys-oa.log 2>/dev/null | cksum; }
+own_before=$(own_seat)
+echo "$own_before" | grep -q '^ow-oa ' && ! echo "$own_before" | grep -q '^ow-ob ' || bad "test setup: the first team's oa did not start alone ($own_before)"
+# own_refused <what> <command...>: the second file's command fails, names the session and the first file,
+# and the first team's seat is as it was (same session and pane process, same title, no key typed).
+own_refused() { local what=$1 out rc; shift
+  out=$(ob env TEAM_ROLE=ob "$@" 2>&1 </dev/null); rc=$?
+  if [ $rc -ne 0 ] && echo "$out" | grep -qF "ow-oa" && echo "$out" | grep -qF "$OA" && [ "$(own_seat)" = "$own_before" ]; then ok "$what"
+  else bad "$what (rc=$rc)"; echo "$out" | tail -3; own_seat; fi; }
+own_refused "up for a second team file with the first one's prefix fails, naming the session and the file that started it" $S -c $OB up --no-view
+[ ! -e $T/own/sb/settings ] && ! tmux has-session -t '=ow-ob' 2>/dev/null && ok "that up makes nothing in its state folder and starts none of its own seats" || { bad "the refused up made or started something"; ls $T/own/sb 2>&1; }
+own_refused "say from the second team file puts nothing into the first one's seat" $S -c $OB say oa "from the other file OWN-MARK"
+grep -q "NOT-DELIVERED" $T/own/sb/messages.log 2>/dev/null && ! tmux capture-pane -p -t '=ow-oa:' | grep -q "OWN-MARK" && ok "that say is logged NOT-DELIVERED in its own team's log, and nothing shows in the seat" || { bad "the refused say"; cat $T/own/sb/messages.log 2>&1 | tail -2; }
+own_refused "say all from the second team file puts nothing into the first one's seat" $S -c $OB say all "to all from the other file OWN-MARK"
+own_refused "flush from the second team file sends no key to the first one's seat" $S -c $OB flush oa
+own_refused "titles from the second team file leaves the first one's seat's title" $S -c $OB titles
+own_refused "attach from the second team file does not attach to the first one's seat" $S -c $OB attach oa
+own_n=$(cat $T/osascript.log 2>/dev/null | wc -l | tr -d ' ')
+own_refused "view from the second team file opens no view of the first one's seat" env TEAM_VIEW=1 $S -c $OB view
+[ "$(cat $T/osascript.log 2>/dev/null | wc -l | tr -d ' ')" = "$own_n" ] || bad "the refused view called osascript"
+own_refused "down without --yes from the second team file lists none of the first one's seats as its own" $S -c $OB down
+own_refused "down --yes from the second team file stops none of the first one's seats" $S -c $OB down --yes
+# The first file still reaches its own seat: by its path, and by another spelling of it (a link to its folder).
+ln -s $T/own/a $T/own/alink
+oa env TEAM_ROLE=ob $S -c $OA say oa "from its own file OWN-OK-1" >/dev/null 2>&1; rc1=$?
+oa env TEAM_ROLE=ob $S -c $T/own/alink/team.yaml say oa "through a link OWN-OK-2" >/dev/null 2>&1; rc2=$?; sleep 1
+[ $rc1 = 0 ] && [ $rc2 = 0 ] && keytext $T/keys-oa.log | grep -q "OWN-OK-1" && keytext $T/keys-oa.log | grep -q "OWN-OK-2" && ok "the team file that started a seat still reaches it, by its path and through a link to its folder" || { bad "say from the seat's own team file (rc=$rc1,$rc2)"; }
+# A team file that was moved: the refusal says how to hand the session over, and that works.
+own_out=$(ob env TEAM_ROLE=ob $S -c $OB say oa "x" 2>&1)
+echo "$own_out" | grep -qF "tmux set-environment -t '=ow-oa' TEAM_CONFIG" && tmux set-environment -t '=ow-oa' TEAM_CONFIG $OB \
+  && ob env TEAM_ROLE=ob $S -c $OB say oa "after the handover OWN-OK-3" >/dev/null 2>&1 && sleep 1 && keytext $T/keys-oa.log | grep -q "OWN-OK-3" \
+  && ok "the refusal names the tmux command that hands a session to a moved team file, and after it the file reaches the seat" || { bad "handing a session over to another team file"; echo "$own_out" | tail -2; }
+ob $S -c $OB down --yes >/dev/null 2>&1
+! tmux has-session -t '=ow-oa' 2>/dev/null && ok "down --yes from the file a session belongs to stops it" || { bad "down from the owning file left the seat"; tmux kill-session -t '=ow-oa' 2>/dev/null; }
 e2e_end=tmpdir # the last line: test/e2e.sh checks that the file ran to here

@@ -133,6 +133,11 @@ printf '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"comma
 o3=$(printf '{"hook_event_name":"PostToolUse","tool_name":"SendMessage","tool_input":{"to":"tt-w2","message":"m"}}' | $SRC/lib/log_message.sh $T/no-such-dir/messages.log w9 2>&1); r3=$?
 [ $r1 = 0 ] && [ $r3 = 0 ] && [ -z "$o3" ] && [ "$(wc -l < $LG)" -eq "$n" ] && [ ! -e $T/no-such-dir ] \
   && ok "another tool, and a log that cannot be written: exit 0, nothing printed, nothing logged" || { bad "log hook failure cases ($r1 $r3)"; echo "$o3"; }
+# A log that is not there yet is created for the owner only, whatever the umask: the hook can be the first to
+# write it (a seat that sends a message before any say).
+(umask 022; printf '{"hook_event_name":"PostToolUse","tool_name":"SendMessage","tool_input":{"to":"tt-w2","message":"first line of a new log"},"tool_response":{"success":true}}' | $SRC/lib/log_message.sh $T/lstate/new.log w9 tt-w2=w2 >/dev/null 2>&1)
+[ "$(wc -l < $T/lstate/new.log 2>/dev/null | tr -d ' ')" = 1 ] && [ "$(stat -f %Lp $T/lstate/new.log)" = 600 ] \
+  && ok "SendMessage log: a log the hook creates has no group or other permission (umask 022)" || { bad "SendMessage log: mode of a log the hook creates"; ls -l $T/lstate/new.log 2>&1; }
 # A link at messages.log (#194): the hook appends to the same log as say, so it must not write
 # through one either. The link points at a sentinel, which must come out byte for byte as it went in.
 printf 'sentinel log\n' > $T/sent-hlog; cp $T/sent-hlog $T/sent-hlog.want; ln -s $T/sent-hlog $T/lstate/linked.log

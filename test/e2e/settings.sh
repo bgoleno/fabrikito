@@ -385,14 +385,28 @@ uchk=$(TEAM_STATE_DIR=$T/uroot/u $S -c $T/sec.yaml check 2>&1); rc=$?; chmod 700
 # this runs in a state folder and session prefix of its own, leaving the test team's alone. Only sec
 # is started; its session and worktree are removed afterwards.
 sed 's/^  prefix: tt$/  prefix: ts/' $T/sec.yaml > $T/sec2.yaml
-TEAM_STATE_DIR=$T/secstate $S -c $T/sec2.yaml up --no-view sec >/dev/null 2>&1
+(umask 022; TEAM_STATE_DIR=$T/secstate $S -c $T/sec2.yaml up --no-view sec >/dev/null 2>&1)
 [ -d $T/secstate/triage ] && [ "$(stat -f %Lp $T/secstate/triage)" = 700 ] && ok "up makes the triage folder (mode 700) for a team with a sec role" || { bad "up: triage folder"; ls -la $T/secstate; }
+# State files are created for the owner only, whatever the umask (022 for the up above and the say here):
+# the state folder, the notes folder and every generated folder are 700, and the message log, which the
+# first say makes, is 600. The say is one that is refused (an empty message), so no seat is typed into.
+(umask 022; TEAM_ROLE=sec TEAM_STATE_DIR=$T/secstate $S -c $T/sec2.yaml say em " " >/dev/null 2>&1)
+# loose_state <state folder>: each of those paths that has a group or other permission bit, or is missing.
+loose_state() { local p m a
+  for p in "$1" "$1/notes" $(for a in $(TEAM_STATE_DIR=$1 ruby $SRC/lib/team_config.rb $T/sec2.yaml get state.generated_dirs); do echo "$1/$a"; done) "$1/messages.log"; do
+    m=$(stat -f %Lp "$p" 2>/dev/null); case $m in [0-7]00) ;; *) printf ' %s:%s' "${p#$1}" "${m:-missing}" ;; esac
+  done; }
+loose=$(loose_state $T/secstate)
+[ -d $T/secstate/settings ] && [ -z "$loose" ] && ok "up and say under umask 022 make the state folder, notes, the generated folders and messages.log with no group or other permission" || bad "state paths open to group or other (path:mode):$loose"
 # An existing folder with a looser mode gets 700 too, and its records are left alone. sec is still
 # running, so this up only writes settings and folders and skips the seat.
 chmod 755 $T/secstate/triage; echo record > $T/secstate/triage/pr-1.md
+chmod 755 $T/secstate $T/secstate/notes $T/secstate/settings; chmod 644 $T/secstate/messages.log; cp $T/secstate/messages.log $T/secstate-log.want
 TEAM_STATE_DIR=$T/secstate $S -c $T/sec2.yaml up --no-view sec >/dev/null 2>&1
 [ "$(stat -f %Lp $T/secstate/triage)" = 700 ] && [ "$(cat $T/secstate/triage/pr-1.md 2>/dev/null)" = record ] \
   && ok "up gives an existing triage folder mode 700 and leaves its records" || { bad "up: existing triage folder"; ls -la $T/secstate/triage; }
+loose=$(loose_state $T/secstate)
+[ -z "$loose" ] && cmp -s $T/secstate/messages.log $T/secstate-log.want && ok "up takes group and other permission off a state folder, its folders and a message log that were there already, and leaves the log's lines" || bad "existing state paths left open to group or other (path:mode):$loose"
 # up refuses a symlink, or anything else that is not a real folder, at every folder it makes or
 # writes under the state folder, naming it: triage and notes (#148), the generated folders, the
 # hooks' gate folder and the folder of the team's claude copy (#168). It makes, writes or chmods

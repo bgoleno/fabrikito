@@ -37,6 +37,29 @@ logged all delivered $'to all,\nfrom em' 'to all,\nfrom em' "a multi-line say al
 # C1 controls (CSI, OSC, ST) and bidi overrides are escaped by code point, as their UTF-8 bytes.
 logged w2 NOT-DELIVERED $'csi \xc2\x9b31m osc \xc2\x9d0;x\xc2\x9c rlo \xe2\x80\xae isolate \xe2\x81\xa6.' 'csi \xC2\x9B31m osc \xC2\x9D0;x\xC2\x9C rlo \xE2\x80\xAE isolate \xE2\x81\xA6.' "a message with C1 controls and bidi overrides"
 logged w2 NOT-DELIVERED $'not utf-8: \x9b, \xff' 'not utf-8: \x9B, \xFF' "a message that is not valid UTF-8"
+# say delivers a message body with control bytes as plain text. What the seat receives for one say is two
+# pastes (the label, then the body) and the Enter: four ESC, all of them the paste marks, and one CR, the
+# Enter. A control byte of the body other than a tab or a newline is not sent: an ESC there could end the
+# paste early or drive the seat's terminal, and a CR is an Enter. The printable text arrives as it was, the
+# message is delivered, and the log keeps the message as it was given, escaped.
+ctl_say() { # ctl_say <what> <body> <the text the seat must receive>
+  local k0 n rc esc cr other line
+  k0=$(wc -c < $T/keys-w1.log | tr -d ' '); n=$(wc -l < $T/state/messages.log)
+  TEAM_ROLE=em $S -c $T/team.yaml say w1 "$2" >/dev/null 2>&1; rc=$?; sleep 1
+  tail -c +$((k0 + 1)) $T/keys-w1.log > $T/ctl-keys
+  esc=$(LC_ALL=C tr -cd '\033' < $T/ctl-keys | wc -c | tr -d ' '); cr=$(LC_ALL=C tr -cd '\r' < $T/ctl-keys | wc -c | tr -d ' ')
+  other=$(keytext $T/ctl-keys | LC_ALL=C tr -d '\r' | LC_ALL=C tr -cd '\000-\010\013-\037\177' | wc -c | tr -d ' ')
+  line=$(tail -n +$((n + 1)) $T/state/messages.log)
+  if [ $rc = 0 ] && [ "$esc" = 4 ] && [ "$cr" = 1 ] && [ "$other" = 0 ] && [ "$(keytext $T/ctl-keys | LC_ALL=C tr -d '\r')" = "[from em] $3" ] \
+    && [ "$(printf '%s\n' "$line" | cut -f2-4)" = "em	w1	delivered" ] && [ "$(printf '%b' "$(printf '%s\n' "$line" | cut -f5-)")" = "$2" ]; then
+    ok "say delivers $1 as plain text: two pastes and one Enter reach the seat, and the log keeps the message as given"
+  else bad "say with $1 (rc=$rc, ESC=$esc, CR=$cr, other controls=$other)"; od -c $T/ctl-keys | head -6; printf '%s\n' "$line" | cut -c1-200
+    # A say that was refused after its paste leaves the text in the box, where it would fail every later
+    # case that sends to w1: submit it, so one failure here stays one failure.
+    tmux send-keys -t '=tt-w1:' Enter; sleep 1; fi
+}
+ctl_say "a body that holds ESC, an end-of-paste mark, BEL, CR and DEL" $'ctl \e[201~after \e]0;t\a cr\rdel\x7f end' 'ctl [201~after ]0;t crdel end'
+ctl_say "a body that holds C1 controls (CSI and OSC as code points)" $'c1 \xc2\x9b31m and \xc2\x9d0;t\xc2\x9c, utf-8 é ✓ kept' 'c1 31m and 0;t, utf-8 é ✓ kept'
 # An empty or whitespace-only message is refused before any tmux call (#157), instead of a bare label
 # going out as a turn of its own. A tmux stand-in first on PATH logs each call and runs the real tmux,
 # so a say that did reach tmux would deliver as before and fail here.
@@ -152,6 +175,11 @@ rm $T/state/messages.log && mv $T/msglog.real $T/state/messages.log
 echo "--- say: sec's messages are logged without their body (#227)"
 sed 's|^  w2: .*|&\n  sec: { title: Security, workdir: { type: project, path: '$T'/proj }, prompt_text: "sec prompt" }|' $T/team.yaml > $T/team-sec.yaml
 mkdir -p $T/secstate
+# em and w1 were started by team.yaml, and a command acts only on sessions its own team file started: for
+# this section they are handed to team-sec.yaml, the way the owner hands a session to a team file that was
+# moved, and back to team.yaml at its end.
+say_hand() { local s; for s in tt-em tt-w1; do tmux set-environment -t "=$s" TEAM_CONFIG "$1"; done; }
+say_hand $T/team-sec.yaml
 SECLOG=$T/secstate/messages.log; : > $SECLOG
 SEC_MARK='[body not logged: sec]'
 # secsay <what> <from> <to> <message>: one line with time, sender, recipient, status, marker; the sentinel is nowhere in the log.
@@ -174,4 +202,5 @@ TEAM_STATE_DIR=$T/secstate TEAM_ROLE=em $S -c $T/team-sec.yaml say all "plain br
 n=$(wc -l < $SECLOG)
 TEAM_STATE_DIR=$T/secstate TEAM_ROLE=em $S -c $T/team-sec.yaml say w2 "plain SENTINEL-227-w2" >/dev/null 2>&1
 [ "$(tail -n +$((n + 1)) $SECLOG | cut -f2,3,4,5)" = "em	w2	NOT-DELIVERED	plain SENTINEL-227-w2" ] && ok "say log: a say between two other seats is logged in full, status as before" || { bad "say log: say between other seats"; tail -n +$((n + 1)) $SECLOG; }
+say_hand $T/team.yaml
 e2e_end=say # the last line: test/e2e.sh checks that the file ran to here
