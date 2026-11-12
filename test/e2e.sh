@@ -86,12 +86,14 @@ ROOT="Projects/_teamtest-$$"; VOL=${TEST_VOLUME:-}
 # would fail only when run from a seat, and a stand-in seat could reach the real seat's tmux or
 # messaging socket (#75). This is the one list of what is cleared; add any new launcher variable here.
 # It runs before anything below exports a TEAM_* variable (TEAM_VIEW=0), or it would clear it.
-# FACTORY_*: run under run-exclusive (#214), the run inherits its lock's variables; nothing in it may
-# take or skip the real lock, so the run has a lock of its own in $T. E2E_LOCK_PID, E2E_LOCK_TREE and
-# E2E_NO_LOCK (#309, above): a test/e2e.sh that a case starts must not skip its lock step because this
-# run did, nor be held to this run's tree.
-for v in $(compgen -e); do case $v in DISABLE_AUTOUPDATER|TEAM_*|CLAUDE*|TMUX*|FACTORY_*|E2E_LOCK_PID|E2E_LOCK_TREE|E2E_NO_LOCK) unset "$v" ;; esac; done
-export TMUX_TMPDIR=$T/tmux TEAM_STATE_DIR=$T/state FACTORY_RUN_LOCK=$T/rx-lock/run-exclusive.lock
+# FABRIKITO_* and the old FACTORY_* (#273): run under run-exclusive (#214), the run inherits its lock's variables; nothing in it may
+# take or skip the real lock, so the run has a lock of its own in $T. It is named under the old variable too:
+# these tests are also run on a lib from before the rename (a red run), which reads only the old name and
+# would otherwise fall back to the real lock and wait there behind the run it is part of (it happened).
+# E2E_LOCK_PID, E2E_LOCK_TREE and E2E_NO_LOCK (#309, above): a test/e2e.sh that a case starts must not skip
+# its lock step because this run did, nor be held to this run's tree.
+for v in $(compgen -e); do case $v in DISABLE_AUTOUPDATER|TEAM_*|CLAUDE*|TMUX*|FABRIKITO_*|FACTORY_*|E2E_LOCK_PID|E2E_LOCK_TREE|E2E_NO_LOCK) unset "$v" ;; esac; done
+export TMUX_TMPDIR=$T/tmux TEAM_STATE_DIR=$T/state FABRIKITO_RUN_LOCK=$T/rx-lock/run-exclusive.lock FACTORY_RUN_LOCK=$T/rx-lock/run-exclusive.lock
 # No run may drive iTerm (#93). A stand-in osascript first on PATH records every call and does
 # nothing, and the run fails at the end if it was called: `up` opens a real iTerm window unless told
 # not to, every run left its windows on the user's screen, and enough of them used up every pty on

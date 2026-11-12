@@ -9,11 +9,19 @@
 # lock. Ctrl-C or TERM while waiting exits 130 or 143 without running the command.
 #
 # The lock is a flock on one file per user, outside every team's state folder and checkout:
-# <home>/Library/Application Support/software-factory/run-exclusive.lock, home from the user database,
+# <home>/Library/Application Support/fabrikito/run-exclusive.lock, home from the user database,
 # not $HOME, so every seat, team and checkout of this user finds the same file. Not the per-user T/
 # folder: macOS removes files there that have not been used for some days, and a lock whose name is
-# removed while a run holds it no longer makes the next run wait (tl on #214). FACTORY_RUN_LOCK names
+# removed while a run holds it no longer makes the next run wait (tl on #214). FABRIKITO_RUN_LOCK names
 # another file instead (the e2e uses its own).
+#
+# The old names (#273): before the rename the folder was software-factory/ and the variables
+# FACTORY_RUN_LOCK and FACTORY_RUN_EXCLUSIVE_HELD. For one release the old variables are still read
+# (the new one wins when both are set), and a run on the default lock also holds the old default lock
+# and writes the old holder record and variable, so that a checkout that still has the old names
+# excludes this one, and the other way round, and nests with it. It takes the old lock through the old
+# lock's own queue, after the new one, so no run of either version is passed there. Remove the
+# fallback, and the old folder with it, after that release (docs/gate.md).
 #
 # Waiting runs get the lock in the order they arrived (#283). Each takes a ticket, a file named by its
 # arrival time in <lock>.queue/, flocked for as long as the run waits; only the earliest live ticket
@@ -48,16 +56,24 @@ args = ARGV.dup
 args.shift if args.first == "--"
 die("usage: fabrikito run-exclusive -- <command> [args...]", 64) if args.empty?
 
-lock = ENV["FACTORY_RUN_LOCK"].to_s
+lock_var = ENV["FABRIKITO_RUN_LOCK"].to_s.empty? ? "FACTORY_RUN_LOCK" : "FABRIKITO_RUN_LOCK"
+lock = ENV[lock_var].to_s
 # A relative path would name a different lock in each caller's folder (tl on #240).
-die("FACTORY_RUN_LOCK must be an absolute path, not #{lock}", 64) unless lock.empty? || lock.start_with?("/")
+die("#{lock_var} must be an absolute path, not #{lock}", 64) unless lock.empty? || lock.start_with?("/")
+legacy = nil
 if lock.empty?
   home = (Etc.getpwuid(Process.uid).dir rescue nil).to_s
   die("cannot find this user's home folder in the user database, so there is no place for the lock") if home.empty?
-  lock = File.join(home, "Library", "Application Support", "software-factory", "run-exclusive.lock")
+  support = File.join(home, "Library", "Application Support")
+  lock = File.join(support, "fabrikito", "run-exclusive.lock")
+  # Its normal path, like the new lock's below and like an older checkout's own name for it: the nesting
+  # check compares the two as strings, and a home folder given with a "." or a doubled slash inside
+  # would otherwise make an old-name run inside this one wait for its parent for good (tl on #361).
+  legacy = utf8(File.expand_path(File.join(support, "software-factory", "run-exclusive.lock")))
 end
 lock = utf8(File.expand_path(lock))
 holder = "#{lock}.holder"
+legacy_holder = legacy && "#{legacy}.holder"
 
 def alive?(pid)
   return false unless pid.is_a?(Integer) && pid > 0
@@ -92,35 +108,42 @@ def who(rec)
 end
 
 # Nesting: a run-exclusive inside the command of another (a gate script that calls it again) would wait
-# for itself forever. The holder hands its command FACTORY_RUN_EXCLUSIVE_HELD=<lock>:<its pid>, and an
+# for itself forever. The holder hands its command FABRIKITO_RUN_EXCLUSIVE_HELD=<lock>:<its pid>, and an
 # inner call on the same lock runs its command directly, but only while the record names that pid and
 # that pid is alive. The variable alone is not enough: anything the command leaves running (a tmux
 # server started under the lock) keeps it for every shell it starts later, and those would then skip
-# the lock for good (tl on #214).
-held = utf8(ENV["FACTORY_RUN_EXCLUSIVE_HELD"].to_s).scrub
-if (m = held.match(/\A(.+):(\d+)\z/)) && m[1] == lock
-  rec = record(holder)
-  if rec.is_a?(Hash) && rec["pid"] == m[2].to_i && alive?(m[2].to_i)
-    begin
-      exec([args[0], args[0]], *args[1..-1])
-    rescue SystemCallError => e
-      die("cannot run #{args[0]}: #{e.message}", 127)
-    end
+# the lock for good (tl on #214). The old variable FACTORY_RUN_EXCLUSIVE_HELD counts too (#273), for a
+# holder that has the old names: its lock is this one when FACTORY_RUN_LOCK named it, or the old default.
+def held_by_parent?(value, lk)
+  m = utf8(value.to_s).scrub.match(/\A(.+):(\d+)\z/)
+  return false unless m && m[1] == lk
+  rec = record("#{lk}.holder")
+  rec.is_a?(Hash) && rec["pid"] == m[2].to_i && alive?(m[2].to_i)
+end
+
+if [[ENV["FABRIKITO_RUN_EXCLUSIVE_HELD"], lock], [ENV["FACTORY_RUN_EXCLUSIVE_HELD"], lock], [ENV["FACTORY_RUN_EXCLUSIVE_HELD"], legacy]]
+   .any? { |value, lk| lk && held_by_parent?(value, lk) }
+  begin
+    exec([args[0], args[0]], *args[1..-1])
+  rescue SystemCallError => e
+    die("cannot run #{args[0]}: #{e.message}", 127)
   end
 end
 
 # The folder is made owner-only. Neither it nor the lock may be a link, or anything but a folder and a
 # regular file with one name: the lock would then be taken on some other file (#194's checks).
-dir = File.dirname(lock)
-begin
-  Dir.mkdir(dir, 0o700)
-rescue Errno::EEXIST
-  nil
-rescue SystemCallError => e
-  die("cannot make #{dir}: #{e.message}")
+def lock_dir!(dir)
+  begin
+    Dir.mkdir(dir, 0o700)
+  rescue Errno::EEXIST
+    nil
+  rescue SystemCallError => e
+    die("cannot make #{dir}: #{e.message}")
+  end
+  st = File.lstat(dir)
+  die("#{dir} is a symlink or not a folder, and the lock is never taken through one: remove that exact path") if st.symlink? || !st.directory?
 end
-st = File.lstat(dir)
-die("#{dir} is a symlink or not a folder, and the lock is never taken through one: remove that exact path") if st.symlink? || !st.directory?
+lock_dir!(File.dirname(lock))
 
 def unsafe?(path)
   st = File.lstat(path)
@@ -252,60 +275,69 @@ end
   end
 end
 
-started = Time.now
-waited = false
-reminded = started
-f = nil
-qdir = "#{lock}.queue"
-tf, tpath = take_ticket(qdir)
-tname = File.basename(tpath)
-# However this run ends (a signal, a refusal, the end of its command) its ticket goes, and the folder
-# with it when it is the last (a leftover folder would change nothing but the listing).
-at_exit do
-  (File.unlink(tpath) rescue nil)
-  (tf.close rescue nil)
-  (Dir.rmdir(qdir) rescue nil)
-end
-loop do
-  # Show the line this run is alive (its flock does not tell a stopped run from a running one). If the
-  # ticket is gone, the others took this run for stopped (it was, or the machine stalled it for
-  # TICKET_STALE seconds): it takes a new place at the end. Mutual exclusion is the main lock, not this.
-  begin
-    File.utime(nil, nil, tpath)
-  rescue SystemCallError
+# Waits for one lock in the order of its queue (#283), and returns the open file with the lock on it and
+# whether this run had to wait. old_name: the lock is the old default lock (#273), and the messages say so.
+def wait_for(lock, holder, started, old_name)
+  what = old_name ? "the old-name lock" : "the lock"
+  waited = false
+  reminded = Time.now
+  f = nil
+  qdir = "#{lock}.queue"
+  tf, tpath = take_ticket(qdir)
+  tname = File.basename(tpath)
+  # However this run ends (a signal, a refusal, the end of its command) its ticket goes, and the folder
+  # with it when it is the last (a leftover folder would change nothing but the listing).
+  at_exit do
+    (File.unlink(tpath) rescue nil)
     (tf.close rescue nil)
-    tf, tpath = take_ticket(qdir)
-    tname = File.basename(tpath)
+    (Dir.rmdir(qdir) rescue nil)
   end
-  n = ahead(qdir, tname)
-  # Only the earliest waiting run tries the lock; the others wait their turn, however free it is.
-  f = n == 0 ? open_lock(lock) : nil
-  if f && f.flock(File::LOCK_EX | File::LOCK_NB)
-    # The lock is on the open file, not the name. A waiter can open the file, have its name removed
-    # and made again by another run, then lock the old file once its holder ends: it would hold a lock
-    # nobody else takes, and overlap the run on the new file. So the name must still lead to the file
-    # locked; if not, take the lock again, on what the name leads to now (tl on #214).
-    cur = (File.lstat(lock) rescue nil)
-    fs = f.stat
-    break if cur && cur.file? && !cur.symlink? && cur.dev == fs.dev && cur.ino == fs.ino
-    f.close
-    next
+  loop do
+    # Show the line this run is alive (its flock does not tell a stopped run from a running one). If the
+    # ticket is gone, the others took this run for stopped (it was, or the machine stalled it for
+    # TICKET_STALE seconds): it takes a new place at the end. Mutual exclusion is the main lock, not this.
+    begin
+      File.utime(nil, nil, tpath)
+    rescue SystemCallError
+      (tf.close rescue nil)
+      tf, tpath = take_ticket(qdir)
+      tname = File.basename(tpath)
+    end
+    n = ahead(qdir, tname)
+    # Only the earliest waiting run tries the lock; the others wait their turn, however free it is.
+    f = n == 0 ? open_lock(lock) : nil
+    if f && f.flock(File::LOCK_EX | File::LOCK_NB)
+      # The lock is on the open file, not the name. A waiter can open the file, have its name removed
+      # and made again by another run, then lock the old file once its holder ends: it would hold a lock
+      # nobody else takes, and overlap the run on the new file. So the name must still lead to the file
+      # locked; if not, take the lock again, on what the name leads to now (tl on #214).
+      cur = (File.lstat(lock) rescue nil)
+      fs = f.stat
+      break if cur && cur.file? && !cur.symlink? && cur.dev == fs.dev && cur.ino == fs.ino
+      f.close
+      next
+    end
+    f.close if f
+    now = Time.now
+    line = n.zero? ? "" : "; #{n} earlier run#{n == 1 ? " is" : "s are"} waiting ahead of this one"
+    if !waited
+      say "waiting for #{what} (#{lock}), held by #{who(record(holder))}#{line}#{old_name ? " (the lock of a checkout from before the rename)" : ""}"
+      waited = true
+    elsif now - reminded >= REMIND
+      say "still waiting#{old_name ? " for #{what}" : ""}, since #{started.strftime("%H:%M:%S")} (#{(now - started).round}s), for #{who(record(holder))}#{line}"
+      reminded = now
+    end
+    sleep LOCK_POLL
   end
-  f.close if f
-  now = Time.now
-  line = n.zero? ? "" : "; #{n} earlier run#{n == 1 ? " is" : "s are"} waiting ahead of this one"
-  if !waited
-    say "waiting for the lock (#{lock}), held by #{who(record(holder))}#{line}"
-    waited = true
-  elsif now - reminded >= REMIND
-    say "still waiting, since #{started.strftime("%H:%M:%S")} (#{(now - started).round}s), for #{who(record(holder))}#{line}"
-    reminded = now
-  end
-  sleep LOCK_POLL
+  # This run's turn is over: its ticket goes, and the next in line may try the lock.
+  (File.unlink(tpath) rescue nil)
+  [f, waited]
 end
 
-# This run's turn is over: its ticket goes, and the next in line may try the lock.
-(File.unlink(tpath) rescue nil)
+started = Time.now
+f, waited = wait_for(lock, holder, started, false)
+legacy_f = nil
+
 me = Process.pid
 rec = {
   "pid" => me,
@@ -315,20 +347,56 @@ rec = {
   "cwd" => utf8(Dir.pwd).scrub,
   "cmd" => utf8(args.join(" ")).scrub[0, 300],
 }
+# Each record is written as soon as its lock is held. The new one therefore exists while this run still
+# waits for the old lock, which can be a whole run of an older checkout: a run of this version that
+# waits for the new lock meanwhile is told who holds it, not "an unknown holder" (tl on #361).
 # Written to a temporary name and renamed: rename replaces a link at the record's name rather than
-# writing through it, and a waiter never reads half a record.
-tmp = "#{holder}.#{me}"
-begin
-  File.unlink(tmp) if File.symlink?(tmp) || File.exist?(tmp)
-  File.open(tmp, File::WRONLY | File::CREAT | File::EXCL | File::NOFOLLOW, 0o600) { |o| o.write(JSON.generate(rec)) }
-  File.rename(tmp, holder)
-rescue SystemCallError => e
-  # Without the record, a run-exclusive inside this command could not tell that its parent holds the
-  # lock, and would wait for it forever, with every other run on the host behind it (tl on #240). So
-  # nothing runs: the lock is released and the run fails, saying why.
-  (File.unlink(tmp) rescue nil)
-  f.close
-  die("could not write the holder record #{holder} (#{e.message}), so the command was not run: remove that exact path if it is not a regular file, or make room, then run again")
+# writing through it, and a waiter never reads half a record. The old record (#273) is the same record:
+# an old-name run nested in this command, and an old-name waiter, read it at the old name.
+recorded = []
+write_record = lambda do |path|
+  tmp = "#{path}.#{me}"
+  begin
+    File.unlink(tmp) if File.symlink?(tmp) || File.exist?(tmp)
+    File.open(tmp, File::WRONLY | File::CREAT | File::EXCL | File::NOFOLLOW, 0o600) { |o| o.write(JSON.generate(rec)) }
+    File.rename(tmp, path)
+    recorded << path
+  rescue SystemCallError => e
+    # Without the record, a run-exclusive inside this command could not tell that its parent holds the
+    # lock, and would wait for it forever, with every other run on the host behind it (tl on #240). So
+    # nothing runs: the lock is released and the run fails, saying why.
+    (File.unlink(tmp) rescue nil)
+    recorded.each { |h| File.unlink(h) rescue nil }
+    recorded.clear
+    f.close
+    legacy_f.close if legacy_f
+    die("could not write the holder record #{path} (#{e.message}), so the command was not run: remove that exact path if it is not a regular file, or make room, then run again")
+  end
+end
+# A run that ends before its command started (a signal while it waits for the old lock, a refusal of
+# the old folder) takes its record with it. It still holds the lock the record is for, so the record at
+# that name can only be its own. At the normal end the records are removed further down, under the lock.
+at_exit { recorded.each { |h| File.unlink(h) rescue nil } }
+write_record.call(holder)
+
+# For one release (#273) a run on the default lock also holds the old default lock, taken after the
+# new one, so that a checkout with the old names, which knows only the old file, waits for this run and
+# this run waits for it. The old file has a queue of its own, the older checkout's (#283), and this run
+# takes a place in it like any run of that checkout: it passes none of them, and those that come later
+# wait behind it. Its place dates from now, not from its arrival: runs of an older checkout that came
+# in while it waited for the new lock go first.
+# The place in the old queue is taken only once the new lock is held, never before (tl on #273). A run
+# with a place in the old queue while it still waited for the new lock could stand there ahead of the
+# run that holds the new lock: each would wait for the other for good, with every run on the host
+# behind them. This way only one run of this version is ever in the old queue, and runs of an older
+# checkout never wait for the new lock, so there is no cycle. Waiting here keeps the new lock: no other
+# run of this version gets past it, and that includes a run stopped here (Ctrl-Z), which a waiter
+# elsewhere in a queue would not hold up (docs/gate.md).
+if legacy
+  lock_dir!(File.dirname(legacy))
+  legacy_f, legacy_waited = wait_for(legacy, legacy_holder, started, true)
+  waited ||= legacy_waited
+  write_record.call(legacy_holder)
 end
 say "got the lock after #{(Time.now - started).round}s" if waited
 locked = f.stat
@@ -341,7 +409,10 @@ locked = f.stat
 # run alone is passed on to the command. One sent to the whole group therefore reaches the command twice:
 # this run cannot tell the two apart. A command that cleans up on a signal must not let the second one
 # cut its cleanup short (test/e2e.sh's on_exit ignores them).
-env = { "FACTORY_RUN_EXCLUSIVE_HELD" => "#{lock}:#{me}" }
+env = { "FABRIKITO_RUN_EXCLUSIVE_HELD" => "#{lock}:#{me}" }
+# The old variable too (#273), naming the old lock: a command that runs a checkout with the old names
+# finds its parent through it.
+env["FACTORY_RUN_EXCLUSIVE_HELD"] = "#{legacy || lock}:#{me}"
 # A background job that touches the terminal gets TTIN or TTOU sent to its whole group, and this run
 # stops with its command. It must: the shell would otherwise see a job still running, and fg would hand
 # over the terminal without continuing the command. So it stays an ordinary stopped job, and from another
@@ -353,7 +424,7 @@ begin
   spawning = false
   pass_on.call(pending) if pending
 rescue SystemCallError => e
-  File.unlink(holder) rescue nil
+  [holder, legacy_holder].compact.each { |h| File.unlink(h) rescue nil }
   die("cannot run #{args[0]}: #{e.message}", 127)
 end
 status = nil
@@ -373,6 +444,8 @@ unless cur && cur.dev == locked.dev && cur.ino == locked.ino
   say "warning: #{lock} was removed or replaced while this run held the lock, so a run that started meanwhile may have overlapped it"
 end
 # Removed while the lock is still held, so it can only be this run's record.
-File.unlink(holder) rescue nil
+recorded.each { |h| File.unlink(h) rescue nil }
+recorded.clear
 f.close
+legacy_f.close if legacy_f
 exit(status.exited? ? status.exitstatus : 128 + (status.termsig || 0))

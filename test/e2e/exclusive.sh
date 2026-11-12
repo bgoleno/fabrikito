@@ -1,7 +1,9 @@
 # Sourced by test/e2e.sh, in its shell and in the order of AREAS there (#70); not run alone.
 # run-exclusive (#214): one heavy run at a time on the host. Every case uses the run's own lock
-# (FACTORY_RUN_LOCK, set by test/e2e.sh), never the real one. Ordering is checked only from marks the
-# commands record, never from how long anything took: these runs are meant for a loaded machine.
+# (FABRIKITO_RUN_LOCK and its old name, both set by test/e2e.sh), never the real one: the probe below stops
+# the run if the lib under test would, and the guard below sends any start of the library that loses its
+# lock's name to a stand-in home, where the last case of the area finds it. Ordering is checked only from
+# marks the commands record, never from how long anything took: these runs are meant for a loaded machine.
 echo "--- run-exclusive: one heavy run at a time (#214)"
 rx=$T/rx; mkdir -p $rx
 # Waits for a condition, up to 30s (a limit for a run that went wrong, not a timing check).
@@ -12,10 +14,55 @@ rx_until() { local i=0; until eval "$1"; do i=$((i + 1)); [ $i -ge 150 ] && retu
 rx_wait() { local i=0; while kill -0 $1 2>/dev/null; do i=$((i + 1)); [ $i -ge 300 ] && { kill -KILL $1 2>/dev/null; break; }; sleep 0.2; done; wait $1; }
 # The same limit for a run in the foreground: it dies of the alarm (142).
 rx_bound() { perl -e 'alarm 60; exec @ARGV' "$@"; }
+# Runs a run_exclusive.rb with the user database's home replaced by the folder FAKE_HOME names, so its
+# default lock is under that folder and not the real one: ruby $rx/shim.rb <run_exclusive.rb> -- <command>.
+printf 'require "etc"\nmodule Etc; def self.getpwuid(*) Struct.new(:dir).new(ENV["FAKE_HOME"]) end; end\nload ARGV.shift\n' > $rx/shim.rb
+# No start of the library in this area may reach the host's real lock, whatever helper or variable it
+# comes through (tl on #361: a helper that named its lock under the new variable only sent a library
+# from before the rename to its default, the real lock). So every ruby this area starts loads guard.rb
+# first: when the program is a run_exclusive.rb, this checkout's or an older one, started directly or
+# by the launcher, the user database's home is the guard folder, and a default lock is under it. A
+# start through the shim replaces the home again, with its case's own folder. The guard folder must be
+# empty when the area ends. Not covered: a library started in a tmux pane (the server's environment has
+# no RUBYOPT; those cases name their lock, and test/e2e.sh gives the server both names), and a library
+# that finds its default some other way than the user database.
+rx_gh=$rx/guard-home; mkdir -p "$rx_gh/Library/Application Support"
+printf 'if File.basename($0) == "run_exclusive.rb"\n  require "etc"\n  module Etc; def self.getpwuid(*) Struct.new(:dir).new(ENV["RX_GUARD_HOME"]) end; end\nend\n' > $rx/guard.rb
+rx_rubyopt=${RUBYOPT-}; [ -n "${RUBYOPT+x}" ] && rx_rubyopt_set=1 || rx_rubyopt_set=0
+export RX_GUARD_HOME=$rx_gh RUBYOPT="-r$rx/guard.rb${RUBYOPT:+ $RUBYOPT}"
 # A holder (a script: run-exclusive runs a program) that records its start, then waits for a go file
 # before it records its end: hold <name> <marks> <go file>.
 printf '#!/bin/sh\necho "$1 start" >> "$2"\nuntil [ -e "$3" ]; do sleep 0.1; done\necho "$1 end" >> "$2"\n' > $rx/hold; chmod +x $rx/hold
-real="$(ruby -retc -e 'print Etc.getpwuid(Process.uid).dir')/Library/Application Support/software-factory"; [ -e "$real" ] && real_was=1 || real_was=0
+real="$(ruby -retc -e 'print Etc.getpwuid(Process.uid).dir')/Library/Application Support/fabrikito"; [ -e "$real" ] && real_was=1 || real_was=0
+real_old="${real%/fabrikito}/software-factory"; [ -e "$real_old" ] && real_old_was=1 || real_old_was=0
+
+# Before any case: the lib under test must use the run's own lock (#273). The e2e clears the variables of
+# the run-exclusive it runs under, so a lib that does not know the name test/e2e.sh gives the run's lock
+# falls back to the default, the host's real lock, is not seen as nested, and waits there behind the very
+# run it is part of, with every run on the host behind both. That happened with these tests on a lib from
+# before the rename. So the lib runs once here with a stand-in home: a miss lands in that folder, and the
+# run stops before a case can reach the real queue.
+rx_ph=$rx/probe-home; mkdir -p "$rx_ph/Library/Application Support"
+HOME=$rx_ph FAKE_HOME=$rx_ph rx_bound ruby $rx/shim.rb $SRC/lib/run_exclusive.rb -- true >$rx/probe.out 2>&1; rc=$?
+if [ $rc = 0 ] && [ -e "$FABRIKITO_RUN_LOCK" ] && [ -z "$(ls -A "$rx_ph/Library/Application Support")" ]; then
+  ok "run-exclusive: the lib under test uses the run's own lock, so no case can reach the real one"
+else
+  echo "test/e2e/exclusive.sh: $SRC/lib/run_exclusive.rb did not use the run's own lock ($FABRIKITO_RUN_LOCK; rc=$rc, in the stand-in home: $(ls -A "$rx_ph/Library/Application Support" | tr '\n' ' ')). Its cases would wait on the host's real lock, so the run stops here." >&2
+  cat $rx/probe.out >&2
+  exit 2
+fi
+# And the guard must hold for it: started with no lock named at all, as a helper gone wrong would start
+# it, its default lock is under the folder RX_GUARD_HOME names. This one start gets a folder of its own
+# for that, and for HOME too, so that a miss of the guard itself lands there and not in the real home.
+rx_gp=$rx/guard-probe; mkdir -p "$rx_gp/Library/Application Support"
+HOME=$rx_gp RX_GUARD_HOME=$rx_gp rx_bound env -u FABRIKITO_RUN_LOCK -u FACTORY_RUN_LOCK -u FABRIKITO_RUN_EXCLUSIVE_HELD -u FACTORY_RUN_EXCLUSIVE_HELD ruby $SRC/lib/run_exclusive.rb -- true >$rx/guard-probe.out 2>&1; rc=$?
+if [ $rc = 0 ] && [ -n "$(ls -A "$rx_gp/Library/Application Support")" ]; then
+  ok "run-exclusive: a start of the lib under test that names no lock uses a default under the area's guard folder, not the real one"
+else
+  echo "test/e2e/exclusive.sh: the guard does not hold for $SRC/lib/run_exclusive.rb (rc=$rc; under the guard folder: $(ls -A "$rx_gp/Library/Application Support" | tr '\n' ' ')). A case that lost its lock's name could reach the host's real lock, so the run stops here." >&2
+  cat $rx/guard-probe.out >&2
+  exit 2
+fi
 
 out=$($S run-exclusive -- sh -c 'echo ran; exit 7' 2>&1); rc=$?
 [ $rc = 7 ] && [ "$out" = ran ] && ok "run-exclusive runs the command and exits with its status" || { bad "run-exclusive status (rc=$rc)"; echo "$out" | tail -2; }
@@ -99,7 +146,7 @@ sc=$(cat $rx/st.pid 2>/dev/null); [ -n "$sc" ] && kill -KILL $sc 2>/dev/null
 # In a terminal, the command stays in the foreground group: it can use the terminal instead of stopping
 # there with the lock held, and Ctrl-C ends it (qa on #240). A pane of an interactive shell, as a person's.
 rt=$rx/tty; mkdir -p $rt
-tmux new-session -d -s rx-tty -x 120 -y 30 "env -u FACTORY_RUN_EXCLUSIVE_HELD FACTORY_RUN_LOCK=$rt/lock bash --norc --noprofile -i"
+tmux new-session -d -s rx-tty -x 120 -y 30 "env -u FABRIKITO_RUN_EXCLUSIVE_HELD FABRIKITO_RUN_LOCK=$rt/lock bash --norc --noprofile -i"
 tmux send-keys -t "=rx-tty:" "$S run-exclusive -- sh -c 'stty -echo; echo set > $rt/set; sleep 60'; echo \$? > $rt/rc" Enter
 rx_until "[ -e $rt/set ]"; used=$?
 tmux send-keys -t "=rx-tty:" C-c
@@ -114,7 +161,7 @@ tmux kill-session -t "=rx-tty:" 2>/dev/null
 # job, so fg still works. From another shell, TERM and then CONT to the run must end both, though CONT
 # reaches only the run, and the lock must come free (the command handles TERM, as in the case above).
 rt=$rx/ttybg; mkdir -p $rt
-tmux new-session -d -s rx-ttybg -x 120 -y 30 "env -u FACTORY_RUN_EXCLUSIVE_HELD FACTORY_RUN_LOCK=$rt/lock bash --norc --noprofile -i"
+tmux new-session -d -s rx-ttybg -x 120 -y 30 "env -u FABRIKITO_RUN_EXCLUSIVE_HELD FABRIKITO_RUN_LOCK=$rt/lock bash --norc --noprofile -i"
 tmux send-keys -t "=rx-ttybg:" "$S run-exclusive -- bash -c 'trap \"exit 5\" TERM; echo \$\$ > $rt/pid; read x' &" Enter
 rx_until '[ -s $rt/pid ] && ps -o stat= -p "$(cat $rt/pid)" | grep -q T'; stopped=$?
 rp=$(ruby -rjson -e 'print JSON.parse(File.read(ARGV[0]))["pid"]' $rt/lock.holder 2>/dev/null)
@@ -131,7 +178,7 @@ $S run-exclusive -- $rx/hold U $rx/u.marks $rx/go 2>/dev/null &
 h=$!
 rx_until "grep -q 'U start' $rx/u.marks 2>/dev/null"
 sh -c 'exit 0' & dead=$!; wait $dead
-printf '{"pid":%s,"who":"gone","since":"2000-01-01T00:00:00","cwd":"/","cmd":"x"}' $dead > $FACTORY_RUN_LOCK.holder
+printf '{"pid":%s,"who":"gone","since":"2000-01-01T00:00:00","cwd":"/","cmd":"x"}' $dead > $FABRIKITO_RUN_LOCK.holder
 $S run-exclusive -- true 2>$rx/u.err &
 w=$!
 rx_until "grep -q 'waiting for the lock' $rx/u.err"
@@ -144,7 +191,7 @@ rm -f $rx/go
 $S run-exclusive -- $rx/hold C $rx/c.marks $rx/go 2>/dev/null &
 h=$!
 rx_until "grep -q 'C start' $rx/c.marks 2>/dev/null"
-printf '{"pid":%s,"who":"a\\u001b[31mb","since":"x","cwd":"/","cmd":"y"}' $h > $FACTORY_RUN_LOCK.holder
+printf '{"pid":%s,"who":"a\\u001b[31mb","since":"x","cwd":"/","cmd":"y"}' $h > $FABRIKITO_RUN_LOCK.holder
 $S run-exclusive -- true 2>$rx/c.err &
 w=$!
 rx_until "grep -q 'waiting for the lock' $rx/c.err"
@@ -160,20 +207,20 @@ rm -f $rx/go $rx/s.ran
 $S run-exclusive -- $rx/hold S $rx/s.marks $rx/go 2>/dev/null &
 h=$!
 rx_until "grep -q 'S start' $rx/s.marks 2>/dev/null"
-FACTORY_RUN_EXCLUSIVE_HELD=$FACTORY_RUN_LOCK:$dead $S run-exclusive -- sh -c 'echo ran > "$0"' $rx/s.ran 2>$rx/s.err &
+FABRIKITO_RUN_EXCLUSIVE_HELD=$FABRIKITO_RUN_LOCK:$dead $S run-exclusive -- sh -c 'echo ran > "$0"' $rx/s.ran 2>$rx/s.err &
 w=$!
 rx_until "grep -q 'waiting for the lock' $rx/s.err"; waiting=$?
 early=$(cat $rx/s.ran 2>/dev/null)
 touch $rx/go; rx_wait $h; rx_wait $w
 [ $waiting = 0 ] && [ -z "$early" ] && [ "$(cat $rx/s.ran 2>/dev/null)" = ran ] \
-  && ok "run-exclusive: a stale FACTORY_RUN_EXCLUSIVE_HELD whose holder is gone does not skip the lock" || { bad "run-exclusive: stale held variable (waiting=$waiting early=$early)"; cat $rx/s.err; }
+  && ok "run-exclusive: a stale FABRIKITO_RUN_EXCLUSIVE_HELD whose holder is gone does not skip the lock" || { bad "run-exclusive: stale held variable (waiting=$waiting early=$early)"; cat $rx/s.err; }
 # The same, when the record names the same dead pid as the variable: only the pid's being alive tells.
 rm -f $rx/go $rx/d.ran
 $S run-exclusive -- $rx/hold D $rx/d.marks $rx/go 2>/dev/null &
 h=$!
 rx_until "grep -q 'D start' $rx/d.marks 2>/dev/null"
-printf '{"pid":%s,"who":"gone","since":"2000-01-01T00:00:00","cwd":"/","cmd":"x"}' $dead > $FACTORY_RUN_LOCK.holder
-FACTORY_RUN_EXCLUSIVE_HELD=$FACTORY_RUN_LOCK:$dead $S run-exclusive -- sh -c 'echo ran > "$0"' $rx/d.ran 2>$rx/d.err &
+printf '{"pid":%s,"who":"gone","since":"2000-01-01T00:00:00","cwd":"/","cmd":"x"}' $dead > $FABRIKITO_RUN_LOCK.holder
+FABRIKITO_RUN_EXCLUSIVE_HELD=$FABRIKITO_RUN_LOCK:$dead $S run-exclusive -- sh -c 'echo ran > "$0"' $rx/d.ran 2>$rx/d.err &
 w=$!
 rx_until "grep -q 'waiting for the lock' $rx/d.err"; waiting=$?
 early=$(cat $rx/d.ran 2>/dev/null)
@@ -183,26 +230,26 @@ touch $rx/go; rx_wait $h; rx_wait $w
 # No record means a nested call cannot see its parent holds the lock, and it would wait for itself with
 # every other run behind it. So nothing runs, even the outer command (tl on #240).
 mkdir -p $rx/nr/lock.holder
-out=$(rx_bound env FACTORY_RUN_LOCK=$rx/nr/lock $S run-exclusive -- $S run-exclusive -- sh -c 'echo SHOULD-NOT-RUN' 2>&1); rc=$?
+out=$(rx_bound env FABRIKITO_RUN_LOCK=$rx/nr/lock $S run-exclusive -- $S run-exclusive -- sh -c 'echo SHOULD-NOT-RUN' 2>&1); rc=$?
 left=$(ls -A $rx/nr | grep -v -x -e lock -e lock.holder)
 rmdir $rx/nr/lock.holder
-after=$(rx_bound env FACTORY_RUN_LOCK=$rx/nr/lock $S run-exclusive -- sh -c 'echo ran' 2>&1); arc=$?
+after=$(rx_bound env FABRIKITO_RUN_LOCK=$rx/nr/lock $S run-exclusive -- sh -c 'echo ran' 2>&1); arc=$?
 [ $rc = 1 ] && echo "$out" | grep -q 'could not write the holder record' && ! echo "$out" | grep -q SHOULD-NOT-RUN && [ -z "$left" ] && [ $arc = 0 ] && [ "$after" = ran ] \
   && ok "run-exclusive: a holder record it cannot write runs nothing, leaves no temporary file and frees the lock" || { bad "run-exclusive: an unwritable holder record (rc=$rc left=$left after=$arc)"; echo "$out" | tail -2; }
 # Bytes that are not valid text (under LC_ALL=C, any that are not ASCII) reach the record, the waiting
 # message and the nesting check. None may end the run in a stack trace.
 out=$(rx_bound $S run-exclusive -- sh -c 'echo ran' "$(printf '\377')" 2>&1); rc=$?
 [ $rc = 0 ] && [ "$out" = ran ] && ok "run-exclusive runs a command with an argument that is not valid UTF-8" || { bad "run-exclusive: an argument that is not valid UTF-8 (rc=$rc)"; echo "$out" | tail -2; }
-out=$(FACTORY_RUN_EXCLUSIVE_HELD="$(printf '\377'):1" rx_bound $S run-exclusive -- sh -c 'echo ran' 2>&1); rc=$?
+out=$(FABRIKITO_RUN_EXCLUSIVE_HELD="$(printf '\377'):1" rx_bound $S run-exclusive -- sh -c 'echo ran' 2>&1); rc=$?
 [ $rc = 0 ] && [ "$out" = ran ] && ok "run-exclusive takes the lock when the held variable is not valid UTF-8" || { bad "run-exclusive: a held variable that is not valid UTF-8 (rc=$rc)"; echo "$out" | tail -2; }
 # Under LC_ALL=C, in a folder and with a lock whose names are not ASCII: a run, a nested run and a waiter.
 rb=$rx/$(printf 'd\303\251'); mkdir -p $rb/w; rm -f $rx/go
-out=$(cd $rb/w && LC_ALL=C FACTORY_RUN_LOCK=$rb/lock rx_bound $S run-exclusive -- $S run-exclusive -- sh -c 'echo nested' 2>&1); rc=$?
+out=$(cd $rb/w && LC_ALL=C FABRIKITO_RUN_LOCK=$rb/lock rx_bound $S run-exclusive -- $S run-exclusive -- sh -c 'echo nested' 2>&1); rc=$?
 [ $rc = 0 ] && [ "$out" = nested ] && ok "run-exclusive under LC_ALL=C runs and nests in a folder whose name is not ASCII" || { bad "run-exclusive: LC_ALL=C and a name that is not ASCII (rc=$rc)"; echo "$out" | tail -2; }
-(cd $rb/w && exec env FACTORY_RUN_LOCK=$rb/lock $S run-exclusive -- $rx/hold E $rx/e.marks $rx/go) 2>/dev/null &
+(cd $rb/w && exec env FABRIKITO_RUN_LOCK=$rb/lock $S run-exclusive -- $rx/hold E $rx/e.marks $rx/go) 2>/dev/null &
 h=$!
 rx_until "grep -q 'E start' $rx/e.marks 2>/dev/null"
-LC_ALL=C FACTORY_RUN_LOCK=$rb/lock $S run-exclusive -- true 2>$rx/e.err &
+LC_ALL=C FABRIKITO_RUN_LOCK=$rb/lock $S run-exclusive -- true 2>$rx/e.err &
 w=$!
 rx_until "grep -q 'waiting for the lock' $rx/e.err"; waiting=$?
 touch $rx/go; rx_wait $h; rx_wait $w; wrc=$?
@@ -211,25 +258,25 @@ touch $rx/go; rx_wait $h; rx_wait $w; wrc=$?
 
 # The lock is never taken through a link (#194's checks).
 mkdir -p $rx/ln && ln -s $rx/ln-target $rx/ln/lock
-out=$(FACTORY_RUN_LOCK=$rx/ln/lock $S run-exclusive -- sh -c 'echo SHOULD-NOT-RUN' 2>&1); rc=$?
+out=$(FABRIKITO_RUN_LOCK=$rx/ln/lock $S run-exclusive -- sh -c 'echo SHOULD-NOT-RUN' 2>&1); rc=$?
 [ $rc = 1 ] && echo "$out" | grep -qF "$rx/ln/lock is a symlink" && ! echo "$out" | grep -q SHOULD-NOT-RUN && [ ! -e $rx/ln-target ] \
   && ok "run-exclusive refuses a lock file that is a symlink, and runs nothing" || { bad "run-exclusive through a symlink (rc=$rc)"; echo "$out" | tail -2; }
 : > $rx/hl-other; mkdir -p $rx/hl && ln $rx/hl-other $rx/hl/lock
-out=$(FACTORY_RUN_LOCK=$rx/hl/lock $S run-exclusive -- sh -c 'echo SHOULD-NOT-RUN' 2>&1); rc=$?
+out=$(FABRIKITO_RUN_LOCK=$rx/hl/lock $S run-exclusive -- sh -c 'echo SHOULD-NOT-RUN' 2>&1); rc=$?
 [ $rc = 1 ] && echo "$out" | grep -qF "$rx/hl/lock is a symlink, a hard link" && echo "$out" | grep -qF "Do not delete this file: it may be the real one, with a second name made elsewhere. Remove the other name, or move this file aside" && ! echo "$out" | grep -qF "exact path" && ! echo "$out" | grep -q SHOULD-NOT-RUN \
   && ok "run-exclusive refuses a lock file that is a hard link, and runs nothing" || { bad "run-exclusive through a hard link (rc=$rc)"; echo "$out" | tail -2; }
 mkdir -p $rx/ld-target && ln -s $rx/ld-target $rx/ld
-out=$(FACTORY_RUN_LOCK=$rx/ld/lock $S run-exclusive -- sh -c 'echo SHOULD-NOT-RUN' 2>&1); rc=$?
+out=$(FABRIKITO_RUN_LOCK=$rx/ld/lock $S run-exclusive -- sh -c 'echo SHOULD-NOT-RUN' 2>&1); rc=$?
 [ $rc = 1 ] && echo "$out" | grep -qF "$rx/ld is a symlink or not a folder" && ! echo "$out" | grep -q SHOULD-NOT-RUN && [ -z "$(ls -A $rx/ld-target)" ] \
   && ok "run-exclusive refuses a lock folder that is a symlink, and makes nothing in it" || { bad "run-exclusive through a symlinked folder (rc=$rc)"; echo "$out" | tail -2; }
-out=$(cd $rx && FACTORY_RUN_LOCK=rel/lock $S run-exclusive -- sh -c 'echo SHOULD-NOT-RUN' 2>&1); rc=$?
+out=$(cd $rx && FABRIKITO_RUN_LOCK=rel/lock $S run-exclusive -- sh -c 'echo SHOULD-NOT-RUN' 2>&1); rc=$?
 [ $rc = 64 ] && echo "$out" | grep -q 'must be an absolute path' && ! echo "$out" | grep -q SHOULD-NOT-RUN && [ ! -e $rx/rel ] \
-  && ok "run-exclusive refuses a relative FACTORY_RUN_LOCK: it would name a different lock in each folder" || { bad "run-exclusive with a relative lock (rc=$rc)"; echo "$out" | tail -2; }
-[ "$(stat -f %Lp $(dirname $FACTORY_RUN_LOCK))" = 700 ] && ok "run-exclusive makes the lock's folder owner-only (700)" || bad "run-exclusive lock folder mode ($(stat -f %Lp $(dirname $FACTORY_RUN_LOCK)))"
+  && ok "run-exclusive refuses a relative FABRIKITO_RUN_LOCK: it would name a different lock in each folder" || { bad "run-exclusive with a relative lock (rc=$rc)"; echo "$out" | tail -2; }
+[ "$(stat -f %Lp $(dirname $FABRIKITO_RUN_LOCK))" = 700 ] && ok "run-exclusive makes the lock's folder owner-only (700)" || bad "run-exclusive lock folder mode ($(stat -f %Lp $(dirname $FABRIKITO_RUN_LOCK)))"
 # Waiting runs get the lock in the order they arrived (#283). D holds it; W1..W4 start one after the other,
 # each only once the one before it is waiting (a run's place is taken before it says it waits), and they
 # must run in that order. Checked from the marks the commands record, never from timing.
-qd=$FACTORY_RUN_LOCK.queue; rm -f $rx/go $rx/ord.marks
+qd=$FABRIKITO_RUN_LOCK.queue; rm -f $rx/go $rx/ord.marks
 $S run-exclusive -- $rx/hold D $rx/ord.d $rx/go 2>/dev/null &
 h=$!
 rx_until "grep -q 'D start' $rx/ord.d 2>/dev/null"
@@ -295,11 +342,205 @@ out=$(rx_bound $S run-exclusive -- sh -c 'echo ran' 2>&1); rc=$?
 [ $rc = 0 ] && [ "$out" = ran ] && [ ! -e $qd/00000000000000000001-1 ] && [ ! -e $qd/.tmp-99 ] && [ ! -L $qd/00000000000000000002-2 ] && [ -d $qd/00000000000000000003-3 ] && [ "$(cat $rx/ord.marks | wc -l)" = "$before" ] \
   && ok "run-exclusive: a stale ticket is not waited for and is removed, and a link or folder in the queue is never followed" || { bad "run-exclusive: stale tickets (rc=$rc)"; echo "$out" | tail -2; ls -A $qd; }
 rmdir $qd/00000000000000000003-3; rmdir $qd 2>/dev/null
+# The old names (#273): FACTORY_RUN_LOCK and FACTORY_RUN_EXCLUSIVE_HELD, and the folder software-factory/,
+# still work for one release, so a checkout from before the rename and this one exclude each other and nest.
+# The old variables name the same file the new ones do.
+echo "--- run-exclusive: the old names, for one release (#273)"
+rm -f $rx/go; mkdir -p $rx/ol
+FABRIKITO_RUN_LOCK=$rx/ol/lock $S run-exclusive -- $rx/hold H $rx/ol.marks $rx/go 2>/dev/null &
+h=$!
+rx_until "grep -q 'H start' $rx/ol.marks 2>/dev/null"
+env -u FABRIKITO_RUN_LOCK FACTORY_RUN_LOCK=$rx/ol/lock $S run-exclusive -- sh -c 'echo "$0" >> "$1"' O $rx/ol.marks 2>$rx/ol.err &
+po=$!
+rx_until "grep -q 'waiting for the lock' $rx/ol.err"
+FABRIKITO_RUN_LOCK=$rx/ol/lock FACTORY_RUN_LOCK=$rx/ol-other/lock $S run-exclusive -- sh -c 'echo "$0" >> "$1"' N $rx/ol.marks 2>$rx/ol-new.err &
+pn=$!
+rx_until "grep -q 'waiting for the lock' $rx/ol-new.err"
+touch $rx/go; rx_wait $h; rx_wait $po; ro=$?; rx_wait $pn; rn=$?
+grep -q "waiting for the lock ($rx/ol/lock)" $rx/ol.err && [ $ro = 0 ] && [ $rn = 0 ] && grep -qx O $rx/ol.marks && grep -qx N $rx/ol.marks \
+  && ok "run-exclusive: the old FACTORY_RUN_LOCK names the lock when the new variable is not set" || { bad "run-exclusive: old lock variable (rc $ro $rn)"; cat $rx/ol.err; }
+grep -q "waiting for the lock ($rx/ol/lock)" $rx/ol-new.err && [ ! -e $rx/ol-other ] \
+  && ok "run-exclusive: when both are set the new FABRIKITO_RUN_LOCK wins, and the old one's file is never made" || { bad "run-exclusive: new variable wins"; cat $rx/ol-new.err; ls -A $rx/ol-other 2>&1; }
+out=$(cd $rx && env -u FABRIKITO_RUN_LOCK FACTORY_RUN_LOCK=rel/lock $S run-exclusive -- true 2>&1); rc=$?
+[ $rc = 64 ] && echo "$out" | grep -qF "FACTORY_RUN_LOCK must be an absolute path" \
+  && ok "run-exclusive: a refusal of a relative old variable names the variable that was set" || { bad "run-exclusive: relative old variable (rc=$rc)"; echo "$out"; }
+out=$(FABRIKITO_RUN_LOCK=$rx/ol/lock rx_bound $S run-exclusive -- sh -c 'FABRIKITO_RUN_EXCLUSIVE_HELD= FACTORY_RUN_EXCLUSIVE_HELD=$FABRIKITO_RUN_EXCLUSIVE_HELD '"$S"' run-exclusive -- echo inner' 2>&1); rc=$?
+[ $rc = 0 ] && [ "$out" = inner ] && ok "run-exclusive: the old FACTORY_RUN_EXCLUSIVE_HELD of the parent run lets a run inside it start" || { bad "run-exclusive: old held variable (rc=$rc)"; echo "$out" | tail -2; }
+
+# On the default lock the lock is also taken at the old place. The e2e must not touch the real folders, so
+# run_exclusive.rb runs here with the user database's home replaced by a folder of its own.
+fh=$rx/fh; legacy="$fh/Library/Application Support/software-factory/run-exclusive.lock"; newlock="$fh/Library/Application Support/fabrikito/run-exclusive.lock"
+mkdir -p "$fh/Library/Application Support"
+rx_def() { env -u FABRIKITO_RUN_LOCK -u FACTORY_RUN_LOCK -u FABRIKITO_RUN_EXCLUSIVE_HELD -u FACTORY_RUN_EXCLUSIVE_HELD FAKE_HOME=$fh ruby $rx/shim.rb $SRC/lib/run_exclusive.rb -- "$@"; }
+# What a checkout from before the rename does: flock the old file, write the old holder record, hold; and a probe.
+cat > $rx/oldhold.rb <<'R'
+require "json"
+lock, marks, go = ARGV
+f = File.open(lock, File::RDWR | File::CREAT, 0o600); f.flock(File::LOCK_EX)
+File.write(lock + ".holder", JSON.generate({ "pid" => Process.pid, "who" => "old", "since" => "2000-01-01T00:00:00", "cwd" => "/", "cmd" => "old" }))
+File.open(marks, "a") { |m| m.puts "old start" }
+sleep 0.1 until File.exist?(go)
+File.open(marks, "a") { |m| m.puts "old end" }
+File.unlink(lock + ".holder")
+R
+printf 'f = File.open(ARGV[0], File::RDWR | File::CREAT, 0o600)\nputs(f.flock(File::LOCK_EX | File::LOCK_NB) ? "free" : "busy")\n' > $rx/oldtry.rb
+out=$(rx_def sh -c 'echo "$FABRIKITO_RUN_EXCLUSIVE_HELD"; echo "$FACTORY_RUN_EXCLUSIVE_HELD"; cat "$1.holder"; echo; cat "$2.holder"; echo; ruby "$3" "$2"' x "$newlock" "$legacy" $rx/oldtry.rb 2>&1); rc=$?
+nh=$(echo "$out" | sed -n 1p); oh=$(echo "$out" | sed -n 2p); pid=${nh##*:}
+[ $rc = 0 ] && [ "$nh" = "$newlock:$pid" ] && [ "$oh" = "$legacy:$pid" ] && [ "$(echo "$out" | sed -n 3p | grep -c "\"pid\":$pid")" = 1 ] && [ "$(echo "$out" | sed -n 4p | grep -c "\"pid\":$pid")" = 1 ] && [ "$(echo "$out" | sed -n 5p)" = busy ] \
+  && ok "run-exclusive: on the default lock a run holds the new file and the old one, with a holder record and a variable at each name" || { bad "run-exclusive: default lock at both names (rc=$rc)"; echo "$out"; }
+[ -d "$fh/Library/Application Support/fabrikito" ] && [ ! -e "$newlock.holder" ] && [ ! -e "$legacy.holder" ] && [ "$(stat -f %Lp "$(dirname "$legacy")")" = 700 ] && [ "$(ruby $rx/oldtry.rb "$legacy")" = free ] \
+  && ok "run-exclusive: both holder records are gone and the old lock is free again after the run, in a folder that is owner-only" || { bad "run-exclusive: after a run on the default lock"; ls -A "$fh/Library/Application Support/"*; }
+# A run of the old version holds; a run of this one waits for it, and goes once it has ended.
+m=$rx/leg.marks; rm -f $rx/go $m
+ruby $rx/oldhold.rb "$legacy" $m $rx/go 2>/dev/null &
+oh=$!
+rx_until "grep -q 'old start' $m 2>/dev/null"
+rx_def $rx/hold N $m $rx/go 2>$rx/leg.err &
+nh=$!
+rx_until "grep -q 'old-name lock' $rx/leg.err"
+sleep 0.5; early=$(grep -c 'N start' $m)
+touch $rx/go; rx_wait $oh; rx_wait $nh; rc=$?
+[ "$early" = 0 ] && [ $rc = 0 ] && [ "$(tr '\n' ' ' < $m)" = "old start old end N start N end " ] \
+  && ok "run-exclusive: a run holding the old-name lock keeps a run of this version waiting until it ends" || { bad "run-exclusive: waiting for the old-name lock (early=$early rc=$rc marks: $(tr '\n' ' ' < $m))"; cat $rx/leg.err; }
+# And the other way round: while a run of this version holds, the old file is busy for an old-name run.
+m=$rx/leg2.marks; rm -f $rx/go $m
+rx_def $rx/hold N $m $rx/go 2>/dev/null &
+nh=$!
+rx_until "grep -q 'N start' $m 2>/dev/null"
+busy=$(ruby $rx/oldtry.rb "$legacy")
+touch $rx/go; rx_wait $nh
+[ "$busy" = busy ] && [ "$(ruby $rx/oldtry.rb "$legacy")" = free ] \
+  && ok "run-exclusive: while a run of this version holds, the old-name lock is busy, and free when it ends" || { bad "run-exclusive: old-name lock while a run holds (during: $busy)"; }
+# A run of the old version holds, and its command runs this one: the old variable, and the old record, say it is the parent.
+m=$rx/leg3.marks; rm -f $rx/go $m
+ruby $rx/oldhold.rb "$legacy" $m $rx/go 2>/dev/null &
+oh=$!
+rx_until "grep -q 'old start' $m 2>/dev/null"
+out=$(FACTORY_RUN_EXCLUSIVE_HELD="$legacy:$oh" FAKE_HOME=$fh rx_bound env -u FABRIKITO_RUN_LOCK -u FACTORY_RUN_LOCK -u FABRIKITO_RUN_EXCLUSIVE_HELD ruby $rx/shim.rb $SRC/lib/run_exclusive.rb -- echo inner 2>&1); rc=$?
+touch $rx/go; rx_wait $oh
+[ $rc = 0 ] && [ "$out" = inner ] && ok "run-exclusive: a run inside a run of the old version, which holds the old lock, starts without waiting for its parent" || { bad "run-exclusive: nested in an old-name run (rc=$rc)"; echo "$out" | tail -2; }
+# The old lock has a queue of its own (#283), and a run of this version takes a place in it once it holds
+# the new lock, so it passes no run of an older checkout and none passes it (tl on #273). An older
+# checkout's run is stood in for by this version's code with the old file named as its lock: the same
+# code on the same file, queue folder and holder record.
+# It names that file under both variables, so a library of either age takes it (a library from before
+# the rename reads only the old one), and it starts through the shim like rx_def, so that even a
+# library that read neither would fall back inside the case's own folder.
+rx_old() { env -u FABRIKITO_RUN_EXCLUSIVE_HELD -u FACTORY_RUN_EXCLUSIVE_HELD FABRIKITO_RUN_LOCK="$legacy" FACTORY_RUN_LOCK="$legacy" FAKE_HOME=$fh ruby $rx/shim.rb $SRC/lib/run_exclusive.rb -- "$@"; }
+# Each helper once before a case uses it, and this file read for the mistake itself: a line that takes
+# the old variable away from a start of the library must send that start through the shim, or a library
+# from before the rename goes to its default lock. (The guard's own probe above is the one such line: it
+# names a guard folder of its own.)
+rx_old true 2>$rx/helper-old.err; rc_o=$?; rx_def true 2>$rx/helper-def.err; rc_d=$?
+rx_lint=$(grep -n -E -e '(-u |unset [^;|&]*)FACTORY_RUN[_]LOCK' -e 'FACTORY_RUN[_]LOCK=( |$)' "$E2E_DIR/exclusive.sh" | grep -v -F -e 'shim.rb' -e 'RX_GUARD_HOME=$rx_gp ' | grep -v -E '^[0-9]+:#')
+[ $rc_o = 0 ] && [ $rc_d = 0 ] && [ -z "$rx_lint" ] && [ -z "$(ls -A "$rx_gh/Library/Application Support")" ] \
+  && ok "run-exclusive: each helper of the old-names cases starts the library on a lock in its case's own folder, and no line takes the old lock variable away without the stand-in home" \
+  || { bad "run-exclusive: a helper or a line of test/e2e/exclusive.sh can send an older library to its default lock (rc $rc_o $rc_d; under the guard folder: $(ls -A "$rx_gh/Library/Application Support" | tr '\n' ' '))"; echo "$rx_lint"; cat $rx/helper-old.err $rx/helper-def.err; }
+rx_tickets() { ls "$1.queue" 2>/dev/null | grep -c -E '^[0-9]{20}-[0-9]+$'; }
+# An older run that was already waiting when this version's run came goes first.
+m=$rx/leg4.marks; rm -f $rx/go $m
+rx_old $rx/hold H $m $rx/go 2>/dev/null &
+ph=$!
+rx_until "grep -q 'H start' $m 2>/dev/null"
+rx_old $rx/hold O $m $rx/go 2>$rx/leg4-o.err &
+po=$!
+rx_until "grep -q 'waiting for the lock' $rx/leg4-o.err"
+rx_def $rx/hold N $m $rx/go 2>$rx/leg4-n.err &
+pn=$!
+rx_until "grep -q 'old-name lock' $rx/leg4-n.err"; waiting=$?
+tickets=$(rx_tickets "$legacy")
+touch $rx/go; rx_wait $ph; rx_wait $po; ro=$?; rx_wait $pn; rn=$?
+[ $waiting = 0 ] && [ "$tickets" = 2 ] && grep -qF "waiting for the old-name lock ($legacy)" $rx/leg4-n.err && grep -q "old-name lock .*; 1 earlier run is waiting ahead of this one" $rx/leg4-n.err && [ $ro = 0 ] && [ $rn = 0 ] \
+  && [ "$(tr '\n' ' ' < $m)" = "H start H end O start O end N start N end " ] \
+  && ok "run-exclusive: a run of this version takes a place in the old lock's queue, behind an older run that was already waiting" || { bad "run-exclusive: place in the old queue (waiting=$waiting tickets=$tickets rc $ro $rn marks: $(tr '\n' ' ' < $m))"; cat $rx/leg4-n.err; }
+[ ! -e "$legacy.queue" ] && [ ! -e "$newlock.queue" ] && [ ! -e "$legacy.holder" ] \
+  && ok "run-exclusive: both queues are empty and removed once those runs have ended" || { bad "run-exclusive: queues left behind"; ls -A "$legacy.queue" "$newlock.queue" 2>&1; }
+# An older run that comes after this version's run has its place waits behind it.
+m=$rx/leg5.marks; rm -f $rx/go $m
+rx_old $rx/hold H $m $rx/go 2>/dev/null &
+ph=$!
+rx_until "grep -q 'H start' $m 2>/dev/null"
+rx_def $rx/hold N $m $rx/go 2>$rx/leg5-n.err &
+pn=$!
+rx_until "grep -q 'old-name lock' $rx/leg5-n.err"
+rx_old $rx/hold O $m $rx/go 2>$rx/leg5-o.err &
+po=$!
+rx_until "grep -q 'waiting for the lock' $rx/leg5-o.err"; waiting=$?
+touch $rx/go; rx_wait $ph; rx_wait $pn; rn=$?; rx_wait $po; ro=$?
+[ $waiting = 0 ] && grep -q "; 1 earlier run is waiting ahead of this one" $rx/leg5-o.err && [ $ro = 0 ] && [ $rn = 0 ] && [ "$(tr '\n' ' ' < $m)" = "H start H end N start N end O start O end " ] \
+  && ok "run-exclusive: an older run that comes after this version's run has its place in the old queue waits behind it" || { bad "run-exclusive: an older run behind this version's place (waiting=$waiting rc $rn $ro marks: $(tr '\n' ' ' < $m))"; cat $rx/leg5-o.err; }
+# A second run of this version, while the first holds: it waits for the new lock and has no place in
+# the old queue yet. The place is taken only once the new lock is held (tl on #273): one taken on arrival
+# could stand ahead of the run that holds the new lock, and the two would wait for each other for good.
+m=$rx/leg6.marks; rm -f $rx/go $m
+rx_def $rx/hold A $m $rx/go 2>/dev/null &
+pa=$!
+rx_until "grep -q 'A start' $m 2>/dev/null"
+rx_def $rx/hold B $m $rx/go 2>$rx/leg6-b.err &
+pb=$!
+rx_until "grep -q 'waiting for the lock' $rx/leg6-b.err"; waiting=$?
+tickets=$(rx_tickets "$legacy"); newtickets=$(rx_tickets "$newlock")
+touch $rx/go; rx_wait $pa; ra=$?; rx_wait $pb; rb=$?
+[ $waiting = 0 ] && [ "$tickets" = 0 ] && [ "$newtickets" = 1 ] && [ $ra = 0 ] && [ $rb = 0 ] && [ "$(tr '\n' ' ' < $m)" = "A start A end B start B end " ] \
+  && ok "run-exclusive: a second run of this version waits for the new lock with no place in the old queue yet" || { bad "run-exclusive: a place in the old queue before the new lock is held (waiting=$waiting old tickets=$tickets new tickets=$newtickets rc $ra $rb marks: $(tr '\n' ' ' < $m))"; cat $rx/leg6-b.err; }
+# The same with an older run holding the old lock: the first run of this version holds the new lock and
+# waits in the old queue, the second waits for the new lock. The old queue has the first one's ticket
+# only, and the second is told who holds the new lock: the record is written as soon as the new lock is
+# held, not when the old one follows, which can be a whole run of the older checkout later.
+m=$rx/leg7.marks; rm -f $rx/go $m
+rx_old $rx/hold O $m $rx/go 2>/dev/null &
+po=$!
+rx_until "grep -q 'O start' $m 2>/dev/null"
+rx_def $rx/hold A $m $rx/go 2>$rx/leg7-a.err &
+pa=$!
+rx_until "grep -q 'old-name lock' $rx/leg7-a.err"
+rx_def $rx/hold B $m $rx/go 2>$rx/leg7-b.err &
+pb=$!
+rx_until "grep -q 'waiting for the lock' $rx/leg7-b.err"; waiting=$?
+tickets=$(rx_tickets "$legacy")
+touch $rx/go; rx_wait $po; rx_wait $pa; ra=$?; rx_wait $pb; rb=$?
+[ $waiting = 0 ] && [ "$tickets" = 1 ] && [ $ra = 0 ] && [ $rb = 0 ] && [ "$(tr '\n' ' ' < $m)" = "O start O end A start A end B start B end " ] \
+  && ok "run-exclusive: while a run of this version waits in the old queue, a second one waits for the new lock and has no place in the old queue" || { bad "run-exclusive: two runs of this version behind an older one (waiting=$waiting old tickets=$tickets rc $ra $rb marks: $(tr '\n' ' ' < $m))"; cat $rx/leg7-b.err; }
+grep -qF "waiting for the lock ($newlock), held by " $rx/leg7-b.err && grep -q "), held by [^(]* (pid [0-9][0-9]*, in " $rx/leg7-b.err && ! grep -q "an unknown holder" $rx/leg7-b.err \
+  && ok "run-exclusive: a run waiting for the new lock is told who holds it, also while that holder still waits for the old lock" || { bad "run-exclusive: the holder of the new lock is not named while it waits for the old one"; cat $rx/leg7-b.err; }
+# TERM to a run of this version while it waits in the old queue: it ends with 143 and its command never
+# ran, and it leaves nothing: no place in the old queue, the new lock free, no holder record of its own.
+# The older run is untouched, and a later run of this version goes ahead once it has ended. Started
+# without the helper, so that the pid is the library's own.
+m=$rx/leg8.marks; rm -f $rx/go $m
+rx_old $rx/hold O $m $rx/go 2>/dev/null &
+po=$!
+rx_until "grep -q 'O start' $m 2>/dev/null"
+env -u FABRIKITO_RUN_LOCK -u FACTORY_RUN_LOCK -u FABRIKITO_RUN_EXCLUSIVE_HELD -u FACTORY_RUN_EXCLUSIVE_HELD FAKE_HOME=$fh ruby $rx/shim.rb $SRC/lib/run_exclusive.rb -- $rx/hold N $m $rx/go 2>$rx/leg8-n.err &
+pn=$!
+rx_until "grep -q 'old-name lock' $rx/leg8-n.err"; waiting=$?
+kill -TERM $pn; rx_wait $pn; rn=$?
+tickets=$(rx_tickets "$legacy"); newfree=$(ruby $rx/oldtry.rb "$newlock"); oldbusy=$(ruby $rx/oldtry.rb "$legacy")
+[ -e "$newlock.holder" ] && nrec=left || nrec=gone
+[ -e "$legacy.holder" ] && orec=kept || orec=gone
+touch $rx/go; rx_wait $po; ro=$?
+out=$(FAKE_HOME=$fh rx_bound env -u FABRIKITO_RUN_LOCK -u FACTORY_RUN_LOCK -u FABRIKITO_RUN_EXCLUSIVE_HELD -u FACTORY_RUN_EXCLUSIVE_HELD ruby $rx/shim.rb $SRC/lib/run_exclusive.rb -- echo after 2>&1); rc=$?
+[ $waiting = 0 ] && [ $rn = 143 ] && [ "$tickets" = 0 ] && [ "$newfree" = free ] && [ "$oldbusy" = busy ] && [ $nrec = gone ] && [ $orec = kept ] && [ $ro = 0 ] && [ $rc = 0 ] && [ "$out" = after ] \
+  && [ "$(tr '\n' ' ' < $m)" = "O start O end " ] \
+  && ok "run-exclusive: TERM to a run waiting in the old queue ends it with 143 and leaves no ticket, no record and a free new lock; the older run and a later run are unaffected" || { bad "run-exclusive: TERM in the old queue (waiting=$waiting rc=$rn tickets=$tickets new lock $newfree, old lock $oldbusy, its record $nrec, the older run's $orec, older rc=$ro, later rc=$rc out=$out marks: $(tr '\n' ' ' < $m))"; cat $rx/leg8-n.err; }
+# An older checkout's library started inside this version's run: it reads the old variable and the old
+# record the outer run wrote, finds its parent, and starts at once. The older library is stood in for by
+# this version's code with only the old names: the old file as its lock, and no new variable.
+out=$(FAKE_HOME=$fh rx_bound env -u FABRIKITO_RUN_LOCK -u FACTORY_RUN_LOCK -u FABRIKITO_RUN_EXCLUSIVE_HELD -u FACTORY_RUN_EXCLUSIVE_HELD ruby $rx/shim.rb $SRC/lib/run_exclusive.rb -- \
+  sh -c 'env -u FABRIKITO_RUN_LOCK -u FABRIKITO_RUN_EXCLUSIVE_HELD FACTORY_RUN_LOCK="$1" ruby "$2" -- echo inner' x "$legacy" $SRC/lib/run_exclusive.rb 2>&1); rc=$?
+[ $rc = 0 ] && [ "$out" = inner ] && ok "run-exclusive: a run with only the old names, started inside a run of this version on the default lock, starts without waiting for its parent" || { bad "run-exclusive: an old-name run nested in this version's run (rc=$rc)"; echo "$out" | tail -2; }
+# The same when the user database gives the home folder with a "." inside: the outer run names the old
+# lock by its normal path, as an older library names its own, so the two still agree on which lock it is.
+fh2=$rx/fh2; mkdir -p "$fh2/Library/Application Support"
+out=$(FAKE_HOME=$rx/./fh2 rx_bound env -u FABRIKITO_RUN_LOCK -u FACTORY_RUN_LOCK -u FABRIKITO_RUN_EXCLUSIVE_HELD -u FACTORY_RUN_EXCLUSIVE_HELD ruby $rx/shim.rb $SRC/lib/run_exclusive.rb -- \
+  sh -c 'echo "$FACTORY_RUN_EXCLUSIVE_HELD"; env -u FABRIKITO_RUN_LOCK -u FABRIKITO_RUN_EXCLUSIVE_HELD FACTORY_RUN_LOCK="$1" ruby "$2" -- echo inner' x "$fh2/Library/Application Support/software-factory/run-exclusive.lock" $SRC/lib/run_exclusive.rb 2>&1); rc=$?
+[ $rc = 0 ] && [ "$(echo "$out" | sed -n 2p)" = inner ] && echo "$out" | sed -n 1p | grep -qF "$fh2/Library/Application Support/software-factory/run-exclusive.lock:" \
+  && ok "run-exclusive: the old lock is named by its normal path, so an old-name run nested in this version's run finds its parent when the home folder's path is not normal" || { bad "run-exclusive: the old lock's path is not normalised (rc=$rc)"; echo "$out" | tail -3; }
 
 # test/e2e.sh takes the lock itself (#309): it starts itself again under run-exclusive, whoever started it.
 # The file runs as it is, from a scratch tree where every area is a stub and the first one is a fixture (as
 # in test/e2e-exit-trap.sh), with the real fabrikito behind a link: a run takes a few seconds, starts no
-# tmux server, and takes this run's lock (FACTORY_RUN_LOCK), never the real one. The fixture writes down
+# tmux server, and takes this run's lock (FABRIKITO_RUN_LOCK and its old name), never the real one. The fixture writes down
 # what it finds inside the run: its arguments, what is left of the lock step's variables, whether the
 # caller's lock is held and by which command, and whether the run's own lock works. With $el/wait there,
 # it then waits for $el/ego. Ordering is checked from the marks, as above.
@@ -310,11 +551,11 @@ cp $SRC/test/e2e.sh $el/src/test/e2e.sh; ln -s $SRC/fabrikito $el/src/fabrikito
 mkdir $el/src/test/guard && cp $SRC/test/guard/tmux $el/src/test/guard/tmux && chmod +x $el/src/test/guard/tmux
 echo 'int main(void) { return 0; }' > $el/src/test/e2e/fake-claude.c
 for el_a in lib $AREAS; do echo "e2e_end=$el_a" > $el/src/test/e2e/$el_a.sh; done
-{ echo "el_d=$el; el_lock=$FACTORY_RUN_LOCK"; cat <<'EOF'
+{ echo "el_d=$el; el_lock=$FABRIKITO_RUN_LOCK"; cat <<'EOF'
 echo "$T_TOP" > $el_d/top; echo "E start" >> $el_d/marks
 { echo "args=$#:${2-}"; echo "var=${EL_VAR-unset}"
-  echo "left=${E2E_LOCK_PID-unset},${E2E_NO_LOCK-unset},${FACTORY_RUN_EXCLUSIVE_HELD-unset}"; echo "tree=${E2E_LOCK_TREE-unset}"
-  [ "$FACTORY_RUN_LOCK" = "$T/rx-lock/run-exclusive.lock" ] && echo "own=yes" || echo "own=no"
+  echo "left=${E2E_LOCK_PID-unset},${E2E_NO_LOCK-unset},${FABRIKITO_RUN_EXCLUSIVE_HELD-unset},${FACTORY_RUN_EXCLUSIVE_HELD-unset}"; echo "tree=${E2E_LOCK_TREE-unset}"
+  [ "$FABRIKITO_RUN_LOCK" = "$T/rx-lock/run-exclusive.lock" ] && [ "$FACTORY_RUN_LOCK" = "$T/rx-lock/run-exclusive.lock" ] && echo "own=yes" || echo "own=no"
   echo "outer=$(ruby -e 'f = (File.open(ARGV[0]) rescue exit); puts f.flock(File::LOCK_EX | File::LOCK_NB) ? "free" : "held"' "$el_lock")"
   echo "holder=$(ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0]))["cmd"]' "$el_lock.holder" 2>/dev/null)"
   echo "inner=$($S run-exclusive -- sh -c 'echo ran' 2>&1)$([ -f "$T/rx-lock/run-exclusive.lock" ] && echo ", on its own lock")"
@@ -333,7 +574,7 @@ el_reset
 out=$(EL_VAR=kept rx_bound $el_cmd one "two words" 2>&1); rc=$?
 [ $rc = 0 ] && echo "$out" | el_result && grep -qx 'outer=held' $el/seen && grep -q "^holder=.* $el/src/test/e2e.sh one two words\$" $el/seen \
   && ok "test/e2e.sh started outside the lock takes it: the lock is held while the cases run, by this run" || { bad "test/e2e.sh outside the lock (rc=$rc)"; echo "$out" | tail -3; el_show; }
-grep -qx 'left=unset,unset,unset' $el/seen && grep -qx 'own=yes' $el/seen && grep -qx 'inner=ran, on its own lock' $el/seen \
+grep -qx 'left=unset,unset,unset,unset' $el/seen && grep -qx 'own=yes' $el/seen && grep -qx 'inner=ran, on its own lock' $el/seen \
   && ok "test/e2e.sh under the lock it took: none of the lock's variables is left, and the run's own lock works" || { bad "test/e2e.sh: the run's own lock and what is left of the variables"; el_show; }
 grep -qx 'args=2:two words' $el/seen && grep -qx 'var=kept' $el/seen \
   && ok "test/e2e.sh: arguments and the environment reach the run it starts under the lock" || { bad "test/e2e.sh: arguments and environment after the lock step"; el_show; }
@@ -362,7 +603,7 @@ rx_until "grep -q 'H start' $el/marks 2>/dev/null"
 out=$(E2E_NO_LOCK=1 rx_bound $el_cmd 2>&1); rc=$?
 during=$(tr '\n' ' ' < $el/marks)
 touch $el/hgo; rx_wait $h; hrc=$?
-[ $rc = 0 ] && echo "$out" | el_result && [ "$during" = "H start E start E end " ] && [ $hrc = 0 ] && grep -q "^holder=$rx/hold H " $el/seen && grep -qx 'left=unset,unset,unset' $el/seen \
+[ $rc = 0 ] && echo "$out" | el_result && [ "$during" = "H start E start E end " ] && [ $hrc = 0 ] && grep -q "^holder=$rx/hold H " $el/seen && grep -qx 'left=unset,unset,unset,unset' $el/seen \
   && ok "test/e2e.sh with E2E_NO_LOCK=1 runs without the lock, while another run holds it, and the option is not left for what it starts" || { bad "test/e2e.sh with E2E_NO_LOCK=1 (rc=$rc h=$hrc during: $during)"; echo "$out" | tail -3; el_show; }
 # E2E_LOCK_PID alone is not trusted: one that names another process, here the very run that holds the
 # lock, does not skip the lock. Then TERM to the waiting run ends it, and nothing of the run starts.
@@ -413,7 +654,7 @@ el_stopped() { [ $waiting = 0 ] && [ $hrc = 0 ] && [ $erc = 64 ] && [ "$(tr '\n'
 el_git() { git -C $el/src -c user.name=e2e -c user.email=e2e@example.invalid "$@"; }
 # The option is 1 and nothing else (sec2 on #356): any other value takes the lock, as no value does.
 EL_RUN="env E2E_NO_LOCK=0 $el_cmd" el_queued
-el_ran && grep -qx 'left=unset,unset,unset' $el/seen \
+el_ran && grep -qx 'left=unset,unset,unset,unset' $el/seen \
   && ok "test/e2e.sh with E2E_NO_LOCK=0 takes the lock like a run without the option: only 1 runs without it" || { bad "test/e2e.sh with E2E_NO_LOCK=0 (waiting=$waiting h=$hrc e=$erc)"; tail -3 $el/out; el_show; }
 # A run that waited tests the tree as it is after the wait, so it stops when that is no longer the tree it
 # was queued for (sec2 on #356): a seat that moves its worktree to its next task while its run queues
@@ -451,4 +692,11 @@ el_ran && ok "test/e2e.sh goes on when git cannot describe the tree after the wa
 # So it can fail only where the folder was missing when the area began: a run with E2E_NO_LOCK=1 or with
 # a lock elsewhere, on a machine that has none yet. Where the folder exists it cannot tell who made it.
 { [ $real_was = 1 ] || [ ! -e "$real" ]; } && ok "this area's cases, on the run's own lock, did not make the real lock's folder ($real)" || bad "this area's cases made the real lock's folder $real"
+{ [ $real_old_was = 1 ] || [ ! -e "$real_old" ]; } && ok "this area's cases, on the run's own lock, did not make the real lock's old folder ($real_old)" || bad "this area's cases made the real lock's old folder $real_old"
+# The guard folder is empty: no start of the library in this area fell back to a default lock outside
+# its case's own stand-in home. Then the area's RUBYOPT goes, so the areas after this one start ruby as
+# before.
+[ -z "$(ls -A "$rx_gh/Library/Application Support")" ] \
+  && ok "run-exclusive: no start of the library in this area fell back to a default lock outside its case's own folder" || { bad "run-exclusive: a start of the library fell back to a default lock, here under the guard folder and on the host's real lock without the guard"; ls -A "$rx_gh/Library/Application Support/"*; }
+if [ $rx_rubyopt_set = 1 ]; then export RUBYOPT=$rx_rubyopt; else unset RUBYOPT; fi; unset RX_GUARD_HOME
 e2e_end=exclusive # the last line: test/e2e.sh checks that the file ran to here

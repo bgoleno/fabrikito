@@ -90,9 +90,9 @@ does not wait a second time.
   nothing that blocks the ones behind it or a later run. The waiting message says how many runs are
   ahead. The folder is removed when the last waiting run leaves. A run started before this was added
   does not take a ticket and can still pass the queue, until it ends.
-- **The lock** is one file per user, `~/Library/Application Support/software-factory/run-exclusive.lock`,
+- **The lock** is one file per user, `~/Library/Application Support/fabrikito/run-exclusive.lock`,
   outside every team's state and checkout. Teams on one machine share the user, so they share the lock.
-  `FACTORY_RUN_LOCK` names another file, by an absolute path (the e2e uses its own). The folder is made
+  `FABRIKITO_RUN_LOCK` names another file, by an absolute path (the e2e uses its own). The folder is made
   owner-only when it is created, and a lock file or folder that is a symlink, or a lock file that is a
   hard link, is refused. Never remove the lock file while a run holds it: a run that starts after that
   does not wait for the one holding it, and the holder can only say so when it ends. If the holder
@@ -119,3 +119,28 @@ does not wait a second time.
 - **Nested runs** (a gate script that calls `run-exclusive` again) run at once instead of waiting for
   themselves, but only while the run that holds the lock is alive. A program left running from an
   earlier run keeps its variable, and that alone does not skip the lock.
+- **The old names** ([#273](../../../issues/273)). Before the rename to fabrikito the lock folder was
+  `~/Library/Application Support/software-factory/` and the variables were `FACTORY_RUN_LOCK` and
+  `FACTORY_RUN_EXCLUSIVE_HELD`. For one release both still work, so that a checkout that has not been
+  updated and one that has still exclude each other and nest:
+  - The old variables are read when the new ones are not set (the new one wins when both are). The old
+    `FACTORY_RUN_EXCLUSIVE_HELD` of a parent run is accepted as the new one is.
+  - On the default lock, a run also takes the old file (`software-factory/run-exclusive.lock`) once it has
+    the new one, and writes the old holder record and sets the old variable for its command. A run of an
+    older checkout, which knows only the old file, then waits for it, and it waits for that run. The old
+    file has the older checkout's queue beside it, and the run takes a place in it as a run of that
+    checkout does: nobody is passed in the old queue. Its place there dates from the moment it got the
+    new lock, not from its arrival, so runs of an older checkout that came in meanwhile go first. While
+    it waits there, its messages name the old-name lock and who holds it.
+  - While it waits there it already holds the new lock, and its holder record is written, so a run of
+    this version that arrives is told who it waits for. A run stopped at that point (Ctrl-Z) therefore
+    keeps the new lock, and runs of this version wait for it, where a stopped run that only waits in a
+    queue holds nobody up.
+  - A lock named by a variable is one file for both versions only when the old variable names it, or
+    both do. An older checkout does not read `FABRIKITO_RUN_LOCK`: with only that one set it stays on
+    the old default lock, and the two versions no longer exclude each other. While checkouts of both
+    ages are in use, set both variables to the same path.
+  - **Migration:** nothing to do. The first run creates `fabrikito/` beside the old folder. The old
+    folder `~/Library/Application Support/software-factory/` is made again by every run of this version
+    on the default lock for as long as the fallback exists, so deleting it has to wait for the release
+    after this one, which also removes the old variables, the old file and this paragraph.

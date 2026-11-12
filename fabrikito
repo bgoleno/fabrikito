@@ -474,7 +474,7 @@ setup_failed() {
   die "$1; the worktree was left as it is (it may hold work) and is not marked set up, so the next up tries again"
 }
 
-# The factory checkout this script runs from, and its commit (#189). A team pinned to a release runs
+# The fabrikito checkout this script runs from, and its commit (#189). A team pinned to a release runs
 # from a checkout of its own (docs/pinned-release.md), and its seats' say, hooks and plugin come from
 # the checkout that started them, so check says which one before a seat is restarted. Only a checkout
 # whose top folder is this one counts: an install copied into some other repository is not described
@@ -773,7 +773,7 @@ cmd_titles() {
 # waiting forever, and `up` with it.
 run_osa() {
   local out p i rc=0
-  out=$(mktemp "${TMPDIR:-/tmp}/factory-osa.XXXXXX")
+  out=$(mktemp "${TMPDIR:-/tmp}/fabrikito-osa.XXXXXX")
   osascript "$@" >"$out" 2>&1 &
   p=$!
   for i in $(seq 1 60); do
@@ -1383,8 +1383,8 @@ seat_unlock() { exec 9>&-; }
 #                 only the label.
 #   <state>/say-refusals.log   time, sender, receiver and class of each refusal, with no text and no
 #                 hash: one write per line, appended
-SAY_RESEND_WINDOW=${FACTORY_SAY_RESEND_WINDOW:-300}   # seconds a refused text stays refused while the box still holds text
-SAY_NOTICE_COUNT=${FACTORY_SAY_NOTICE_COUNT:-3}       # refusals to one seat before status shows a notice
+SAY_RESEND_WINDOW=${FABRIKITO_SAY_RESEND_WINDOW:-${FACTORY_SAY_RESEND_WINDOW:-300}}   # seconds a refused text stays refused while the box still holds text (FACTORY_SAY_*, the old names, are read for one release: #273)
+SAY_NOTICE_COUNT=${FABRIKITO_SAY_NOTICE_COUNT:-${FACTORY_SAY_NOTICE_COUNT:-3}}   # refusals to one seat before status shows a notice
 SAY_SEEN_MAX=8                                         # refused texts remembered per seat
 # A value that is not a whole number would make every comparison below fail quietly and turn the feature
 # off (tl on #292), so it falls back to the default.

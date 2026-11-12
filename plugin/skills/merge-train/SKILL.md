@@ -132,7 +132,7 @@ nothing outside its scratch clone. Use it to see what a real run would do.
      - credential or secret handling;
      - code that deletes files;
      - the team's own safety rules (the owner's decision): the prompt every seat shares, with its
-       hard rules (`roles/common.md` in the factory), the security role's prompt (`roles/sec.md`),
+       hard rules (`roles/common.md` in fabrikito), the security role's prompt (`roles/sec.md`),
        and the `review-pr`, `security-triage` and `verify-behavior` skills (the last defines the
        QA marker below).
 

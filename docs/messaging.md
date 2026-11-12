@@ -106,10 +106,11 @@ message to that seat, and senders used to retry in a loop. Now:
   a shell or a busy seat do not, and a different text is refused for the box as before. The window is
   kept per text (the last eight refused texts of each seat), so another sender's refusal in between, or
   alternating two texts, does not hide a repeat. A message to or from `sec` is never hashed, so it is
-  refused for the box each time and not as a repeat. The `FACTORY_SAY_RESEND_WINDOW` environment variable
-  changes the 300 seconds (a value that is not a whole number means the default);
+  refused for the box each time and not as a repeat. The `FABRIKITO_SAY_RESEND_WINDOW` environment variable
+  changes the 300 seconds (a value that is not a whole number means the default; the old name
+  `FACTORY_SAY_RESEND_WINDOW` is still read for one release);
 - `status` prints one `NOTICE <role>` line for a seat once three sends to it were refused for its box
-  (`FACTORY_SAY_NOTICE_COUNT`), however many more are refused. It says when the last refusal was: only a
+  (`FABRIKITO_SAY_NOTICE_COUNT`, old name `FACTORY_SAY_NOTICE_COUNT` read for one release), however many more are refused. It says when the last refusal was: only a
   later `say` clears it, and `status` does not read the pane. Nothing is typed into any seat by it;
 - the records of that seat (what `say` keeps for the two points above, mode 600 files in
   `.state/<team>/say/`, the hash of the text among them) are removed the moment its box is seen empty,

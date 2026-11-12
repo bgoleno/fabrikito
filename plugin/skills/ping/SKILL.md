@@ -4,4 +4,4 @@ description: Confirm that the fabrikito plugin is loaded in this session. A plac
 disable-model-invocation: true
 ---
 
-Reply with exactly one line, `factory plugin loaded`, and nothing else. Do not run any tool.
+Reply with exactly one line, `fabrikito plugin loaded`, and nothing else. Do not run any tool.

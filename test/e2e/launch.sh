@@ -22,6 +22,7 @@ echo "--- fabrikito plugin"
 # The plugin each seat loads: a manifest named fabrikito and the placeholder skill that proves loading.
 ruby -rjson -e 'exit(JSON.parse(File.read(ARGV[0]))["name"] == "fabrikito" ? 0 : 1)' $SRC/plugin/.claude-plugin/plugin.json 2>/dev/null && ok "plugin.json parses and names the plugin fabrikito (skills are /fabrikito:<skill>)" || bad "plugin.json"
 grep -qx "name: ping" $SRC/plugin/skills/ping/SKILL.md 2>/dev/null && ok "the placeholder skill skills/ping exists" || bad "skills/ping/SKILL.md"
+grep -qF "Reply with exactly one line, \`fabrikito plugin loaded\`, and nothing else." $SRC/plugin/skills/ping/SKILL.md 2>/dev/null && ok "the ping skill tells the seat to reply with fabrikito plugin loaded (#273)" || bad "the ping skill's reply names fabrikito"
 # Every skill in the plugin, checked here once so a PR that adds a skill adds no test code (#17). The
 # frontmatter parses; name is the folder's name; the description is one line of at most 300 characters
 # (it sits in every seat's skill list, so it costs context everywhere); no @@PLACEHOLDER@@ is left

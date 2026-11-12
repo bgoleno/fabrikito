@@ -67,7 +67,7 @@ Bash(git push */main)
 Bash(git push */main *)'
 [ "$(rules $T/state/settings/em.json ask | grep '^Bash(git push ')" = "$base_rules" ] && ok "ask on any push to the base branch (main, from origin/main): the 8 patterns" || { bad "base-branch ask"; rules $T/state/settings/em.json ask; }
 chk=$($S -c $T/team.yaml check 2>&1)
-# check names the factory checkout the team runs from and its commit (#189): a team pinned to a
+# check names the fabrikito checkout the team runs from and its commit (#189): a team pinned to a
 # release runs from its own checkout. Not read from $SRC, which may be an export with no .git (tl on
 # #191): a throwaway git checkout of copied files, with a lightweight tag (plain describe skips one),
 # then a change to a tracked file (-dirty). The team file in teams/ is untracked, so not dirty.
@@ -78,7 +78,7 @@ gl=$($T/ginst/fabrikito -c $T/ginst/teams/team.yaml check 2>&1 | grep "^install 
 echo changed >> $T/ginst/VERSION
 gd=$($T/ginst/fabrikito -c $T/ginst/teams/team.yaml check 2>&1 | grep "^install ")
 [ "$gl" = "install   : $T/ginst at v9.8.7" ] && [ "$gd" = "install   : $T/ginst at v9.8.7-dirty" ] \
-  && ok "check: the install line names the factory checkout and its tag (lightweight), with -dirty after a change" || { bad "check: install line in a git checkout"; echo "clean: $gl"; echo "dirty: $gd"; }
+  && ok "check: the install line names the fabrikito checkout and its tag (lightweight), with -dirty after a change" || { bad "check: install line in a git checkout"; echo "clean: $gl"; echo "dirty: $gd"; }
 # fabrikito is copied, not linked: a link to the file is the real install (#263), so a linked file would make $SRC the install.
 mkdir -p $T/linst/teams; cp $SRC/fabrikito $T/linst/fabrikito; for p in lib roles plugin; do ln -s $SRC/$p $T/linst/$p; done; cp $T/team.yaml $T/linst/teams/team.yaml
 $T/linst/fabrikito -c $T/linst/teams/team.yaml check 2>&1 | grep -qxF "install   : $T/linst (not a git checkout)" && ok "check: an install outside any git checkout says so" || { bad "check: install line outside git"; $T/linst/fabrikito -c $T/linst/teams/team.yaml check 2>&1 | grep -E "^(install|error)"; }
@@ -290,7 +290,7 @@ ssect sec | grep -F "added: " | grep -qF ", Edit and Read allow on the triage re
   && ! echo "$schk" | grep -q "warning: sec lists fabrikito:security-triage" \
   && ok "check: the triage folder rules on each seat's added line, and a warning for w2, which lists the skill and is not sec" || { bad "check: triage folder"; ssect sec; ssect em; echo "$schk" | grep warning; }
 echo "--- other teams' state folders (#197)"
-# Two teams on one factory checkout, their state folders side by side in one state root ($X): each
+# Two teams on one fabrikito checkout, their state folders side by side in one state root ($X): each
 # team's seats get Read denies on the other's triage records, log and notes and an Edit deny on all
 # of it, in both spellings ($T and its real path), and none of these on their own. A team's state
 # folder is one holding settings/, launch/ and prompts/, which up makes. In the root, a link is
@@ -393,7 +393,7 @@ reject "other_teams: a folder whose only entry is a link named .DS_Store" "other
 mkdir -p $T/repo/emptyst
 reject "other_teams: an empty folder in the repo" "other_teams: $T/repo/emptyst is, holds or sits inside this team's repository (repo.path)" "" "other_teams: [{ state: $T/repo/emptyst }]"
 rmdir $T/repo/emptyst
-# A team pinned to a release whose repo.path is the factory checkout lists the checkout's
+# A team pinned to a release whose repo.path is the fabrikito checkout lists the checkout's
 # <repo>/.state/<team> (#205): a real team state folder whose real parent is named .state is exempt
 # from "sits inside" the repository, and gets every rule. Spelled through a link, the real path
 # decides, and the parent's name is read from the disk. Without team state, without a real .state parent (a link named .state, or a source folder
@@ -410,7 +410,7 @@ mk "" "other_teams: [{ state: $T/repo/alias/other }]"
 adn=$(TEAM_STATE_DIR=$T/pinst/pin ruby $SRC/lib/team_config.rb $T/v.yaml settings em 2>&1 | ruby -rjson -e 'puts JSON.parse(STDIN.read)["permissions"]["deny"]' 2>&1)
 for rule in "Read(/$T/repo/alias/other/triage/**)" "Edit(/$T/repo/alias/other/**)" "Edit(/$RT/repo/.state/other/**)"; do printf '%s\n' "$adn" | grep -qxF "$rule" || pr="$pr link-lacks:$rule"; done
 [ $rc = 0 ] && [ -z "$pr" ] && echo "$pchk" | grep -qF "other teams: $T/repo/.state/other (listed)" \
-  && ok "other_teams: a pinned team whose repo is the factory lists <repo>/.state/<team>, with every rule, and through a link with that spelling's rules too" || { bad "other_teams: pinned factory layout (rc=$rc)$pr"; echo "$pchk" | grep -E "^(other teams|error)|other_teams:" | head -3; }
+  && ok "other_teams: a pinned team whose repo is the fabrikito checkout lists <repo>/.state/<team>, with every rule, and through a link with that spelling's rules too" || { bad "other_teams: pinned fabrikito layout (rc=$rc)$pr"; echo "$pchk" | grep -E "^(other teams|error)|other_teams:" | head -3; }
 export TEAM_STATE_DIR=$T/pinst/pin
 reject "other_teams: a missing folder in the repo's .state" "other_teams: $T/repo/.state/later is, holds or sits inside this team's repository (repo.path)" "" "other_teams: [{ state: $T/repo/.state/later }]"
 reject "other_teams: a team-state-like source folder in the repo" "other_teams: $T/repo/srclike/like is, holds or sits inside this team's repository (repo.path)" "" "other_teams: [{ state: $T/repo/srclike/like }]"
@@ -546,7 +546,7 @@ reject "state: inside the repository by a link" "state: $T/kslink/st is, holds o
 reject "state: a seat's working directory itself" "state: $T/proj is, holds or sits inside seat em's working directory" "" "state: $T/proj"
 reject "state: inside a seat's working directory" "state: $T/proj/st is, holds or sits inside seat em's working directory" "" "state: $T/proj/st"
 reject "state: inside the worktree folder" "state: $VOL/$ROOT/st is, holds or sits inside this team's worktree folder" "" "state: $VOL/$ROOT/st"
-reject "state: inside the factory checkout" "state: $SRC/lib/st is, holds or sits inside this factory checkout" "" "state: $SRC/lib/st"
+reject "state: inside the fabrikito checkout" "state: $SRC/lib/st is, holds or sits inside this fabrikito checkout" "" "state: $SRC/lib/st"
 accept "state: a folder under <checkout>/.state/" "" "state: $SRC/.state/e2e-ks-$$"
 mk "" "state: $T/far/ksx/sub
 other_teams: [{ state: $T/far/ksx }]"; ko=$($S -c $T/v.yaml check 2>&1); rc=$?
@@ -564,7 +564,7 @@ echo "$dw" | grep -qF "warning: em: the deny Edit(/$RT/ks/**) covers its own pro
 mkdir -p $T/dk/.state; mk "" "state: $T/dk/.state/tk
 $(rule deny "\"Edit(/$RT/dk/**)\"")"; dw=$(nos $S -c $T/v.yaml check 2>&1)
 echo "$dw" | grep -qF "the deny Edit(/$RT/dk/**) covers its own progress note ($RT/dk/.state/tk/notes/em.md)" && ok "state: a deny on a folder covers a note under its .state folder" || { bad "state: deny over a note under .state"; echo "$dw" | grep -E "^(warning|error)" | cut -c1-200; }
-reject "state: .state of a repository that is not a factory checkout" "state: $T/repo/.state/st is, holds or sits inside this team's repository (repo.path)" "" "state: $T/repo/.state/st"
+reject "state: .state of a repository that is not a fabrikito checkout" "state: $T/repo/.state/st is, holds or sits inside this team's repository (repo.path)" "" "state: $T/repo/.state/st"
 mk "" "state: $T/ks
 $(rule deny "\"Edit(/$RT/elsewhere/**)\", \"Read(/$RT/ks/**)\"")"; dw=$(nos $S -c $T/v.yaml check 2>&1)
 ! echo "$dw" | grep -qF "covers its own progress note" && ok "state: no warning for a deny elsewhere or on another tool" || { bad "state: a false warning"; echo "$dw" | grep -F "covers its own" | cut -c1-200; }
@@ -578,10 +578,10 @@ rm -r $IN/.state/tv; ln -s $T/ks $IN/.state/tv; dw=$(nos $IC warnings 2>&1)
 echo "$dw" | grep -qF "note: $RT/kinst/.state/tv is a link to the state folder ($T/ks); state: in the team file wins, so the link is unused and can be removed." && ok "state: a default link to the same folder is named as unused" || { bad "state: unused link"; echo "$dw" | grep -E "^(note|error)" | cut -c1-200; }
 rm $IN/.state/tv; dw=$(nos $IC warnings 2>&1)
 ! echo "$dw" | grep -qE "default .* also exists|is a link to the state folder" && ok "state: no state warning when the default folder is absent" || bad "state: warning without a default folder"
-# The .state exemption holds for a factory checkout whose .state is a real folder, and not when it is a link into the checkout (sec on #270).
+# The .state exemption holds for a fabrikito checkout whose .state is a real folder, and not when it is a link into the checkout (sec on #270).
 : > $IN/fabrikito; mk "plugin: false" "state: $IN/.state/e2e-ks"; ivc=$(nos ruby $IN/lib/team_config.rb $T/v.yaml validate 2>&1); irc=$?
 mkdir -p $IN/src; rmdir $IN/.state; ln -s src $IN/.state; mk "plugin: false" "state: $IN/.state/e2e-ks"; ilc=$(nos ruby $IN/lib/team_config.rb $T/v.yaml validate 2>&1); ilrc=$?
-[ $irc = 0 ] && [ $ilrc != 0 ] && echo "$ilc" | grep -qF "is, holds or sits inside this factory checkout" && ok "state: .state of a factory checkout is allowed, and not when .state is a link" || { bad "state: .state link in a factory checkout (real=$irc link=$ilrc)"; echo "$ivc$ilc" | tail -2; }
+[ $irc = 0 ] && [ $ilrc != 0 ] && echo "$ilc" | grep -qF "is, holds or sits inside this fabrikito checkout" && ok "state: .state of a fabrikito checkout is allowed, and not when .state is a link" || { bad "state: .state link in a fabrikito checkout (real=$irc link=$ilrc)"; echo "$ivc$ilc" | tail -2; }
 rm $IN/.state
 # up and the seats: no link, no TEAM_STATE_DIR in the seat, one folder for up and for the seat's say.
 mk "wrapper: $T/bin/wrap" "state: $T/ks3

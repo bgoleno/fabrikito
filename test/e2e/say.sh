@@ -301,5 +301,12 @@ TEAM_STATE_DIR=$T/secstate TEAM_ROLE=em $S -c $T/team-sec.yaml say all "plain br
 n=$(wc -l < $SECLOG)
 TEAM_STATE_DIR=$T/secstate TEAM_ROLE=em $S -c $T/team-sec.yaml say w2 "plain SENTINEL-227-w2" >/dev/null 2>&1
 [ "$(tail -n +$((n + 1)) $SECLOG | cut -f2,3,4,5)" = "em	w2	NOT-DELIVERED	plain SENTINEL-227-w2" ] && ok "say log: a say between two other seats is logged in full, status as before" || { bad "say log: say between other seats"; tail -n +$((n + 1)) $SECLOG; }
+# The settings that tune the repeat window and the notice count (#273): FABRIKITO_SAY_*, and the old FACTORY_SAY_*
+# still read for one release; the new name wins when both are set.
+say_set() { env -u FABRIKITO_SAY_RESEND_WINDOW -u FACTORY_SAY_RESEND_WINDOW -u FABRIKITO_SAY_NOTICE_COUNT -u FACTORY_SAY_NOTICE_COUNT "$@" bash -c "$(grep -E '^SAY_(RESEND_WINDOW|NOTICE_COUNT)=' $S)
+echo \$SAY_RESEND_WINDOW \$SAY_NOTICE_COUNT"; }
+[ "$(say_set)" = "300 3" ] && [ "$(say_set FABRIKITO_SAY_RESEND_WINDOW=11 FABRIKITO_SAY_NOTICE_COUNT=5)" = "11 5" ] \
+  && [ "$(say_set FACTORY_SAY_RESEND_WINDOW=12 FACTORY_SAY_NOTICE_COUNT=6)" = "12 6" ] && [ "$(say_set FABRIKITO_SAY_RESEND_WINDOW=13 FACTORY_SAY_RESEND_WINDOW=14 FABRIKITO_SAY_NOTICE_COUNT=7 FACTORY_SAY_NOTICE_COUNT=8)" = "13 7" ] \
+  && ok "say: FABRIKITO_SAY_RESEND_WINDOW and _NOTICE_COUNT set the window and the count, the old FACTORY_SAY_ names still do, and the new ones win" || { bad "say: the names of the window and count settings"; say_set; say_set FACTORY_SAY_RESEND_WINDOW=12; }
 say_hand $T/state
 e2e_end=say # the last line: test/e2e.sh checks that the file ran to here
