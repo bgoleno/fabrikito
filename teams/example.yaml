@@ -33,8 +33,8 @@ repo:
   # runs there with bash, no terminal input, and TEAM_ROLE and TEAM_REPO (the main checkout) set,
   # before the seat starts, its output shown as it runs. A failing or interrupted setup stops `up`
   # (and removes a worktree it has just made); a worktree whose setup did not finish is set up
-  # again by the next `up`. No real credentials in copy: each copy is another file. See README,
-  # "New worktrees", for where package stores should live when worktrees are on another volume.
+  # again by the next `up`. No real credentials in copy: each copy is another file. See
+  # docs/team-file.md, "New worktrees", for where package stores should live when worktrees are on another volume.
   # copy: [.env.local]
   # bootstrap: "npm ci"
   # Other repositories (owner/name) a writer seat may also change, such as a documentation site or a
@@ -190,7 +190,7 @@ permissions:
 
 # Seats start in this order. Each needs: title, workdir, and one of `prompt` (a file) or
 # `prompt_text` (inline). `summary` is the line shown in the roster every seat sees.
-# Each seat costs tokens while it works, so start only the seats a task needs: README, "Right-sizing".
+# Each seat costs tokens while it works, so start only the seats a task needs: docs/right-sizing.md.
 # Optional per role: `gate_on_stop:` (see repo.gate), `model:`, `effort:` and `permission_mode:` (override sessions.claude),
 # `permissions:` (added to the team's), `session:` (tmux name), `kickoff:` (first message),
 # `skills:` (skills to name in the seat's prompt, below), `may_merge:` (below).
@@ -353,8 +353,8 @@ roles:
         - Bash(gh api graphql*enablePullRequestAutoMerge*)
         - Bash(gh api graphql*mergeBranch*)
   # A Technical Writer keeps the documentation true: README, guides, reference pages, and the
-  # repo.docs_repos repositories. Start one when the project's docs fall behind its changes (README,
-  # "Right-sizing"). It writes docs and opens PRs like an engineer and never merges. Uncomment to use.
+  # repo.docs_repos repositories. Start one when the project's docs fall behind its changes
+  # (docs/right-sizing.md). It writes docs and opens PRs like an engineer and never merges. Uncomment to use.
   # dw:
   #   title: Technical Writer
   #   effort: medium

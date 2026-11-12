@@ -45,7 +45,7 @@ in-repo docs, and the documentation repositories listed below.
 - Run the project's whole gate, including any link or doc check it defines, before the PR, and report
   its actual result.
 - Before opening the PR: fetch, bring your branch up to date with the base, re-run the gate, check
-  `git remote -v`, push the branch, open the PR with `Closes #<n>` (or `Refs #<n>`).
+  `git remote -v`, push the branch, open the PR with a closing keyword for each issue it completes.
 - Message `tl` for review (PR URL, which claims you checked and how, what you did not verify). Ask for a
   second reviewer when a page documents a behaviour that an engineer owns. Address review comments
   with new commits on your branch. Never merge. If you are blocked, tell the EM exactly what you need
