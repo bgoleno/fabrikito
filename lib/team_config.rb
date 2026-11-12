@@ -397,6 +397,37 @@ class TeamConfig
     die "roles.#{id}.tmpdir (#{t}) must name the team and the role as folders, for example #{File.join(volume, 'tmp', @c['team'], id)}"
   end
 
+  # A role's temp folder overlaps nothing else of the team (#300). The seat gets an Edit allow on
+  # everything in it (#252), so a folder that is, holds or sits inside another role's temp folder, the
+  # state folder, the repository or a working directory (the seat's own included) would put those files
+  # under that allow, and two seats that share one would each hold an allow on the other's files. The
+  # worktree folder is different: a temp folder may sit inside it, beside the worktrees (the launcher
+  # only makes and lists git worktrees there), but may not be it or hold it. That is why
+  # own_work_overlap is not used here: it refuses "sits inside the worktree folder".
+  # validate runs this once every role's tmpdir has passed validate_tmpdir. Paths compare as for
+  # `state:` and other_teams (path_overlap?: real paths as far as they exist, so an unmounted volume
+  # is compared as written and stops nothing here).
+  def validate_tmpdir_overlap
+    with = roles.keys.select { |id| role(id).key?('tmpdir') }
+    with.each_with_index do |id, i|
+      t = tmpdir(id)
+      refuse = lambda do |what|
+        die "roles.#{id}.tmpdir (#{t}) #{what}: a seat may edit everything in its temp folder, so that folder is the seat's alone. " \
+            "Name a folder of its own, for example #{File.join(volume, 'tmp', @c['team'], id)}"
+      end
+      with.first(i).each do |o|
+        refuse.call("is, holds or sits inside roles.#{o}.tmpdir (#{tmpdir(o)})") if path_overlap?(t, tmpdir(o))
+      end
+      refuse.call("is, holds or sits inside this team's state folder (#{state_dir}, from #{state_source})") if path_overlap?(t, state_dir)
+      refuse.call("is, holds or sits inside this team's repository (repo.path: #{repo_path})") if path_overlap?(t, repo_path)
+      # Before the working directories: a folder that holds the worktree folder holds every worktree too.
+      refuse.call("is or holds this team's worktree folder (#{worktree_root})") if path_within?(worktree_root, t)
+      roles.each_key do |o|
+        refuse.call("is, holds or sits inside seat #{o}'s working directory (#{workdir(o)})") if path_overlap?(t, workdir(o))
+      end
+    end
+  end
+
   def read_prompt_file(rel)
     f = expand(rel)
     die "prompt file not found: #{f}" unless File.file?(f)
@@ -1575,6 +1606,7 @@ class TeamConfig
       kickoff(id)
     end
     validate_state_work
+    validate_tmpdir_overlap
     prompts_common
     prompts_project
     roles.each_key { |id| render(id) } # unknown @@placeholders and a project label fail here, not at launch

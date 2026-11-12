@@ -85,6 +85,12 @@ one host share role names, so a folder without the team can collide, and every c
 it loads the team file. `check` shows each role's folder and also refuses, while the volume is mounted, a
 path that a symlink or another mount leads off the volume.
 
+Loading also refuses a `tmpdir` that is, holds or sits inside another role's `tmpdir` (two roles naming
+one folder included), the team's state folder, the repository or any seat's working directory, or that is
+or holds the worktree folder (inside it, beside the worktrees, is fine), and as every command loads the
+team file, one with such an overlap is refused by all of them after the upgrade, `say` and `down`
+included: run `check` with the new version before a restart ([#300](../../../issues/300)).
+
 `up` makes the folder and its `claude/`, owner-only, before it starts anything, for each seat it is about
 to start. It refuses if the volume is not mounted, the same as for a worktree, and creates nothing: `mkdir`
 under an unmounted `/Volumes` path would land on the internal disk. It also refuses a symlink at either
