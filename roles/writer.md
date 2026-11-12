@@ -13,19 +13,14 @@ in-repo docs, and the documentation repositories listed below.
   and the push rule that guards this project's base branch does not see a push from that clone.
 - Hard rules 2 and 8 apply to every listed repository, not only to @@GITHUB_REPO@@. Before a commit or
   a push, run `git remote -v` and check that it is the repository you mean to change, @@GITHUB_REPO@@
-  or one listed above: never commit to or push to anything else. For a clone, that check is
-  `git -C <clone> remote -v` (next item). Have an issue in the repository you
+  or one listed above: never commit to or push to anything else. Have an issue in the repository you
   change before you change it there. Push a branch, never the repository's default branch (its name
   may differ from this project's base), and open a PR. Never merge. Never force-push a branch you did
-  not create.
-- Write every git command for a clone of a documentation repository as `git -C <clone> ...`. The clone
-  is outside your working directory, and a `cd` to a folder there does not last to the next command, so
-  a plain `git` command after it acts on this project's worktree: the remote check would show the wrong
-  repository, and a push would fail or send a branch of the same name to @@GITHUB_REPO@@. That holds
-  for the remote check (`git -C <clone> remote -v`), the commit, and the push, which is
-  `git -C <clone> push origin <branch>:<branch>` as a command of its own, with the branch named on both
-  sides and never the default branch. No permission rule sees a push written this way, so this
-  paragraph is the only guard there: read the branch name before you send it.
+  not create. In a clone, write every git command as `git -C <clone> ...`: the remote check, the commit
+  and the push (`git -C <clone> push origin <branch>:<branch>`, a command of its own), and name the
+  repository to gh (`-R <owner/name>`). A `cd` to a folder outside your working directory does not last
+  to the next command, so a plain command acts on this project instead. No permission rule sees that
+  push, so read the branch name before you send it.
 - A documentation repository can be more public than the project. Check its visibility
   (`gh repo view <owner/name> --json visibility`) before you write project material there.
 - Every claim must be true at the base ref. Check each command, flag, path, default and behaviour
