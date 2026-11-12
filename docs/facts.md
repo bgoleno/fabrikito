@@ -23,7 +23,7 @@ Source: [How it works](how-it-works.md), first paragraph; the [README](../README
 | Generates, for each seat, a prompt (shared rules, role prompt, roster), a read-only settings file and a launch script. | [What a seat is made of](how-it-works.md#what-a-seat-is-made-of) |
 | Writes permission rules into each seat's settings: denies on the files that would change a seat's own rules, and an ask on a push to the base branch. | [Safety](safety.md), first list |
 | Lets seats message each other by session name with Claude Code's `SendMessage`, and lets you (or a script) type a message into a seat with `say`. | [How seats talk](how-it-works.md#how-seats-talk) |
-| Records every `say` and every `SendMessage` a seat sends in one message log per team. | [The message log](../README.md#the-message-log) |
+| Records every `say` and every `SendMessage` a seat sends in one message log per team. The text of a message to or from the security seat (`sec`) is left out. | [The message log](../README.md#the-message-log) |
 | Shows each seat its own progress note, branch, uncommitted files and last commits at every start and after every compaction. | [Progress notes](workflow.md#progress-notes) |
 | Holds a seat with `gate_on_stop` to the repository's pass/fail command when it ends a turn with uncommitted work. | [The gate](gate.md) |
 | Runs one heavy command at a time across every team on the host, in arrival order (`run-exclusive`). | [One heavy run at a time](gate.md#one-heavy-run-at-a-time) |
@@ -82,8 +82,11 @@ Say these as the docs say them. Do not strengthen them.
   1; `roles/em.md`.
 - Session names and `[from ...]` labels on messages are claims, not identities: nothing authenticates a
   sender. Source: [How seats talk](how-it-works.md#how-seats-talk).
-- Auto memory is off in every seat by default, and the repository's auto-memory folder is denied to the
-  seats' file tools. Source: [Safety](safety.md), the paragraphs on auto memory.
+- Auto memory is off in every seat by default, and such a seat also gets an `Edit` deny (which covers
+  the Write tool too) on the repository's auto-memory folder. Reading the folder is not denied, a
+  script that opens the file itself is not stopped, and the deny covers only Claude Code's default
+  folder, not one named by `autoMemoryDirectory`. Source: [Safety](safety.md), the paragraphs on auto
+  memory.
 - The hard rules in the shared prompt (never merge, confirm the remote, no secrets in anything written,
   no change without an issue, and the rest) are prompt text. Only the ones a team file also writes as
   permission rules are enforced by Claude Code, and those too only as an accident guard. Source:
@@ -100,9 +103,10 @@ Say these as the docs say them. Do not strengthen them.
 - **`say` depends on how Claude Code draws its input box.** It recognises the box as Claude Code
   2.1.316 draws it, and refuses rather than guess, so a Claude Code update that changes the box makes
   `say` refuse every seat until fabrikito is updated. Source: [`say`](../README.md#say).
-- **Messages between permission classes are held.** A message between a seat in `bypassPermissions`
-  and a seat in any other mode waits for a human in the receiver's pane, and is dropped if nobody
-  answers. `check` warns about such a team. Source:
+- **Messages between permission classes are held by default.** The launcher sets no
+  `crossSessionInbound`, and with no such setting in force Claude Code holds a message between a seat
+  in `bypassPermissions` and a seat in any other mode: it waits for a human in the receiver's pane, and
+  is dropped if nobody answers. `check` warns when the team file's seats fall into both classes. Source:
   [Which messages are held](../README.md#which-messages-are-held).
 - **A seat at a dialog waits for a human.** A trust dialog in a folder Claude Code has not seen, or a
   prompt from an ask rule, stops that seat until someone answers; `say` does not type into a dialog.
