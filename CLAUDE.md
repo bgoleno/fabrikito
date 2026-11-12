@@ -21,6 +21,9 @@ together in one iTerm tab. Read `README.md` for the overview, `docs/` for use, a
   `e2e_end=<its name>`.
 - `test/e2e-exit-trap.sh`: checks that the exit trap and the cleanup of `test/e2e.sh` reach no tmux server but
   the run's own (#306). Stand-in tmux only, so it starts no server and can run alone; one e2e case runs it.
+- `test/guard/tmux`: the tmux guard (#307), first on the PATH of an e2e run and of `test/live-env.sh run`: it
+  passes a tmux call on only to a socket inside the run's own folders (`TMUX_GUARD_ROOTS`), by `-S`, and
+  fails any other, naming it. `test/e2e-tmux-guard.sh` checks it with a stand-in as the real tmux.
 - `test/live-env.sh`: a private tmux server and state folder for a live test (docs/testing.md, Live tests).
 - Git-ignored, local to each project: `teams/*` other than the example, `projects/`, `.state/`.
 
@@ -32,17 +35,29 @@ together in one iTerm tab. Read `README.md` for the overview, `docs/` for use, a
   names at least one issue and links each issue it completes with its own `Closes #<n>` (one PR may close
   several issues; `Refs #<n>` for an issue it does not complete), and fills in
   `.github/pull_request_template.md`.
-- Gates: `bash -n fabrikito factory.sh test/e2e.sh test/e2e-exit-trap.sh lib/stop_gate.sh lib/session_start.sh lib/log_message.sh`, `ruby -c lib/team_config.rb`, and
+- Gates: `bash -c 'rc=0; for f in "$@"; do bash -n "$f" || rc=1; done; exit $rc' gate fabrikito factory.sh lib/*.sh test/*.sh test/e2e/*.sh test/guard/tmux`,
+  `bash -c 'rc=0; for f in "$@"; do ruby -c "$f" || rc=1; done; exit $rc' gate lib/*.rb`
+  (one check for each file: `bash -n a b` and `ruby -c a b` check only `a`), and
   `TEST_VOLUME=/Volumes/<a mounted, writable volume> test/e2e.sh` (all assertions must pass).
 - Do not run the e2e test, or any experiment, against the user's real tmux server: unset `TMUX` and use
   `TMUX_TMPDIR`, as the test does. Never kill or restart seats of a running team without being asked.
-- Commit or push only when asked. The remote is a private repository.
+- Commit or push only when asked. The repository is public: write issue, PR, comment and commit text for a
+  public reader, with no local paths, drive names, people's names, e-mail addresses or other projects'
+  names, no credential or token, and nothing about an unfixed security finding (report one as `SECURITY.md`
+  says). Use the placeholders the docs use, such as `/Volumes/YourDrive`.
 
 ## Things that cost time
 - tmux: a session target written `=name` needs a trailing colon (`=name:`) for pane and option commands,
   and zsh expands an unquoted `=name`, so quote it.
 - tmux falls back to `/tmp`, the default server, when `TMUX_TMPDIR` names a folder that is not there. A test
   that stops a server names its socket (`tmux -S`), after checking the socket is there (#306).
+- In an e2e run and under `test/live-env.sh run`, `tmux` is the guard (#307): a call whose socket is outside
+  the run's folders fails with `tmux-guard: refused`. A case that means to reach another server names that
+  folder in `TMUX_GUARD_ROOTS`, and a command run with `env -i` passes the variable on.
+- A seat's pane runs a login shell, whose profile builds `PATH` again with the system's folders first: a
+  stand-in first on the `PATH` of `up` is not first in the seat. Other variables do reach it. The stand-in
+  `claude` of the e2e puts the tmux guard first itself; a case that makes a call the guard must refuse
+  checks `command -v tmux` first and does not make the call otherwise (#307).
 - bash 3.2 runs the EXIT trap in the child forked for a pipeline or `&` when an unset variable ends a simple
   command there under `set -u`, and `BASH_SUBSHELL` is 0 in it. A trap that cleans up checks it is the top
   shell by pid (`e2e_top` in `test/e2e.sh`).
@@ -59,5 +74,3 @@ together in one iTerm tab. Read `README.md` for the overview, `docs/` for use, a
 - Under heavy load, an e2e run can fail one assertion with `echo: write error: Interrupted system call`
   from fabrikito: macOS bash 3.2 does not restart a pipe write interrupted by SIGCHLD (#101). Rerun
   only for that exact message; for any other failure a green rerun is not evidence.
-- Durable knowledge about this project lives in the Obsidian vault under `projects/software-factory/`,
-  not in Claude Code's own memory files.
