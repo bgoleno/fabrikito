@@ -13,7 +13,7 @@ This page shows how the parts fit together. Each section links to the page with 
 
 | Part | What it is |
 |---|---|
-| `fabrikito` | The launcher. Every command (`check`, `up`, `view`, `titles`, `status`, `say`, `attach`, `migrate`, `down`) is a function in it. `run-exclusive` hands over to `lib/run_exclusive.rb` before any team file is read. |
+| `fabrikito` | The launcher. Every command (`check`, `up`, `view`, `titles`, `status`, `say`, `flush`, `attach`, `migrate`, `down`) is a function in it. `run-exclusive` hands over to `lib/run_exclusive.rb` before any team file is read. |
 | `lib/run_exclusive.rb` | `fabrikito run-exclusive`: runs one heavy command at a time on the host. See [One heavy run at a time](gate.md#one-heavy-run-at-a-time). |
 | `lib/team_config.rb` | Reads and validates the team file, and generates what each seat is started with: its prompt, kickoff, settings (permission rules and hooks) and claude flags. `fabrikito` calls it for every value. |
 | `lib/session_start.sh` | A `SessionStart` hook: shows a seat its progress note and the state of its working directory. |
@@ -48,7 +48,11 @@ session names, unknown placeholders and invalid UTF-8 stop the command before an
 4. **Starts each role in turn,** in file order or in the order given on the command line, and stops
    at the first role it cannot start. A role whose tmux session already exists is skipped and left
    alone; if the claude file it runs was replaced under it, `up` prints an `ATTENTION` line saying
-   to restart it. For each other role it:
+   to restart it. That holds for a role added to the team file while the team runs: `up` starts the
+   new seat, but the seats already running keep the prompt they started with, whose roster does not
+   list it. They do not learn of the new seat, and will not act on its messages (the shared prompt tells
+   a seat to act only on a roster name), until each is restarted: `./fabrikito down --yes <role>`, then
+   `./fabrikito up <role>` ([#231](../../../issues/231)). For each other role it:
    - **Makes the worktree,** for a `worktree` seat that has none. No worktree of the same name may be
      registered elsewhere (`migrate` moves an old one); the volume must be mounted and the folder must
      be on it; the main checkout's `origin` must name `repo.github`; `up` fetches the base
