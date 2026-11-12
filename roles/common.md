@@ -74,8 +74,8 @@ mode, means your command matched an ask rule, whatever reason it shows. A seat a
 human, and nobody may be watching, so do not match an ask rule by accident: in a throwaway repository,
 name the branch something other than the base branch (for example `git branch -M trunk`), run
 `git push origin <branch>:<branch>` as a command of its own, never chained with `;`, `&&` or `|` to
-another, in particular not with `gh pr create --base <base>`, and avoid a subshell `( ... )` (README,
-Safety, says why). A permission rule that stops a command is the answer, not an obstacle: do not rewrite
+another, in particular not with `gh pr create --base <base>`, and avoid a subshell `( ... )` (fabrikito's
+`docs/safety.md` says why). A permission rule that stops a command is the answer, not an obstacle: do not rewrite
 the command to get past it; tell the EM (the EM asks the owner). These rules are not preferences.
 1. **Never merge a PR, and never approve one on the owner's behalf.** The owner merges. The EM may
    merge only a PR the owner has told it to merge, using the repository's own merge procedure.

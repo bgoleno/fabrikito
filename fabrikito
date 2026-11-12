@@ -1224,7 +1224,7 @@ box_full_rows() {
 # checks it alone (box_has_label) before the body goes in (tl on #175). Text before the message would
 # show at the top and text after it at the end, so neither passes, except one gap:
 # a draft typed in the moment between the empty-box check and the paste, scrolled out of view by a
-# tall message, would go out with it (the README says so). When the box does not show just the
+# tall message, would go out with it (docs/messaging.md says so, under `say`). When the box does not show just the
 # message, it prints why, so the refusal names the real cause (#84).
 box_has_message() {
   local state dim rows vis full m v ph lab
@@ -1287,7 +1287,7 @@ GROWN_WIN="" GROWN_W="" GROWN_H="" GROWN_OPT="" LOCK_WHY=""
 # Grows seat $1's window if it is under SAY_MIN_COLS x SAY_MIN_ROWS and not grown yet, recording
 # what to put back, and waits for Claude Code to redraw at the new size. True only when it grew the
 # window now, so the caller knows a check is worth running again. The traps put it back on every
-# exit but SIGKILL; the README names the recovery for that. Bash runs a trap once the command it is
+# exit but SIGKILL; docs/messaging.md names the recovery for that, under `say`. Bash runs a trap once the command it is
 # waiting for returns, and every tmux call here returns at once.
 grow_window() {
   local win w h opt i
@@ -1850,7 +1850,7 @@ cmd_say() {
     say_send "$to" "$label" "$text" || rc=1
   fi
   # The log records what happened, not what was attempted: a refused delivery says so. One line
-  # per say (all included), in the format the README documents under "The message log". $to is a
+  # per say (all included), in the format docs/messaging.md documents under "The message log". $to is a
   # role id or all; $from comes from TEAM_ROLE, which nothing validates, so it is escaped too.
   # A failed append must not lose the terminal message in turn, so it is noted, not fatal, here.
   if log_unsafe; then

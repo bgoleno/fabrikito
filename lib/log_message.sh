@@ -2,7 +2,7 @@
 #
 # PostToolUse and PostToolUseFailure hook on SendMessage that fabrikito puts in every seat's
 # generated settings (#39). It appends one line per native message to the team's messages.log in
-# say's format (README, "The message log"): time, sender role, recipient, outcome, message.
+# say's format (docs/messaging.md, "The message log"): time, sender role, recipient, outcome, message.
 #
 #   log_message.sh <log file> <sender role> [<session>=<role> ...]
 #
@@ -158,7 +158,7 @@ ruby --disable-gems -rjson -e '
   # (the observer role, a copy kept elsewhere). The line keeps time, sender, recipient and outcome, so
   # the delivery checks read it as before. The test is on the resolved recipient and the sender, both
   # role ids, so a session name, a "[ref]" or a uds: address that resolves to sec is caught too. The
-  # id is TRIAGE_WRITER in lib/team_config.rb. A message to "all" (say) is not one to sec: see the README.
+  # id is TRIAGE_WRITER in lib/team_config.rb. A message to "all" (say) is not one to sec: see docs/messaging.md, "The message log".
   msg = "[body not logged: sec]" if (rcpt == "sec" || from == "sec") && !watch
   # Fail closed (sec on #227): a uds: address that did not resolve to a roster seat (the 2s lookup ran
   # out on a loaded host, or the sender is outside a roster pane) may still be one for sec, and replying to a

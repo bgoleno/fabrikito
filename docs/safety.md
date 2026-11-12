@@ -162,14 +162,17 @@ What the rules cannot do:
   writes, so they do not stop the same command run through another shell or a script (`sh -c 'cp …'`,
   which qa checked gets through), or a program that writes the file itself, such as a Python or Node
   script.
-- A subagent a seat starts with worktree isolation runs under the seat's own rules, not under the
-  `.claude/settings.json` in its worktree (checked on Claude Code 2.1.316, [#53](../../../issues/53)):
-  the worktree's file held a deny, yet the subagent's matching command ran with no denial, because the
-  parent session had no deny loaded. Editing a worktree's settings therefore does not change what such a
-  subagent may do. Two paths were not checked: `EnterWorktree`, which moves the session itself into a
-  worktree, and a separate `claude` process a seat starts from Bash. That process loads the project
-  settings of its own folder and does not get the seat's generated `--settings` file at all, which is
-  the general limit above: the rules guard against accidents. Severity as sec rated it: low.
+- A subagent a seat starts with worktree isolation did not come under the `.claude/settings.json` in
+  its worktree: it behaved as its parent session did (one check on Claude Code 2.1.316,
+  [#53](../../../issues/53): a headless `claude -p` session in bypass mode in a throwaway repository,
+  one `Bash` deny in the worktree's file). The subagent's matching command ran with no denial, and the
+  parent session had no deny loaded. So a deny written into a worktree's settings did not bind such a
+  subagent. The reverse was not checked: that a deny in the seat's own settings refuses the same
+  command in its subagent. Two more paths were not checked: `EnterWorktree`, which moves the session
+  itself into a worktree, and a separate `claude` process a seat starts from Bash. That process loads
+  the project settings of its own folder and does not get the seat's generated `--settings` file at
+  all, which is the general limit above: the rules guard against accidents. Severity as sec rated it:
+  low (the checked path is ruled out; the unchecked ones fall under the general limit above).
 - The hard rules are prompt text, and the shared prompt treats a subagent as knowing only its brief.
   It tells a seat to put into the brief the rules that apply to the subagent's work (the hard rules,
   what is out of bounds, where temp files go), and that the seat answers for what the subagent does
