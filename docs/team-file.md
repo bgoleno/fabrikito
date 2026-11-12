@@ -47,6 +47,8 @@ the reference for each key, and the file to copy.
 - `roles`: ordered; each has `title`, `workdir` (`project` folder or `worktree`), a prompt, and
   optional `model`, `effort`, `session`, `kickoff`, `summary`, `skills`, `tmpdir`
   (see [Temp files](#temp-files)).
+  A role added while the team runs is started by the next `up`, but the seats already running do not
+  know it until they are restarted: see [What `up` does](how-it-works.md#what-up-does), step 4.
 - `skills` (per role): skills to name in that seat's prompt, each a name (`plugin:name` for a plugin's
   skill) with an optional note on when to use it. They are listed after the role's prompt with a note
   that a skill may not be installed; naming one installs nothing. The example team lists commonly
@@ -92,8 +94,9 @@ folder. A running seat keeps what it started with and picks up a change at its n
 
 Owner-only (mode 700) guards against other OS users, and only on a volume that honours ownership. It
 keeps out nobody on a volume mounted `noowners` (Finder's "ignore ownership on this volume"), and every
-seat runs as the same user in any case. Separate folders keep two teams' temp files apart by accident
-guard only, as with the other rules in [Safety](safety.md): this is not a security boundary.
+seat runs as the same user in any case. Separate folders keep two seats' temp files apart, and two
+teams', by accident guard only, as with the other rules in [Safety](safety.md): this is not a security
+boundary between seats, and any seat can read and write another seat's folder.
 
 A role with no `tmpdir` behaves as before: the seat takes `TMPDIR` and `CLAUDE_CODE_TMPDIR` from whatever
 started it, and `check` shows `(inherit)`. There is no default folder, because the choice is explicit per role.

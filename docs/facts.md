@@ -108,6 +108,12 @@ Say these as the docs say them. Do not strengthen them.
   in `bypassPermissions` and a seat in any other mode: it waits for a human in the receiver's pane, and
   is dropped if nobody answers. `check` warns when the team file's seats fall into both classes. Source:
   [Which messages are held](../README.md#which-messages-are-held).
+- **Running seats do not know a seat added later.** A seat's roster is written into its prompt when it
+  starts, so after a role is added to the team file the seats already running do not know it, and will
+  not act on its messages, until each is restarted. Source: [What `up` does](how-it-works.md#what-up-does),
+  step 4.
+- **Separate temp folders are not a boundary between seats.** A role's own temp folder keeps files apart
+  by accident guard only: every seat runs as the same user. Source: [Temp files](team-file.md#temp-files).
 - **A seat at a dialog waits for a human.** A trust dialog in a folder Claude Code has not seen, or a
   prompt from an ask rule, stops that seat until someone answers; `say` does not type into a dialog.
   Source: [Safety](safety.md), last paragraph; [Troubleshooting](troubleshooting.md).
