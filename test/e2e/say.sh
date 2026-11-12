@@ -124,6 +124,75 @@ for l in C none; do
   [ "$(wc -l < $T/state/messages.log)" -eq $((n + 1)) ] && tail -1 $T/state/messages.log | grep -qF "from a non-ASCII team ($l)" \
     && ok "say from a team with a non-ASCII workdir, owner and home ($l)" || { bad "say from a non-ASCII team ($l)"; tail -1 $T/state/messages.log; }
 done
+# What the file system returns is tagged by the locale too (#360): outside a UTF-8 locale a listed name
+# with a non-ASCII byte came back as a binary string, which is never equal to the UTF-8 path of the team's
+# own state folder, cannot be joined to a folder with a non-ASCII name and cannot be normalized, and the
+# mount table came back as US-ASCII. The state folder above is empty, so nothing takes it for a team's
+# state and those cases never met this. up fills it (settings/, launch/, prompts/), and from then on
+# every command that loads the team file ended in a Ruby backtrace.
+# nr <C | none> <team file> <command> [VAR=value ...]: as rn, on any team file and without this run's
+# TEAM_STATE_DIR. With NRL set it runs under that locale instead: the UTF-8 reference, same environment.
+nr() { local l=$1 f=$2 c=$3; shift 3
+  set -- HOME="$T/home$E" CLAUDE_CONFIG_DIR="$T/home$E/.claude" "$@"
+  if [ $l = C ]; then env -u TEAM_STATE_DIR LC_ALL=${NRL:-C} "$@" ruby $SRC/lib/team_config.rb "$f" $c em 2>&1
+  else env -i PATH="$PATH" ${NRL:+LC_ALL=$NRL} "$@" ruby $SRC/lib/team_config.rb "$f" $c em 2>&1; fi; }
+# nsame <what> <team file> <lines the output must hold, one a line> [VAR=value ...]: validate, check's
+# report and em's settings come out under LC_ALL=C and with no locale exactly as under a UTF-8 locale,
+# each status included, with no Ruby error and with those lines (an empty line asks for nothing).
+nsame() { local what=$1 f=$2 want=$3 l c w out ref good; shift 3
+  for l in C none; do
+    out=$(for c in validate permissions_report settings; do nr $l "$f" $c "$@"; echo "$c: status $?"; done)
+    ref=$(for c in validate permissions_report settings; do NRL=en_US.UTF-8 nr $l "$f" $c "$@"; echo "$c: status $?"; done)
+    good=1; [ "$out" = "$ref" ] && { [ -n "${NSANY:-}" ] || ! echo "$out" | grep -q 'Error)'; } || good=0
+    while IFS= read -r w; do echo "$out" | grep -qF -- "$w" || good=0; done <<< "$want"
+    [ $good = 1 ] && ok "$what ($l)" || { bad "$what ($l)"; echo "$out" | grep -E 'Error\)|status|^other teams|^skipped|^team config error' | head -8; }
+  done; }
+nf() { mkdir -p "$1/settings" "$1/launch" "$1/prompts"; } # what up leaves in a state folder
+NA=$T/na; nf "$NA/alone/s$E"; nf "$NA/two/s$E"; nf "$NA/two/other"; nf "$NA/beside/own"; nf "$NA/beside/o$E"
+nsame "a filled state folder with a non-ASCII name, alone in its parent, is the team's own" "$NT" "validate: status 0
+other teams: none" TEAM_STATE_DIR="$NA/alone/s$E"
+nsame "a filled state folder with a non-ASCII name beside another team's" "$NT" "validate: status 0
+other teams: $NA/two/other (found)" TEAM_STATE_DIR="$NA/two/s$E"
+nsame "another team's state folder with a non-ASCII name is found and denied" "$NT" "validate: status 0
+other teams: $NA/beside/o$E (found)
+\"Edit(/$NA/beside/o$E/**)\"" TEAM_STATE_DIR="$NA/beside/own"
+# A state root with a non-ASCII name: joining any listed non-ASCII name to it raised, a plain file's too.
+nf "$NA/root$E/s$E"; nf "$NA/root$E/o$E"; : > "$NA/root$E/note$E.txt"
+nsame "a state root with a non-ASCII name that holds non-ASCII names" "$NT" "validate: status 0
+other teams: $NA/root$E/o$E (found)" TEAM_STATE_DIR="$NA/root$E/s$E"
+# A link is compared by its real path before anything says what it leads to.
+nf "$NA/link/own"; ln -s "$NA/link/own" "$NA/link/l$E"
+nsame "a link with a non-ASCII name to the team's own state folder is passed over" "$NT" "validate: status 0
+skipped   : $NA/link/l$E (a symlink to this team's own state folder, or to a folder holding it)" TEAM_STATE_DIR="$NA/link/own"
+# state: lists the folder it names when that is not a team's state yet (validate_state_key).
+mkdir -p "$NA/key$E/c$E"; nf "$NA/held$E/c$E"
+{ printf 'state: "%s"\n' "$NA/key$E"; cat "$NT"; } > "$NA/key.yaml"; { printf 'state: "%s"\n' "$NA/held$E"; cat "$NT"; } > "$NA/held.yaml"
+nsame "state: a folder with a non-ASCII name that holds one" "$NA/key.yaml" "validate: status 0"
+nsame "state: a folder with a non-ASCII name that holds a team's state is refused, naming both" "$NA/held.yaml" "validate: status 1
+state: $NA/held$E holds another team's state folder ($NA/held$E/c$E)"
+# state: on a volume is looked up in the mount table. The stand-in prints $NA/mounts: volumes no machine has.
+mkdir -p "$NA/bin"; printf '#!/bin/sh\ncat "%s"\n' "$NA/mounts" > "$NA/bin/mount"; chmod +x "$NA/bin/mount"
+{ printf 'state: "%s"\n' "/Volumes/e2e-V$E/st"; cat "$NT"; } > "$NA/vol.yaml"
+printf '/dev/disk9s1 on /Volumes/e2e-V\303\251 (apfs, local)\n' > "$NA/mounts"
+nsame "state: on a mounted volume with a non-ASCII name" "$NA/vol.yaml" "validate: status 0" PATH="$NA/bin:$PATH"
+# A name that is not valid UTF-8 (tl on #360) is read as under a UTF-8 locale too, so the result is that
+# locale's. In the mount table: a volume listed beside it is still found, and one not listed is still
+# not mounted.
+printf '/dev/disk8s1 on /Volumes/e2e-\377 (apfs, local)\n/dev/disk9s1 on /Volumes/e2e-V\303\251 (apfs, local)\n' > "$NA/mounts"
+nsame "state: the volume is found in a mount table that holds a name that is not valid UTF-8" "$NA/vol.yaml" "validate: status 0" PATH="$NA/bin:$PATH"
+printf '/dev/disk8s1 on /Volumes/e2e-\377 (apfs, local)\n' > "$NA/mounts"
+nsame "state: a volume missing from a mount table that holds a name that is not valid UTF-8 is not mounted" "$NA/vol.yaml" "validate: status 1
+state: /Volumes/e2e-V$E/st is on /Volumes/e2e-V$E, which is not mounted" PATH="$NA/bin:$PATH"
+# In a listing: a folder with such a name that holds a team's state, beside the team's own. APFS and most
+# disks refuse the name, and then there is nothing to list; where a disk takes it, the outcome only has
+# to be the UTF-8 locale's, whatever that is (NSANY: a Ruby error there is compared, not refused).
+nf "$NA/bad/own"
+if nf "$NA/bad/o"$'\xff' 2>/dev/null; then NSANY=1 nsame "a listed name that is not valid UTF-8 gives the UTF-8 locale's result" "$NT" "" TEAM_STATE_DIR="$NA/bad/own"
+else for l in C none; do ok "a listed name that is not valid UTF-8: this disk refuses such a name, so nothing was compared ($l)"; done; fi
+# Through the launcher: every command validates the team file first.
+out=$(LC_ALL=C HOME="$T/home$E" TEAM_STATE_DIR="$NA/alone/s$E" $S -c "$NT" check 2>&1); rc=$?
+[ $rc = 0 ] && echo "$out" | grep -qxF "other teams: none" && ! echo "$out" | grep -q 'Error)' \
+  && ok "check under LC_ALL=C with a filled state folder whose name is not ASCII" || { bad "check under LC_ALL=C, filled non-ASCII state folder (rc=$rc)"; echo "$out" | tail -3; }
 # The sender comes from TEAM_ROLE, which nothing validates: it is escaped like the message.
 n=$(wc -l < $T/state/messages.log)
 TEAM_ROLE=$'e\tm\nx' $S -c $T/team.yaml say w2 "from an odd sender" >/dev/null 2>&1

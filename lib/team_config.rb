@@ -60,6 +60,20 @@ def home_utf8
   utf8(Dir.home, 'the home folder (HOME)')
 end
 
+# What the file system returns is tagged by the locale as well: the names in a folder listing
+# (Dir.children), the output of a command (mount), a file read without an encoding. Outside a UTF-8
+# locale a listed name with a non-ASCII byte is a binary string: never equal to a UTF-8 path, not
+# joinable to a folder with a non-ASCII name, and not normalizable. So the team's own state folder was
+# not recognised as its own once up had filled it, and every command ended in a backtrace (#360).
+# Ruby tags all of these with the default external encoding, so it is set once, here, before anything
+# is read: they then come back exactly as under a UTF-8 locale, whatever is listed or read later.
+# It does not retag what the locale tagged before this line runs (the environment, the command line,
+# this file's own folder), so utf8, env_utf8 and home_utf8 above are not leftovers: they stay, and a
+# new value from one of those sources still goes through them. Nothing written changes: no stream
+# here has an external encoding of its own, so strings go out byte for byte. A name that is not
+# valid UTF-8 is tagged UTF-8 all the same, as under a UTF-8 locale: the result is that locale's.
+Encoding.default_external = Encoding::UTF_8
+
 TOP_KEYS = %w[team owner repo project storage state sessions display prompts kickoff permissions roles other_teams].freeze
 DISPLAY_KEYS = %w[iterm primary window].freeze
 PROJECT_KEYS = %w[name url].freeze
