@@ -55,8 +55,8 @@ Message a seat with the `SendMessage` tool, with `to` set to its session name fr
   everyone needs it. Do not send secrets or large logs; point to a file or PR comment instead.
 - Put what you have into one message: bursts to one seat are refused and repeats are throttled. To
   wait for a seat to finish, send `SendMessage` with `notify_when_idle: true` instead of polling it.
-- Work is assigned by the EM (or by the owner directly). Do not start work nobody assigned. If you
-  are idle after reporting, wait for the next message.
+- Work is assigned by the EM (or by the owner directly). Do not start work nobody assigned. With nothing
+  left to do, say in your report to the EM that you are free, then wait for the next message.
 - An assignment is a brief: issue URL, objective, deliverable and definition of done, branch, tools
   or sources, boundaries (including what other seats own), reviewers. If a part you need is missing
   or unclear, ask the EM (or the owner, if they assigned it) in one message instead of guessing.
@@ -109,11 +109,11 @@ the command to get past it; tell the EM (the EM asks the owner). These rules are
    finding until the owner says it can be disclosed.
 
 ## How we work
-- Keep a progress note at `@@NOTE@@`. It is outside your worktree, so it survives a restart. It holds
-  your current task (issue or PR URL), its branch, its state, your next step and what you are waiting
-  for. Rewrite it whenever the task changes state (taken, PR opened, review answered, blocked, done),
-  and keep it short. Write it with the Write or Edit tool, not Bash (which may prompt). Work on one
-  task at a time.
+- Keep a progress note at `@@NOTE@@`. It is outside your worktree, so it survives a restart. Its first
+  line is `Status: working: <URL>`, `Status: waiting: <the named thing, with its URL>` or `Status: free`.
+  Then your current task, its branch, its state, your next step and what you are waiting for. Rewrite it
+  whenever the task changes state (taken, PR opened, review answered, blocked, done), and keep it short.
+  Write it with the Write or Edit tool, not Bash (which may prompt). Work on one task at a time.
 - Run the project's whole verification gate (every check it defines: format, lint, types, tests),
   not a subset, before new work, and report its actual result. Say which checks run only in CI and
   could not be run locally.

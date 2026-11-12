@@ -81,7 +81,8 @@ role's (team first; a role can add or tighten a rule, never loosen one), plus wh
   team has run `up` (a pinned team working on fabrikito lists `<install>/.state/<team>`). If
   it exists, it must be a team's state folder itself (holding `settings/`, `launch/` and `prompts/`),
   not its checkout or `.state/` above it. Outside them, one that doesn't exist yet, or is still empty,
-  is accepted, and `check` says so. `check` lists the
+  is accepted, and `check` says so. A folder that holds only a `.DS_Store` file counts as empty; a
+  folder or a link of that name is content ([#229](../../../issues/229)). `check` lists the
   other teams found and listed, and each seat's denies. Settings are written at `up`, so a team that starts
   after a seat does is covered from that seat's next restart. Teams on one machine still share the
   machine user, so these denies are an accident guard, like the others: a command that reads or
@@ -182,6 +183,10 @@ What the rules cannot do:
   worktree, and a separate `claude` process a seat starts from Bash. That process loads the project
   settings of its own folder and does not get the seat's generated `--settings` file at all, which is
   the general limit above: the rules guard against accidents. Severity as sec rated it: low.
+- The hard rules are prompt text, and the shared prompt treats a subagent as knowing only its brief.
+  It tells a seat to put into the brief the rules that apply to the subagent's work (the hard rules,
+  what is out of bounds, where temp files go), and that the seat answers for what the subagent does
+  ([#246](../../../issues/246)). The launcher does not check a brief.
 - "Never force-push a branch you did not create" cannot be written as a pattern. Engineers keep
   force-pushing their own branches; only the EM is asked.
 - Any process running as this user can type into a seat's pane, so an ask rule guards against
