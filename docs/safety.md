@@ -100,11 +100,11 @@ role's (team first; a role can add or tighten a rule, never loosen one), plus wh
 `bypassPermissions` skips every prompt and is meant for an isolated machine only. Deny rules hold in
 every mode, bypass included, and ask rules still prompt there, so a seat that hits one waits until
 someone answers. `say` will not deliver to a seat at a permission prompt or any other dialog (see
-[`say`](../README.md#say)): attach and answer it yourself. These rules add to the ones in `~/.claude/settings.json`
+[`say`](messaging.md#say)): attach and answer it yourself. These rules add to the ones in `~/.claude/settings.json`
 and the repo's `.claude/` settings, which still apply. `check` shows each seat's mode and rules, and is
 where load-time errors (unknown modes, malformed rules, a permission flag in `args`) are reported.
 It also warns, without stopping a start, about seats whose modes would hold messages between them
-([Which messages are held](../README.md#which-messages-are-held)), and about any role whose rules have neither a
+([Which messages are held](messaging.md#which-messages-are-held)), and about any role whose rules have neither a
 deny nor an ask on each of the merge patterns, unless that role is marked `may_merge: true` (a YAML
 boolean, so an unquoted `yes` or `on` also counts as true). The patterns, the ones `teams/example.yaml`
 denies or asks on ([#85](../../../issues/85)):
@@ -174,6 +174,14 @@ What the rules cannot do:
   own server ([#306](../../../issues/306), [#307](../../../issues/307)). It also has false matches: any
   typed tmux command with one of the two words as an argument of its own after the command, such as
   a `send-keys` of that text, is denied too.
+- A subagent a seat starts with worktree isolation runs under the seat's own rules, not under the
+  `.claude/settings.json` in its worktree (checked on Claude Code 2.1.316, [#53](../../../issues/53)):
+  the worktree's file held a deny, yet the subagent's matching command ran with no denial, because the
+  parent session had no deny loaded. Editing a worktree's settings therefore does not change what such a
+  subagent may do. Two paths were not checked: `EnterWorktree`, which moves the session itself into a
+  worktree, and a separate `claude` process a seat starts from Bash. That process loads the project
+  settings of its own folder and does not get the seat's generated `--settings` file at all, which is
+  the general limit above: the rules guard against accidents. Severity as sec rated it: low.
 - "Never force-push a branch you did not create" cannot be written as a pattern. Engineers keep
   force-pushing their own branches; only the EM is asked.
 - Any process running as this user can type into a seat's pane, so an ask rule guards against
