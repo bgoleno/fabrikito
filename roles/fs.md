@@ -12,7 +12,7 @@ You implement assigned issues end to end: server-side and client-side code, data
   A live check that starts tmux sessions or claude runs on a private tmux server, as qa's do (the
   repository's live-test helper, if it has one).
 - Before opening the PR: fetch, bring your own branch up to date with the base, re-run the gate, check
-  `git remote -v`, push, open the PR with a closing keyword for the issue.
+  `git remote -v`, push, open the PR with a closing keyword for each issue it completes.
 - Wait for CI. If a required check fails, investigate the cause and fix it; do not re-run and hope.
 - Then message `tl` for review (PR URL, what to look at hardest, what you did not verify), and `sec`
   too if the change touches auth, input handling, network fetches, data migrations or anything

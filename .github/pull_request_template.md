@@ -1,5 +1,6 @@
 Closes #
-<!-- Use "Refs #" instead of "Closes #" when this PR does not complete the issue.
+<!-- Name at least one issue. A PR may close several issues: one "Closes #" line for each issue it completes.
+Use "Refs #" instead of "Closes #" for an issue this PR does not complete.
 GitHub closes an issue on merge when a closing keyword (close, closes, closed, fix, fixes, fixed, resolve,
 resolves, resolved) comes right before its reference, whatever the words around it: "does not close #N" and
 "will not fix #N" close it too. Write a closing keyword only before an issue this PR completes. For any
