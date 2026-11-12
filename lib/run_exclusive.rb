@@ -66,7 +66,10 @@ if lock.empty?
   die("cannot find this user's home folder in the user database, so there is no place for the lock") if home.empty?
   support = File.join(home, "Library", "Application Support")
   lock = File.join(support, "fabrikito", "run-exclusive.lock")
-  legacy = utf8(File.join(support, "software-factory", "run-exclusive.lock"))
+  # Its normal path, like the new lock's below and like an older checkout's own name for it: the nesting
+  # check compares the two as strings, and a home folder given with a "." or a doubled slash inside
+  # would otherwise make an old-name run inside this one wait for its parent for good (tl on #361).
+  legacy = utf8(File.expand_path(File.join(support, "software-factory", "run-exclusive.lock")))
 end
 lock = utf8(File.expand_path(lock))
 holder = "#{lock}.holder"
@@ -333,6 +336,48 @@ end
 
 started = Time.now
 f, waited = wait_for(lock, holder, started, false)
+legacy_f = nil
+
+me = Process.pid
+rec = {
+  "pid" => me,
+  "who" => utf8([ENV["TEAM_ROLE"].to_s.empty? ? "a shell" : ENV["TEAM_ROLE"],
+                 (ENV["TEAM_CONFIG"].to_s.empty? ? nil : File.basename(ENV["TEAM_CONFIG"], ".*"))].compact.join(" of ")).scrub,
+  "since" => Time.now.strftime("%Y-%m-%dT%H:%M:%S"),
+  "cwd" => utf8(Dir.pwd).scrub,
+  "cmd" => utf8(args.join(" ")).scrub[0, 300],
+}
+# Each record is written as soon as its lock is held. The new one therefore exists while this run still
+# waits for the old lock, which can be a whole run of an older checkout: a run of this version that
+# waits for the new lock meanwhile is told who holds it, not "an unknown holder" (tl on #361).
+# Written to a temporary name and renamed: rename replaces a link at the record's name rather than
+# writing through it, and a waiter never reads half a record. The old record (#273) is the same record:
+# an old-name run nested in this command, and an old-name waiter, read it at the old name.
+recorded = []
+write_record = lambda do |path|
+  tmp = "#{path}.#{me}"
+  begin
+    File.unlink(tmp) if File.symlink?(tmp) || File.exist?(tmp)
+    File.open(tmp, File::WRONLY | File::CREAT | File::EXCL | File::NOFOLLOW, 0o600) { |o| o.write(JSON.generate(rec)) }
+    File.rename(tmp, path)
+    recorded << path
+  rescue SystemCallError => e
+    # Without the record, a run-exclusive inside this command could not tell that its parent holds the
+    # lock, and would wait for it forever, with every other run on the host behind it (tl on #240). So
+    # nothing runs: the lock is released and the run fails, saying why.
+    (File.unlink(tmp) rescue nil)
+    recorded.each { |h| File.unlink(h) rescue nil }
+    recorded.clear
+    f.close
+    legacy_f.close if legacy_f
+    die("could not write the holder record #{path} (#{e.message}), so the command was not run: remove that exact path if it is not a regular file, or make room, then run again")
+  end
+end
+# A run that ends before its command started (a signal while it waits for the old lock, a refusal of
+# the old folder) takes its record with it. It still holds the lock the record is for, so the record at
+# that name can only be its own. At the normal end the records are removed further down, under the lock.
+at_exit { recorded.each { |h| File.unlink(h) rescue nil } }
+write_record.call(holder)
 
 # For one release (#273) a run on the default lock also holds the old default lock, taken after the
 # new one, so that a checkout with the old names, which knows only the old file, waits for this run and
@@ -345,42 +390,13 @@ f, waited = wait_for(lock, holder, started, false)
 # run that holds the new lock: each would wait for the other for good, with every run on the host
 # behind them. This way only one run of this version is ever in the old queue, and runs of an older
 # checkout never wait for the new lock, so there is no cycle. Waiting here keeps the new lock: no other
-# run of this version gets past it.
-legacy_f = nil
+# run of this version gets past it, and that includes a run stopped here (Ctrl-Z), which a waiter
+# elsewhere in a queue would not hold up (docs/gate.md).
 if legacy
   lock_dir!(File.dirname(legacy))
   legacy_f, legacy_waited = wait_for(legacy, legacy_holder, started, true)
   waited ||= legacy_waited
-end
-
-me = Process.pid
-rec = {
-  "pid" => me,
-  "who" => utf8([ENV["TEAM_ROLE"].to_s.empty? ? "a shell" : ENV["TEAM_ROLE"],
-                 (ENV["TEAM_CONFIG"].to_s.empty? ? nil : File.basename(ENV["TEAM_CONFIG"], ".*"))].compact.join(" of ")).scrub,
-  "since" => Time.now.strftime("%Y-%m-%dT%H:%M:%S"),
-  "cwd" => utf8(Dir.pwd).scrub,
-  "cmd" => utf8(args.join(" ")).scrub[0, 300],
-}
-# Written to a temporary name and renamed: rename replaces a link at the record's name rather than
-# writing through it, and a waiter never reads half a record. The old record (#273) is the same record:
-# an old-name run nested in this command, and an old-name waiter, read it at the old name.
-[holder, legacy_holder].compact.each do |path|
-  tmp = "#{path}.#{me}"
-  begin
-    File.unlink(tmp) if File.symlink?(tmp) || File.exist?(tmp)
-    File.open(tmp, File::WRONLY | File::CREAT | File::EXCL | File::NOFOLLOW, 0o600) { |o| o.write(JSON.generate(rec)) }
-    File.rename(tmp, path)
-  rescue SystemCallError => e
-    # Without the record, a run-exclusive inside this command could not tell that its parent holds the
-    # lock, and would wait for it forever, with every other run on the host behind it (tl on #240). So
-    # nothing runs: the lock is released and the run fails, saying why.
-    (File.unlink(tmp) rescue nil)
-    [holder, legacy_holder].compact.each { |h| File.unlink(h) rescue nil }
-    f.close
-    legacy_f.close if legacy_f
-    die("could not write the holder record #{path} (#{e.message}), so the command was not run: remove that exact path if it is not a regular file, or make room, then run again")
-  end
+  write_record.call(legacy_holder)
 end
 say "got the lock after #{(Time.now - started).round}s" if waited
 locked = f.stat
@@ -428,7 +444,8 @@ unless cur && cur.dev == locked.dev && cur.ino == locked.ino
   say "warning: #{lock} was removed or replaced while this run held the lock, so a run that started meanwhile may have overlapped it"
 end
 # Removed while the lock is still held, so it can only be this run's record.
-[holder, legacy_holder].compact.each { |h| File.unlink(h) rescue nil }
+recorded.each { |h| File.unlink(h) rescue nil }
+recorded.clear
 f.close
 legacy_f.close if legacy_f
 exit(status.exited? ? status.exitstatus : 128 + (status.termsig || 0))

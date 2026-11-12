@@ -126,8 +126,15 @@ command at a time across every seat of every team on the host, and the owner's s
     checkout does: nobody is passed in the old queue. Its place there dates from the moment it got the
     new lock, not from its arrival, so runs of an older checkout that came in meanwhile go first. While
     it waits there, its messages name the old-name lock and who holds it.
-  - A lock named by a variable (old or new) is one file for both versions and needs nothing more.
-  - **Migration:** nothing to do. The first run creates `fabrikito/` beside the old folder. Once no
-    checkout from before this release is in use on the machine, the old folder
-    `~/Library/Application Support/software-factory/` can be deleted (while no run holds it). The old
-    variables, the old file and this paragraph go in the release after this one.
+  - While it waits there it already holds the new lock, and its holder record is written, so a run of
+    this version that arrives is told who it waits for. A run stopped at that point (Ctrl-Z) therefore
+    keeps the new lock, and runs of this version wait for it, where a stopped run that only waits in a
+    queue holds nobody up.
+  - A lock named by a variable is one file for both versions only when the old variable names it, or
+    both do. An older checkout does not read `FABRIKITO_RUN_LOCK`: with only that one set it stays on
+    the old default lock, and the two versions no longer exclude each other. While checkouts of both
+    ages are in use, set both variables to the same path.
+  - **Migration:** nothing to do. The first run creates `fabrikito/` beside the old folder. The old
+    folder `~/Library/Application Support/software-factory/` is made again by every run of this version
+    on the default lock for as long as the fallback exists, so deleting it has to wait for the release
+    after this one, which also removes the old variables, the old file and this paragraph.
