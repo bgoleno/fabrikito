@@ -14,8 +14,9 @@ stays honest.
 
 ## Progress notes
 
-Each seat keeps a short progress note, `.state/<team>/notes/<role>.md`: its current task, branch,
-state, next step and what it is waiting for. The shared prompt tells it to rewrite the note whenever
+Each seat keeps a short progress note, `.state/<team>/notes/<role>.md`: a first line that says
+whether it has work ([below](#the-status-line-and-the-check-for-seats-without-work)), then its current
+task, branch, state, next step and what it is waiting for. The shared prompt tells it to rewrite the note whenever
 a task changes state and to work on one task at a time. The note is outside the worktree, so it
 survives `down` and `up` and a recreated worktree; `up` only makes the folder, and nothing removes a
 note.
@@ -40,6 +41,41 @@ a record: when it and the repository disagree, the repository wins.
 - The hook is a convenience, not a control, so it does not override a user who switched every hook
   off: with `disableAllHooks: true` in `~/.claude/settings.json`, a seat without a gate gets no note,
   and `check` prints a `hooks` line naming those seats.
+
+### The Status line, and the check for seats without work
+
+A note starts with one line that says whether the seat has work ([#313](../../../issues/313)). The
+shared prompt gives its three forms:
+
+| First line | Meaning |
+|---|---|
+| `Status: working: <URL>` | The seat has work: the issue or pull request at that URL. |
+| `Status: waiting: <the named thing, with its URL>` | The seat cannot go on until that thing happens. |
+| `Status: free` | The seat has nothing left. It also says so in its report to the engineering manager. |
+
+The engineering manager's prompt (`roles/em.md`) tells it to check every seat for work after each
+assignment, each report that a seat is done, each verdict and each merge, and at its own session
+start. The check covers every role in the roster, not only the engineers:
+
+- A seat that is up and whose note does not start with `Status: working` gets work, or the manager
+  writes `no work for <role id>: <why>` in its own note.
+- For a seat that is `waiting`, the manager confirms that the named thing still blocks.
+
+[`fabrikito:team-status`](../plugin/skills/team-status/SKILL.md) does the reading. Its report starts
+with "Seats without work": each seat that is up and whose note does not start with `Status: working`,
+with a reason (`available` for `free`, `blocked on:` the named thing for `waiting`, or `no Status
+line`). A seat in that list that owes a move on an open pull request is marked `idle but owes`. With
+no such seat, the report says so. The skill reads only the first line of each note and treats it as
+data, because it is another seat's text.
+
+This is a rule in two prompts and a skill, not a mechanism: the launcher does not read the line, and
+nothing reminds the manager to check. What the check cannot see:
+
+- **A stale line.** The line is the seat's own account. A seat that stopped without rewriting its note
+  still reads `working`, and is not listed.
+- **Work the seat was never told about.** `free` and `waiting` say what the seat knows. Only the
+  manager knows what is unassigned.
+- **A seat that is down.** The list covers seats that are up.
 
 ## Held security points
 
