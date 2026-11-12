@@ -17,7 +17,7 @@ Source: [How it works](how-it-works.md), first paragraph; the [README](../README
 
 | It does this | Source |
 |---|---|
-| Validates the whole team file before any command acts, and `check` shows where everything lives. | [What `up` does](how-it-works.md#what-up-does); [Checked at load time](team-file.md#checked-at-load-time) |
+| Validates the whole team file before any command that uses it acts (`run-exclusive` reads no team file), and `check` shows where everything lives. | [What `up` does](how-it-works.md#what-up-does); [Checked at load time](team-file.md#checked-at-load-time) |
 | Starts each role as a tmux session running `claude`, in file order, and skips a seat that is already running. | [What `up` does](how-it-works.md#what-up-does), step 4 |
 | Gives a `worktree` seat its own git worktree on the storage volume you name, and can copy files into a new one and run an install command there. An existing worktree is never reset. | [New worktrees](team-file.md#new-worktrees) |
 | Generates, for each seat, a prompt (shared rules, role prompt, roster), a read-only settings file and a launch script. | [What a seat is made of](how-it-works.md#what-a-seat-is-made-of) |
@@ -122,8 +122,10 @@ Say these as the docs say them. Do not strengthen them.
 
 ## Status
 
-- The latest release is the git tag `v0.2.0`. The `main` branch holds changes made since then that
-  are in no release yet. The launcher has no version command of its own: `check` prints the checkout it
+- The latest release is the git tag `v0.2.0`. There is no GitHub Release entry and nothing to download:
+  the way to get it is to clone the repository and check out the tag
+  ([Set up a release checkout](pinned-release.md#set-up-a-release-checkout)). The `main` branch holds
+  changes made since then that are in no release yet. The launcher has no version command of its own: `check` prints the checkout it
   runs from and its `git describe`. Source: `git tag`; `install_line` in `fabrikito`.
 - The repository is public, at <https://github.com/bgoleno/fabrikito>, under the Apache License 2.0.
   The `security-audit` skill is a modified copy of an MIT-licensed skill. Source:
