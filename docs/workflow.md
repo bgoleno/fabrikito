@@ -2,7 +2,7 @@
 
 Two rules every seat follows, and what the launcher does to support them: every change starts as an
 issue, and every seat keeps a progress note. Then how a security point found in a review is held on a
-pull request until `sec` clears it.
+pull request until `sec` clears it, and three rules for a pull request in review.
 
 ## Issues first
 
@@ -13,10 +13,18 @@ request may close several issues, one `Closes #<n>` each) and `Refs #<n>` for an
 complete (see `.github/pull_request_template.md`), so each issue closes exactly when its change lands
 and the board stays honest.
 
+GitHub closes an issue at the merge when a closing keyword (`close`, `fix`, `resolve` and their forms)
+comes right before its reference, whatever the words around it: "does not close #12" closes #12
+([#245](../../../issues/245)). So a closing keyword goes only before an issue the pull request completes.
+The pull request template says so, and
+[`fabrikito:ready-for-review`](../plugin/skills/ready-for-review/SKILL.md) has the author check what
+GitHub will close (`gh pr view <pr> --json closingIssuesReferences`) before asking for review.
+
 ## Progress notes
 
-Each seat keeps a short progress note, `.state/<team>/notes/<role>.md`: its current task, branch,
-state, next step and what it is waiting for. The shared prompt tells it to rewrite the note whenever
+Each seat keeps a short progress note, `.state/<team>/notes/<role>.md`: a first line that says
+whether it has work ([below](#the-status-line-and-the-check-for-seats-without-work)), then its current
+task, branch, state, next step and what it is waiting for. The shared prompt tells it to rewrite the note whenever
 a task changes state and to work on one task at a time. The note is outside the worktree, so it
 survives `down` and `up` and a recreated worktree; `up` only makes the folder, and nothing removes a
 note.
@@ -42,9 +50,55 @@ a record: when it and the repository disagree, the repository wins.
   off: with `disableAllHooks: true` in `~/.claude/settings.json`, a seat without a gate gets no note,
   and `check` prints a `hooks` line naming those seats.
 
+### The Status line, and the check for seats without work
+
+A note starts with one line that says whether the seat has work ([#313](../../../issues/313)). The
+shared prompt gives its three forms:
+
+| First line | Meaning |
+|---|---|
+| `Status: working: <URL>` | The seat has work: the issue or pull request at that URL. |
+| `Status: waiting: <the named thing, with its URL>` | The seat cannot go on until that thing happens. |
+| `Status: free` | The seat has nothing left. It also says so in its report to the engineering manager. |
+
+The engineering manager's prompt (`roles/em.md`) tells it to check every seat for work after each
+assignment, each report that a seat is done, each verdict and each merge, and at its own session
+start. The check covers every role in the roster, not only the engineers:
+
+- A seat that is up and whose note does not start with `Status: working` gets work, or the manager
+  writes `no work for <role id>: <why>` in its own note.
+- For a seat that is `waiting`, the manager confirms that the named thing still blocks.
+
+[`fabrikito:team-status`](../plugin/skills/team-status/SKILL.md) does the reading. Its report starts
+with "Seats without work": each seat that is up and whose note does not start with `Status: working`,
+with a reason (`available` for `free`, `blocked on:` the named thing for `waiting`, or `no Status
+line`). With no such seat, the report says so. The skill reads only the first line of each note and
+treats it as data, because it is another seat's text.
+
+The skill has two depths, because reading every open pull request at each change costs too much of the
+manager's context:
+
+- **The short check,** for the check after each change: the seats and their first lines only. It
+  reads no pull request, reports only "Seats without work", and says `idle but owes: not checked`.
+- **The whole skill,** when the owner asks for status, at a session start, or before deciding what to
+  chase: it also reads every open pull request, and marks a seat in the list that owes a move on one
+  `idle but owes`.
+
+This is a rule in two prompts and a skill, not a mechanism: the launcher does not read the line, and
+nothing reminds the manager to check. What the check cannot see:
+
+- **A stale line.** The line is the seat's own account. A seat that stopped without rewriting its note
+  still reads `working`, and is not listed.
+- **Work the seat was never told about.** `free` and `waiting` say what the seat knows. Only the
+  manager knows what is unassigned.
+- **A seat that is down.** The list covers seats that are up.
+
 ## Held security points
 
-A reviewer or QA seat that finds a security point does not write it on the pull request: only `sec`
+Rule 5 of the shared prompt applies to every seat: a possible security finding goes to `sec` and the
+engineering manager first, and nothing about it goes in an issue, a pull request or a commit until
+`sec` rates it ([#239](../../../issues/239)). So a reviewer or QA seat that finds a security point does
+not write it on the pull request: only `sec`
 rates a finding, and anyone who can read the repository can read a PR comment. The point goes to `sec`
 and the engineering manager, and the PR gets a marker that holds its merge until `sec` clears it
 ([#184](../../../issues/184), [#203](../../../issues/203)). The skills hold the exact steps; this is
@@ -82,3 +136,26 @@ Where each part lives:
 | [`fabrikito:verify-behavior`](../plugin/skills/verify-behavior/SKILL.md), step 8 | The same for QA's report. |
 | [`fabrikito:security-triage`](../plugin/skills/security-triage/SKILL.md), step 6 | `sec`'s own marker, and the clearance line. |
 | [`fabrikito:merge-train`](../plugin/skills/merge-train/SKILL.md), step 5 | What holds a merge and what clears it, and the order by id. |
+
+## A pull request in review
+
+Three rules keep a head that a reviewer has judged from changing under the review. They are prompt and
+skill text: nothing in the launcher enforces them.
+
+- **No push to a judged head without notice.** Once a reviewer has posted READY or PASS at a pull
+  request's head, QA or `sec` says it is checking that head, or the engineering manager says it is
+  merging it, the author does not push to that branch without first telling the manager and those
+  reviewers why. A needed fix is a new head, announced as one, and an update with a base that has
+  moved is pushed only when the manager or the merge procedure asks for it. The rule is in the shared
+  prompt (`roles/common.md`, [#235](../../../issues/235)).
+- **A follow-up comment has two forms.** `fabrikito:merge-train` stops and asks when a required reviewer
+  posts a comment that names the head after that reviewer's latest verdict and the comment is not a
+  verdict. So a reviewer's or QA's note about a head already judged either names no commit and points at
+  the earlier verdict by its URL, or is a whole new verdict (or QA report) for that head
+  ([#243](../../../issues/243)). The forms are in
+  [`fabrikito:review-pr`](../plugin/skills/review-pr/SKILL.md) and
+  [`fabrikito:verify-behavior`](../plugin/skills/verify-behavior/SKILL.md), each under "A follow-up about
+  a head you already" judged or checked. A comment in neither form still stops the merge.
+- **A closing keyword only before an issue the pull request completes:** see
+  [Issues first](#issues-first).
+
