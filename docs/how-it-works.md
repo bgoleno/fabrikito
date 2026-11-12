@@ -125,7 +125,7 @@ hook is installed into your own settings.
   [Progress notes](workflow.md#progress-notes).
 - **`log_message.sh`** appends one line per message to `.state/<team>/messages.log`, in the same
   format `say` uses. It never blocks or changes the message, and it always exits 0. See
-  [The message log](../README.md#the-message-log).
+  [The message log](messaging.md#the-message-log).
 - **`stop_gate.sh`** runs `repo.gate` in the seat's working directory when the seat stops with
   uncommitted changes. If the gate fails, the seat is sent back to work with the failure. See
   [The gate](#the-gate) below.
@@ -144,22 +144,22 @@ prompt tells seats to send with `SendMessage` to that name and to check `ListAge
   permission modes. Seats in one class (all `bypassPermissions`, or all other modes) get each other's
   messages at once; across classes a message waits for a human to approve it in the receiver's pane.
   `check` warns when a team's seats fall into both classes. See
-  [Which messages are held](../README.md#which-messages-are-held).
+  [Which messages are held](messaging.md#which-messages-are-held).
 - **`say`** is how the owner and scripts reach a seat, and the seats' fallback when `SendMessage`
   cannot reach one. It types the message into the seat's tmux pane, labelled `[from <role>]`, and it
   types only when it sees Claude Code's input box ready for input, so it does not type into a dialog
   or a shell it can see. A dialog that appears in the moment between its checks and its keys is not
-  caught. See [`say`](../README.md#say).
+  caught. See [`say`](messaging.md#say).
 - **The kickoff** is each seat's first message, labelled `[from launcher]`, so it never reads as the
-  owner typing. See [The kickoff](../README.md#the-kickoff).
+  owner typing. See [The kickoff](messaging.md#the-kickoff).
 - **The message log,** `.state/<team>/messages.log`, records every `say` with whether it was
   delivered, and every `SendMessage` a seat sends (through the hook above). Every seat but `em` has a
   `Read` deny on it, an accident guard like the other rules (see [Safety](safety.md)). See
-  [The message log](../README.md#the-message-log).
+  [The message log](messaging.md#the-message-log).
 
 Session names and `[from …]` labels are claims, not identities. The prompt tells seats to act only on
 roster names, which guards against mistakes, not impersonation. See
-[How seats talk](../README.md#how-seats-talk).
+[How seats talk](messaging.md#how-seats-talk).
 
 ## The gate
 

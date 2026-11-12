@@ -111,7 +111,7 @@ on send-backs.
 Some seats run in `bypassPermissions` and others in a prompting mode. Messages between the two
 classes wait at an approval dialog in the receiver's pane and are dropped when it expires, so in an
 unattended team they are lost. Give every seat a `permission_mode` of the same
-class, or set `crossSessionInbound`. See [Which messages are held](../README.md#which-messages-are-held).
+class, or set `crossSessionInbound`. See [Which messages are held](messaging.md#which-messages-are-held).
 
 ### `say` refuses to send
 
@@ -124,7 +124,7 @@ gives the reason when it refuses:
   try once more later; do not loop (a repeat of the same text within 300 seconds is refused as a repeat,
   and `status` shows a notice for the seat after three refusals). If the text is a fragment `say` itself
   left, `./fabrikito flush <role>` submits it, deleting nothing; text someone typed is theirs, and the
-  owner can attach and submit or clear it. See [`say`](../README.md#say).
+  owner can attach and submit or clear it. See [`say`](messaging.md#say).
 - "in copy mode": someone is scrolling. Leave copy mode with q.
 - "shows Claude Code's diff panel notice": the pane is too short, even after `say` grew it for the
   check. Make it 110 columns wide or more, or 16 rows or more, or close the diff panel in the seat.
@@ -149,7 +149,7 @@ gives the reason when it refuses:
 
 A refused message is logged as `NOT-DELIVERED`. If `say` refuses every seat after a Claude Code update,
 the update has changed how the input box is drawn, and `fabrikito` needs updating. See
-[`say`](../README.md#say).
+[`say`](messaging.md#say).
 
 ## After a Claude Code update
 
