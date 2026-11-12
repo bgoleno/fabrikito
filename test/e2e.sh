@@ -27,7 +27,10 @@ for e2e_p in "$e2e_tmp" "$e2e_real"; do
 done
 T_TOP=$(mktemp -d "$e2e_tmp/team-e2e.XXXX") || { echo "cannot make a scratch folder under $e2e_tmp" >&2; exit 2; }
 mkdir "$T_TOP/r" && ln -s r "$T_TOP/l" && T=$(cd "$T_TOP/l" && pwd) || { echo "cannot make the scratch link under $T_TOP" >&2; exit 2; }
-T_TOP=${T%/l}; mkdir -p $T/bin $T/tmux $T/local
+T_TOP=${T%/l}
+# $T/tmux is the folder TMUX_TMPDIR names below. A run that could not make it would export a name for
+# nothing, the state in which tmux takes /tmp (#307), so it stops here, before its first tmux call.
+mkdir -p $T/bin $T/tmux $T/local || { echo "cannot make $T/bin, $T/tmux and $T/local" >&2; rm -rf "$T_TOP"; exit 2; }
 ROOT="Projects/_teamtest-$$"; VOL=${TEST_VOLUME:-}
 # Start from a clean environment. Run from a seat, this shell inherits what the seat's launcher
 # and claude set there (DISABLE_AUTOUPDATER, TEAM_*, CLAUDE* including CLAUDE_CONFIG_DIR, TMUX*), and the test's tmux server

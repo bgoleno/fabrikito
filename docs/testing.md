@@ -117,6 +117,7 @@ seat runs has it. A new area file gets all of this without doing anything.
   (`TMUX_GUARD_LOG`). A run fails at its end if the guard refused a call that no case asked for.
 - With no root that exists, every call is refused. The guard is in the tree and not in the scratch folder,
   so it is still the tmux on `PATH` after the scratch folder is removed, for a job the run left behind too.
+- A run that cannot make the folder `TMUX_TMPDIR` names stops there, before its first tmux call.
 - A stand-in `tmux` that an area puts first on `PATH` and that passes calls on is built on
   `command -v tmux`, which is the guard, so its calls are judged too.
 - A call that goes to another server on purpose says so where it is made: through `test/live-env.sh run`,
@@ -134,6 +135,11 @@ full path is not held. Two more callers are not held, for the reason above (a pa
 
 In a pane `TMUX` names the pane's own server, so a bare tmux call there stays on it; the call that can get
 out is one that unsets `TMUX` or names another socket.
+
+A job a run left behind is held for as long as the tree the run started from is there. Remove that tree
+(an export in a temporary folder, say) or switch it to a commit without the guard while such a job is
+still running, and the guard is gone from the job's `PATH`: the next `tmux` on it is the real one. So stop
+what a run left behind before you remove the tree it ran from.
 
 A case that makes a call the guard must refuse first checks that its `tmux` is the guard
 (`command -v tmux`), and fails without making the call if it is not; where it can, it makes a call that

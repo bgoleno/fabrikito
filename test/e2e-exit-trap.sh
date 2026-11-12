@@ -337,6 +337,26 @@ else
   check "the tree this script is in has test/guard/tmux" 1
 fi
 
+# The folder TMUX_TMPDIR names was never made: the same state as "removed mid-run", reached before the first
+# tmux call. A stand-in mkdir, first on the PATH of this one run, fails for a folder named tmux and makes
+# nothing then, as mkdir does on a full or read-only volume. The run must stop there, before it exports a
+# TMUX_TMPDIR that names nothing. (Were it to go on, each bare tmux call would fail at the guard: that state
+# is the first half of this script's "removed mid-run" cases and of test/e2e-tmux-guard.sh.)
+echo "--- the run's tmux folder cannot be made"
+cat > "$X/bin/mkdir" <<'EOF'
+#!/bin/sh
+for a in "$@"; do case $a in */tmux) echo "mkdir: $a: the stand-in makes no folder named tmux" >&2; exit 1 ;; esac; done
+PATH=/usr/bin:/bin exec mkdir "$@"
+EOF
+chmod +x "$X/bin/mkdir"; [ -d "$X/tmp" ] || /bin/mkdir "$X/tmp"
+nested 'xt_mark "the first area ran"
+e2e_end='"$first" TMPDIR="$X/tmp"
+rm -f "$X/bin/mkdir"
+[ "$rc" = 2 ] && [ -z "$marks" ] && printf '%s\n' "$out" | grep -qE "cannot make .*/tmux"; check "tmux folder not made: the run stops before its first area, exit 2, naming the folder (exit $rc)" $?
+[ "$(calls tmux)" = 0 ] && [ "$(calls fabrikito)" = 0 ]; check "tmux folder not made: nothing was run, and no tmux call was made" $?
+[ -z "$(ls -A "$X/tmp")" ]; check "tmux folder not made: the scratch folder the run had begun is removed" $?
+finish
+
 echo "--- the caller's environment has LIVE_D and TD, and the run ends before an area sets them"
 mkdir "$X/td-marker" "$X/live-marker"
 nested 'xt_socket "$xt_sock"; xt_mark "at the start"

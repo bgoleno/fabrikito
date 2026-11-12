@@ -13,6 +13,8 @@
 #                      refused: a run whose scratch folder is removed leaves no way through, for a job
 #                      it left running either. That is why the guard lives in the tree, not in the
 #                      scratch folder: a tmux there would be gone with it, and the next one on PATH is real.
+#                      (The same holds for the tree: a job that outlives the tree it was started from
+#                      has lost the guard with it.)
 #   TMUX_GUARD_REAL    the real tmux. Without it: the next tmux on PATH after this one.
 #   TMUX_GUARD_LOG     a file each refusal is appended to, as printed.
 #   TMUX_GUARD_VIA     set by the guard itself: the guards a call has come through (see "The real tmux").
