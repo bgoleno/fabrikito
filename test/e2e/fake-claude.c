@@ -129,6 +129,15 @@ static void endpaste(void) {
 }
 int main(int n, char **v) {
   if (n == 2 && !strcmp(v[1], "--version")) { char *fv = getenv("FAKE_VERSION"); printf("%s (Claude Code)\n", fv ? fv : "9.9.9"); return 0; }
+#ifdef FAKE_GUARD_DIR
+  /* The tmux guard of the tests (#307, test/guard/tmux) first on PATH, for whatever a ! line runs. A seat's
+     pane runs a login shell, whose profile builds PATH again with the system's folders first, so the guard
+     that is first on the PATH of the run is not first here, and a seat's tmux would be the real one.
+     test/e2e.sh writes the define with the guard's folder at the top of the copy it compiles. */
+  { const char *p = getenv("PATH"); size_t l = strlen(FAKE_GUARD_DIR) + (p ? strlen(p) : 0) + 2; char *np = malloc(l);
+    if (!np) return 2;
+    snprintf(np, l, "%s%s%s", FAKE_GUARD_DIR, p ? ":" : "", p ? p : ""); setenv("PATH", np, 1); free(np); }
+#endif
   struct termios t; char *k = getenv("FAKE_KEYLOG"); FILE *kl = k ? fopen(k, "a") : 0, *mf;
   base = getenv("FAKE_FILES"); if (!base) base = "/nonexistent";
   char path[4096]; snprintf(path, sizeof path, "%s-mode.txt", base);

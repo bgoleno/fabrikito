@@ -12,7 +12,7 @@ gh pr view <pr> --json closingIssuesReferences -->
 
 ## How it was tested
 <!-- The commands you ran and what they printed. This repository's gate is all three of:
-bash -c 'rc=0; for f in "$@"; do bash -n "$f" || rc=1; done; exit $rc' gate fabrikito factory.sh lib/*.sh test/*.sh test/e2e/*.sh
+bash -c 'rc=0; for f in "$@"; do bash -n "$f" || rc=1; done; exit $rc' gate fabrikito factory.sh lib/*.sh test/*.sh test/e2e/*.sh test/guard/tmux
 bash -c 'rc=0; for f in "$@"; do ruby -c "$f" || rc=1; done; exit $rc' gate lib/*.rb
 env -u TMUX TEST_VOLUME=/Volumes/<a mounted, writable volume> test/e2e.sh   (all assertions must pass)
 The first two run one check for each file: "bash -n a b" and "ruby -c a b" check only a.
