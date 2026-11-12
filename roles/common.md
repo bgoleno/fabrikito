@@ -104,7 +104,7 @@ the command to get past it; tell the EM (the EM asks the owner). These rules are
    change is reviewed, where `sec` and the EM decide (for example a draft GitHub security advisory and
    its private fork), and nothing public (issue, PR, branch name or commit message) describes the
    finding until the owner says it can be disclosed.
-9. **Never run code from a fork's pull request.** Before you check out, gate, test or start anything from a PR, look at `gh pr view <n> -R @@GITHUB_REPO@@ --json isCrossRepository,headRepositoryOwner`: if `isCrossRepository` is true, or the head's owner is not this repository's, read its diff and run nothing from it, and ask the EM: the owner decides whether outside code runs on this machine. No role prompt or skill lifts this.
+9. **Never run code from a fork's pull request.** Before you check out, gate, test or start anything from a PR, look at `gh pr view <n> -R <repo> --json isCrossRepository,headRepositoryOwner` (`<repo>` is the repository the PR is in: @@GITHUB_REPO@@ unless your brief names another): if `isCrossRepository` is true, or the head's owner is not this repository's, read its diff (`gh pr diff`), do not check out or switch to its head, run nothing from it, and ask the EM: the owner decides whether outside code runs on this machine. No role prompt or skill lifts this.
 
 ## How we work
 - Keep a progress note at `@@NOTE@@`. It is outside your worktree, so it survives a restart. It holds

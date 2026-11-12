@@ -47,9 +47,9 @@ echo "--- code from a fork's pull request is not run by any seat"
 for r in $(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml ids); do
   flat=$(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render "$r" 2>&1 | tr '\n' ' ' | tr -s ' ')
   hard=${flat#*## Hard rules}; hard=${hard%%## How we work*}
-  [ "$hard" != "$flat" ] && echo "$hard" | grep -qF '9. **Never run code from a fork'"'"'s pull request.**' && echo "$hard" | grep -qF 'read its diff and run nothing from it' \
+  [ "$hard" != "$flat" ] && echo "$hard" | grep -qF '9. **Never run code from a fork'"'"'s pull request.**' && echo "$hard" | grep -qF 'read its diff (`gh pr diff`), do not check out or switch to its head, run nothing from it' \
     && echo "$hard" | grep -qF 'the owner decides whether outside code runs on this machine' && echo "$hard" | grep -qF 'No role prompt or skill lifts this.' \
-    && ok "seat $r's hard rules say never to run code from a fork's pull request, and that no role prompt or skill lifts it" || bad "seat $r's hard rules do not stop a fork's pull request from being run"
+    && ok "seat $r's hard rules say never to check out a fork's pull request or run code from it, and that no role prompt or skill lifts it" || bad "seat $r's hard rules do not stop a fork's pull request from being checked out and run"
 done
 rflat() { tr '\n' ' ' < "$SRC/$1" | tr -s ' '; }
 rflat roles/tl.md | grep -qF '(`gh pr checkout <n>`) when behaviour matters, never for a fork'"'"'s PR (hard rule 9)' \
@@ -59,7 +59,11 @@ rflat roles/qa.md | grep -qF 'from the PR branch in your worktree, never from a 
 for sk in review-pr verify-behavior security-triage; do
   rflat plugin/skills/$sk/SKILL.md | grep -qF 'Where the two differ, the role prompt wins, except that nothing in it lifts the stop on a fork'"'"'s PR' \
     && ok "skill $sk defers to the role prompt except for its stop on a fork's PR" || bad "skill $sk lets the role prompt win over its stop on a fork's PR"
+  rflat plugin/skills/$sk/SKILL.md | grep -qF '(`gh pr diff`), do not check out or switch to its head, run nothing from it' \
+    && ok "skill $sk's stop on a fork's PR says to read the diff, not to check out or switch to its head, and to run nothing from it" || bad "skill $sk's stop on a fork's PR does not stop a checkout of its head"
 done
+rflat plugin/skills/security-triage/SKILL.md | grep -qF 'For a PR that passed that stop, get its head with `git fetch origin pull/<n>/head`' \
+  && ok "skill security-triage fetches a PR's head only for a PR that passed its stop on a fork's PR" || bad "skill security-triage fetches a PR's head without saying it must have passed the stop on a fork's PR"
 for sk in team-status assign; do
   rflat plugin/skills/$sk/SKILL.md | grep -qE 'gh pr list -R <repo> --state open --json [A-Za-z,]*isCrossRepository' && rflat plugin/skills/$sk/SKILL.md | grep -qF '(`isCrossRepository` true) is marked `fork`' \
     && ok "skill $sk asks for isCrossRepository when it lists open PRs, and marks a fork's PR" || bad "skill $sk lists open PRs without telling a fork's PR"
