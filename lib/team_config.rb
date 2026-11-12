@@ -966,6 +966,27 @@ class TeamConfig
     [' ', ':', '+', '/'].flat_map { |c| ["Bash(git push *#{c}#{b})", "Bash(git push *#{c}#{b} *)"] }
   end
 
+  # A deny on a typed `tmux kill-server` or `tmux kill-session` (#308): either one can end other seats,
+  # or every team on the machine, and no seat has a reason to type it. A deny, not an ask: an ask parks
+  # a seat at a prompt until a human comes, and a deny answers at once in every mode (tl on #308).
+  # What a seat needs is untouched, because a Bash rule sees only the typed command: the launcher's
+  # down and a test's own helper make the tmux call from a script.
+  # Each pattern starts at the command word, never with a wildcard: a seat that greps for these words,
+  # or writes them in a commit message, must match no rule. The shapes: the command alone, with
+  # arguments after it (-t), with options before it (-S, -L), and with both. Then the same behind
+  # `env`, with and without arguments of its own, because env is not one of the wrappers Claude Code
+  # strips before it matches (https://code.claude.com/docs/en/permissions); a leading VAR=value is
+  # matched past by a deny, so it needs no pattern. The exact form is listed beside `<command> *`,
+  # which also matches the bare command, so that the plainest spelling does not rest on that reading.
+  # Not caught: a script, `sh -c`, tmux under another path, tmux's own short forms (kill-ser,
+  # kill-ses), and other commands that end a session (kill-window, kill-pane, respawn-pane -k).
+  TMUX_KILL_COMMANDS = %w[kill-server kill-session].freeze
+  def tmux_kill_rules
+    ['tmux', 'env tmux', 'env * tmux'].flat_map do |p|
+      TMUX_KILL_COMMANDS.flat_map { |k| ["Bash(#{p} #{k})", "Bash(#{p} #{k} *)", "Bash(#{p} * #{k})", "Bash(#{p} * #{k} *)"] }
+    end
+  end
+
   # Patterns (escaped) for the files that change what a seat runs at its next start, or the rules it
   # runs under now: each path as configured and, when a symlink makes it differ, its real path too,
   # so neither spelling (nor the link itself) is left open. Every seat
@@ -1115,7 +1136,7 @@ class TeamConfig
     others = (roles.keys - [id]).flat_map { |r| note_rules(r) }
     tri = triage_rules(id)
     deny = protected_paths(id).map { |p| "Edit(/#{p})" } + others + log_read_rules(id) + memory_rules(id) + tri['deny'] +
-           other_team_rules(id)
+           other_team_rules(id) + tmux_kill_rules
     add.call({ 'deny' => deny, 'ask' => base_push_rules, 'allow' => own + tri['allow'] + tmpdir_rules(id) }, 'fabrikito')
     out
   end
@@ -1273,10 +1294,13 @@ class TeamConfig
       logs = log_read_rules(id)
       mem = memory_rules(id)
       tri = triage_rules(id)
+      kills = merged['deny'] & tmux_kill_rules
       added = merged['deny'].count do |r|
-        factory.include?(r) && !notes.include?(r) && !logs.include?(r) && !mem.include?(r) && !tri['deny'].include?(r) && !others.include?(r)
+        factory.include?(r) && !notes.include?(r) && !logs.include?(r) && !mem.include?(r) && !tri['deny'].include?(r) && !others.include?(r) &&
+          !kills.include?(r)
       end
       asks = merged['ask'].count { |r| factory.include?(r) }
+      kill = kills.empty? ? '' : ", deny on #{kills.size} tmux kill-server and kill-session patterns"
       note = merged['allow'].any? { |r| note_rules(id).include?(r) } ? ', Edit allow on its own progress note and deny on the other seats\'' : ''
       tmp = merged['allow'].any? { |r| tmpdir_rules(id).include?(r) } ? ", Edit allow on its own temp folder (#{tmpdir(id)})" : ''
       memo = mem.empty? ? '' : ", Edit deny on the repository's auto-memory folder (#{mem.size} spellings)"
@@ -1291,7 +1315,7 @@ class TeamConfig
                 ", Read and Edit deny on #{other_teams.size} other teams' state folders" +
                   (watched.empty? ? '' : " (observer of #{watched.join(', ')}: may read its log and notes)")
               end
-      out << "    added: Edit deny on #{added} protected paths#{asks.positive? ? ", ask on #{asks} push-to-#{base_branch} patterns" : ''}#{note}#{tmp}#{memo}#{log}#{triage}#{teams}"
+      out << "    added: Edit deny on #{added} protected paths#{asks.positive? ? ", ask on #{asks} push-to-#{base_branch} patterns" : ''}#{kill}#{note}#{tmp}#{memo}#{log}#{triage}#{teams}"
       out << '    note : allow rules have no effect in bypassPermissions' if mode.start_with?('bypassPermissions') && !(merged['allow'] - factory).empty?
       out << '    note : ask rules are refused in dontAsk mode, not asked' if mode == 'dontAsk' && !merged['ask'].empty?
     end

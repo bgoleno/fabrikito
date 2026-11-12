@@ -4,10 +4,10 @@
 # Uses the running seats. Restarts em.
 echo "--- generated settings"
 # The user's rules, in team-then-role order, without duplicates. Rules the launcher adds itself
-# (Edit denies on its own files, the Read rules on the log, say's records (#212) and the triage folder, and the Read denies
-# on the log, triage records and notes of secstate, the e2e's other team beside $T/state, #197) are
-# checked separately, so they are left out of these lists.
-perms() { ruby -rjson -e 'p = JSON.parse(File.read(ARGV[0]))["permissions"] || {}; %w[deny ask allow].each { |k| l = (p[k] || []).reject { |r| r.start_with?("Edit(//", "Bash(git push ") || r =~ %r{\ARead\(//.*/state/(messages\.log|(triage|say)/\*\*)\)\z} || r =~ %r{\ARead\(//.*/secstate/(messages\.log|triage/\*\*|notes/\*\*)\)\z} }; puts "#{k}=#{l.join(" | ")}" }; puts "disable=#{p["disableBypassPermissionsMode"]}"' "$1" 2>&1; }
+# (Edit denies on its own files, the Read rules on the log, say's records (#212) and the triage folder, the Read denies
+# on the log, triage records and notes of secstate, the e2e's other team beside $T/state, #197, and the
+# Bash denies on tmux kill-server and kill-session, #308) are checked separately, so they are left out of these lists.
+perms() { ruby -rjson -e 'p = JSON.parse(File.read(ARGV[0]))["permissions"] || {}; %w[deny ask allow].each { |k| l = (p[k] || []).reject { |r| r.start_with?("Edit(//", "Bash(git push ", "Bash(tmux ", "Bash(env ") || r =~ %r{\ARead\(//.*/state/(messages\.log|(triage|say)/\*\*)\)\z} || r =~ %r{\ARead\(//.*/secstate/(messages\.log|triage/\*\*|notes/\*\*)\)\z} }; puts "#{k}=#{l.join(" | ")}" }; puts "disable=#{p["disableBypassPermissionsMode"]}"' "$1" 2>&1; }
 # rules <file> <deny|ask|allow>: one rule per line
 rules() { ruby -rjson -e 'puts((JSON.parse(File.read(ARGV[0]))["permissions"] || {})[ARGV[1]] || [])' "$1" "$2"; }
 want_em='deny=Read(//**/.env) | Bash(touch tt-deny*)
@@ -90,6 +90,53 @@ echo "$chk" | grep -qF "warning: seat-to-seat messages will be held. Prompting f
 sect() { echo "$chk" | sed -n "/^\[$1\]/,/^\[/p"; }
 sect w1 | grep -qF "deny : Read(//**/.env), Bash(touch tt-deny*), Bash(gh pr merge *)" && ok "check: w1's merged deny list" || { bad "check w1 deny"; sect w1; }
 sect em | grep -qF "allow rules have no effect in bypassPermissions" && ! sect w1 | grep -qF "no effect in bypassPermissions" && ok "check: bypass note on em only" || { bad "check bypass note"; sect em; }
+echo "--- generated settings: a deny on a typed tmux kill-server or kill-session (#308)"
+# Either command, typed by a seat, can end other seats, or every team on the machine. Every seat gets
+# a deny on both, whatever its mode (em bypasses, w1 prompts): in the settings up wrote, and in what
+# the builder gives w2, which has not started yet. The patterns: the command alone or with arguments
+# after it (-t), with options before it (-S, -L), and each of those behind env, which Claude Code does
+# not strip before it matches. All start at the command word.
+tk_want=$(for p in 'tmux' 'env tmux' 'env * tmux'; do for k in kill-server kill-session; do printf 'Bash(%s %s)\nBash(%s %s *)\nBash(%s * %s)\nBash(%s * %s *)\n' "$p" "$k" "$p" "$k" "$p" "$k" "$p" "$k"; done; done)
+tk_rules() { grep -E '^Bash\((tmux|env) '; }
+tk_miss=""
+for r in em w1; do [ "$(rules $T/state/settings/$r.json deny | tk_rules)" = "$tk_want" ] || tk_miss="$tk_miss $r"; done
+[ "$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml settings w2 | ruby -rjson -e 'puts JSON.parse(STDIN.read)["permissions"]["deny"]' | tk_rules)" = "$tk_want" ] || tk_miss="$tk_miss w2"
+[ -z "$tk_miss" ] && [ "$(echo "$tk_want" | wc -l | tr -d ' ')" = 24 ] && ok "deny on tmux kill-server and kill-session in every seat's settings: the 24 patterns" || { bad "tmux kill deny missing or different for:$tk_miss"; rules $T/state/settings/em.json deny | tk_rules; }
+tk_soft=""; for r in em w1; do for l in ask allow; do rules $T/state/settings/$r.json $l | grep -qE 'kill-(server|session)' && tk_soft="$tk_soft $r.$l"; done; done
+[ -z "$tk_soft" ] && ok "no seat has an ask or an allow on tmux kill-server or kill-session" || bad "tmux kill rule in a weaker list:$tk_soft"
+# What the patterns catch, through matching_rules (the launcher's reading of a rule, as the
+# permissions docs describe it; how Claude Code itself reads a typed command is a live check).
+tk_nl=$'\n'
+tk() { TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml matching_rules w1 "$1"; }
+tk_caught() { local c=$1 want="" r; shift; for r in "$@"; do want="$want${want:+$tk_nl}deny Bash($r)"; done
+  [ "$(tk "$c")" = "$want" ] && ok "tmux kill caught: $c" || { bad "tmux kill not caught as expected: $c"; tk "$c"; }; }
+tk_caught 'tmux kill-server' 'tmux kill-server' 'tmux kill-server *'
+tk_caught 'tmux kill-session' 'tmux kill-session' 'tmux kill-session *'
+tk_caught 'tmux kill-session -t =tt-em' 'tmux kill-session *'
+tk_caught 'tmux -L other kill-server' 'tmux * kill-server'
+tk_caught 'tmux -S /tmp/x/sock kill-server' 'tmux * kill-server'
+tk_caught 'tmux -S /tmp/x/sock kill-session -t a' 'tmux * kill-session *'
+tk_caught 'tmux -L other kill-session' 'tmux * kill-session'
+tk_caught 'env tmux kill-server' 'env tmux kill-server' 'env tmux kill-server *'
+tk_caught 'env -u TMUX tmux kill-server' 'env * tmux kill-server'
+tk_caught 'env -u TMUX tmux kill-session -t a' 'env * tmux kill-session *'
+tk_caught 'env TMUX_TMPDIR=/tmp/x tmux -L y kill-server' 'env * tmux * kill-server'
+tk_caught 'env TMUX_TMPDIR=/tmp/x tmux -L y kill-session -t z' 'env * tmux * kill-session *'
+# A deny with a wildcard before the command word would also stop a seat from reading or writing about
+# these commands, and from the ways it is told to use instead (tl on #308).
+for c in 'grep -rn "tmux kill-server" docs test' 'git log --grep "tmux kill-session"' 'git commit -m "docs: tmux kill-server is denied for a seat"' \
+  '# tmux kill-server' 'echo "tmux kill-session -t a"' 'tmux ls' 'tmux has-session -t =tt-em' 'env -u TMUX tmux -L y ls' \
+  'test/live-env.sh down /tmp/sf-live.abc' 'test/live-env.sh run /tmp/sf-live.abc tmux kill-session -t =lt-em' './fabrikito -c /tmp/t.yaml down --yes' \
+  'env -u TMUX TEST_VOLUME=/Volumes/x test/e2e.sh'; do
+  [ -z "$(tk "$c")" ] && ok "not caught by a tmux kill deny: $c" || { bad "caught by a rule: $c"; tk "$c"; }
+done
+# A team's own ask or allow on one of these patterns would do nothing under the deny, so it is refused,
+# like any rule a stronger one makes useless. Its own deny on one is the same rule twice, and is accepted.
+reject "a team ask on a tmux kill pattern, which the launcher's deny makes useless" 'permission rule "Bash(tmux kill-server *)" in team ask has no effect: fabrikito deny has the same rule' "" "$(rule ask '"Bash(tmux kill-server *)"')"
+reject "a role allow on a tmux kill pattern, which the launcher's deny makes useless" 'permission rule "Bash(tmux * kill-session *)" in roles.em allow has no effect: fabrikito deny has the same rule' "" "" ', permissions: { allow: ["Bash(tmux * kill-session *)"] }'
+accept "a team deny on a tmux kill pattern the launcher adds too" "" "$(rule deny '"Bash(tmux kill-session *)"')"
+tk_chk=""; for r in em w1 w2; do sect $r | grep -F "added: " | grep -qF ", deny on 24 tmux kill-server and kill-session patterns" || tk_chk="$tk_chk $r"; done
+[ -z "$tk_chk" ] && ok "check: every seat's added line names the tmux kill deny" || { bad "check: no tmux kill deny in the added line of:$tk_chk"; sect em | grep -F "added: "; }
 # Claude Code's auto-updater reinstalls its package under running seats, and macOS then loses
 # track of the seat's process (#50): every seat starts with it off, in the launch script and in its
 # settings, and nothing else in the tmux server gets the variable.

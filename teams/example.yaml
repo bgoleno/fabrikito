@@ -153,9 +153,11 @@ kickoff: >-
 #   them one). The sandbox would hold whatever the command text, but fabrikito does not turn it on.
 # - Paths: //absolute, ~/home, ./relative or a bare name. A single leading / would anchor at the
 #   state folder that holds the generated file, so it is refused.
-# fabrikito adds two sets itself: an Edit deny on the files that change a seat's next start (team
-# file, prompts, launcher, generated state, Claude Code's own settings), and an ask on any push to
-# the base branch (from repo.base). `./fabrikito check` lists what each seat gets.
+# fabrikito adds three sets itself: an Edit deny on the files that change a seat's next start (team
+# file, prompts, launcher, generated state, Claude Code's own settings), an ask on any push to
+# the base branch (from repo.base), and a deny on a typed `tmux kill-server` or `tmux kill-session`
+# (so an ask or an allow on one of those patterns here is refused as having no effect).
+# `./fabrikito check` lists what each seat gets.
 permissions:
   deny:
     # Every .env on the machine, the main checkout's included. This also blocks .env.example: a

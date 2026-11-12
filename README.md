@@ -31,7 +31,8 @@ seats message each other, and one iTerm tab shows them all.
   own cross-session messaging. Every message a seat sends, and every message you send with `say`, is
   appended to a log, `.state/<team>/messages.log`.
 - **Guardrails are generated, not hoped for.** Every `up` writes each seat a settings file with deny rules
-  on the files that would change its own rules, and an ask on any push to the base branch. The example
+  on the files that would change its own rules, a deny on a typed `tmux kill-server` or `kill-session`,
+  and an ask on any push to the base branch. The example
   team also denies `gh pr merge` to every role but the manager, whose rule is an ask. `check` lists what
   each seat gets and warns about a role left open to a merge.
 - **A seat can be held to your checks.** With `gate_on_stop`, a seat that stops with uncommitted work is

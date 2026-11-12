@@ -32,6 +32,10 @@ makes, or a command it runs makes, gets through only to a socket inside `$d`, wh
 changes `PATH`, and the seats of a team started in the environment, whose panes run a login shell that
 builds `PATH` again.
 
+A `tmux kill-server` or `tmux kill-session` that a seat types is denied by a permission rule, with or
+without `-S`, `-L` and `-t` ([Safety](safety.md)). `test/live-env.sh down` is how a test server is stopped,
+and `test/live-env.sh run "$d" tmux kill-session -t <name>` ends one session on it.
+
 ## The end-to-end test
 
 `TEST_VOLUME=/Volumes/YourDrive test/e2e.sh` runs the launcher against a throwaway repo with a stand-in
