@@ -31,7 +31,8 @@ together in one iTerm tab. Read `README.md` for use and `teams/example.yaml` for
   links it with `Closes #<n>` when the PR completes the issue (`Refs #<n>` when it does not) and fills in
   `.github/pull_request_template.md`.
 - Gates: `bash -n fabrikito factory.sh test/e2e.sh test/e2e-exit-trap.sh lib/stop_gate.sh lib/session_start.sh lib/log_message.sh`, `ruby -c lib/team_config.rb`, and
-  `TEST_VOLUME=/Volumes/<a mounted, writable volume> test/e2e.sh` (all assertions must pass).
+  `env -u TMUX TEST_VOLUME=/Volumes/<a mounted, writable volume> test/e2e.sh` (all assertions must pass; it takes the
+  host's run lock itself and waits for its turn, #309).
 - Do not run the e2e test, or any experiment, against the user's real tmux server: unset `TMUX` and use
   `TMUX_TMPDIR`, as the test does. Never kill or restart seats of a running team without being asked.
 - Commit or push only when asked. The remote is a private repository.

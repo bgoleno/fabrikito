@@ -54,7 +54,10 @@ Roles without the switch never run it. The example gives it to the engineers and
   `~/.claude/settings.json` had switched them all off.
 - The stop gate does not take the [run-exclusive](#one-heavy-run-at-a-time) lock yet
   ([#236](../../../issues/236)). A wait for it would count against `repo.gate_timeout` and come back as a
-  failing gate, sending the seat back for a failure that is not real.
+  failing gate, sending the seat back for a failure that is not real. The same holds for a gate command
+  that takes the lock itself, as this repository's `test/e2e.sh` does
+  ([#309](../../../issues/309)): while another heavy run holds the lock, such a gate waits inside its
+  time limit.
 
 ## One heavy run at a time
 
@@ -64,8 +67,10 @@ command at a time across every seat of every team on the host, and the owner's s
 
 ```
 ./fabrikito run-exclusive -- make check
-./fabrikito run-exclusive -- env -u TMUX TEST_VOLUME=/Volumes/YourDrive test/e2e.sh
 ```
+
+This repository's own `test/e2e.sh` needs no `run-exclusive` in front: it takes the lock itself
+([Testing](testing.md#one-run-at-a-time)). With one in front, it runs at once as a nested run.
 
 - **It waits, and never fails for a busy lock.** It prints who holds the lock (role, team file, pid,
   folder), since when and the command, then a reminder every 5 minutes, and "got the lock" when its

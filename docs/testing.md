@@ -27,11 +27,29 @@ exist. A throwaway team's worktrees on the volume are not removed by `down`; rem
 
 ## The end-to-end test
 
-`TEST_VOLUME=/Volumes/YourDrive test/e2e.sh` runs the launcher against a throwaway repo with a stand-in
-`claude` on a private tmux server. From a seat, or with other teams on the machine, run it through
-`./fabrikito run-exclusive -- env -u TMUX TEST_VOLUME=/Volumes/YourDrive test/e2e.sh`, so that only one
-heavy run loads the machine at a time ([One heavy run at a time](gate.md#one-heavy-run-at-a-time)).
-The run uses a lock of its own for its run-exclusive cases, never the real one.
+`env -u TMUX TEST_VOLUME=/Volumes/YourDrive test/e2e.sh` runs the launcher against a throwaway repo with a
+stand-in `claude` on a private tmux server. That is the one command, for a seat and for anyone else.
+
+### One run at a time
+
+The run takes the host's run lock itself ([#309](../../../issues/309)): after its first checks it starts
+itself again under `fabrikito run-exclusive`, so only one heavy run loads the machine at a time
+([One heavy run at a time](gate.md#one-heavy-run-at-a-time)), whoever starts it and without anyone having
+to remember the lock. While another run holds the lock it waits, and prints who holds it and since when;
+Ctrl-C or TERM while it waits ends it before anything is made. With no other run on the machine the lock
+is free and the run starts at once. Started under `run-exclusive` already, it does not wait for itself.
+Inside, the run uses a lock of its own for its run-exclusive cases, never the real one.
+
+`E2E_NO_LOCK=1` runs it without the lock:
+
+```
+E2E_NO_LOCK=1 env -u TMUX TEST_VOLUME=/Volumes/YourDrive test/e2e.sh
+```
+
+That is right only where no other heavy run can be on the machine and the lock is in the way: a CI
+runner or a container that runs one job and has no home folder the lock's file can be made in. On a
+machine you share with a team, or with your own second terminal, leave it out: a free lock costs nothing.
+The stand-in runs inside `test/e2e-exit-trap.sh` set it too, as they take a few seconds and start nothing.
 
 ### Its temp folder
 

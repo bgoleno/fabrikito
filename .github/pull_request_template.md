@@ -14,7 +14,8 @@ gh pr view <pr> --json closingIssuesReferences -->
 bash -n fabrikito factory.sh test/e2e.sh test/e2e-exit-trap.sh lib/stop_gate.sh lib/session_start.sh lib/log_message.sh
 ruby -c lib/team_config.rb
 env -u TMUX TEST_VOLUME=/Volumes/<a mounted, writable volume> test/e2e.sh   (all assertions must pass)
-Run the e2e with TMUX unset, as CLAUDE.md requires, so it never touches the tmux server you work in. -->
+Run the e2e with TMUX unset, as CLAUDE.md requires, so it never touches the tmux server you work in.
+It takes the host's run lock itself and waits for its turn: no run-exclusive in front is needed. -->
 
 ## Not verified
 <!-- What you did not check or could not check, and why. Write "Nothing" only if that is true. -->

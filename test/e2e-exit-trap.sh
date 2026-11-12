@@ -74,7 +74,9 @@ xt_socket() { ruby -rsocket -e 'UNIXServer.new(ARGV[0])' "$1"; }
 xt_mark() { if [ -d "$T/bin" ] && [ -S "$xt_sock" ]; then echo "$1: kept"; else echo "$1: gone"; fi >> "$xt_x/marks"; }
 EOF
     printf '%s\n' "$fixture"; } > "$X/src/test/e2e/$first.sh"
-  out=$(env -u LIVE_D -u TD PATH="$xt_path" TEST_VOLUME="$X/vol" ${1+"$@"} "$BASH" "$X/src/test/e2e.sh" 2>&1); rc=$?
+  # E2E_NO_LOCK=1 (#309): the file under test would start itself again under the tree's fabrikito, which
+  # is a stand-in here and runs nothing. A stand-in run of a few seconds needs no place in the host's queue.
+  out=$(env -u LIVE_D -u TD PATH="$xt_path" TEST_VOLUME="$X/vol" E2E_NO_LOCK=1 ${1+"$@"} "$BASH" "$X/src/test/e2e.sh" 2>&1); rc=$?
   t=$(cat "$X/t" 2>/dev/null); top=$(cat "$X/top" 2>/dev/null); own=$t/tmux/tmux-$uid/default
   marks=$(cat "$X/marks" 2>/dev/null)
 }

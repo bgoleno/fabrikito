@@ -22,6 +22,27 @@ e2e_real=$(cd "$e2e_tmp" && pwd -P) || { echo "TMPDIR ($e2e_tmp) is not a folder
 for e2e_p in "$e2e_tmp" "$e2e_real"; do
   [ ${#e2e_p} -le $e2e_max ] || { echo "TMPDIR is too long: $e2e_p has ${#e2e_p} characters and this test takes at most $e2e_max, because tmux's socket goes $e2e_sock below it (see docs/testing.md)" >&2; exit 64; }
 done
+# One heavy run at a time on the host (#309): the run starts itself again under fabrikito run-exclusive,
+# whoever started it and from wherever, so two runs never overlap and nobody has to remember the lock. It
+# waits its turn there, and run-exclusive says who holds the lock. Started under run-exclusive already,
+# the call below is a nested one, which runs at once instead of waiting for itself.
+# The step comes after the refusals above (a run that would be refused must not wait in the queue first)
+# and before anything is made or cleared: the clearing below removes the lock's variables and gives the
+# run a lock of its own, which is what keeps its run-exclusive cases off the real lock (#214). Arguments
+# and the environment go to the second start as they are, so a run of part of the cases is covered too.
+# The second start knows itself by E2E_LOCK_PID, the pid of the first start. run-exclusive keeps that pid
+# (the first start execs it), so it is this shell's parent, or this shell itself when the call was nested
+# (run-exclusive then execs the command). The variable alone is never trusted: left in an environment by
+# anything else it names some other process, and the run takes the lock again. It is cleared below with
+# the launcher's variables, so nothing the run starts has it.
+# E2E_NO_LOCK=1 skips the step (docs/testing.md says when that is right). The stand-in runs inside
+# test/e2e-exit-trap.sh set it: their tree's fabrikito is a stand-in, and they take a few seconds.
+if [ -z "${E2E_NO_LOCK:-}" ]; then
+  case ${E2E_LOCK_PID:-} in
+    "$PPID" | "$$") ;;
+    *) E2E_LOCK_PID=$$ exec "$S" run-exclusive -- "$BASH" "$SRC/test/e2e.sh" ${1+"$@"} ;;
+  esac
+fi
 T_TOP=$(mktemp -d "$e2e_tmp/team-e2e.XXXX") || { echo "cannot make a scratch folder under $e2e_tmp" >&2; exit 2; }
 mkdir "$T_TOP/r" && ln -s r "$T_TOP/l" && T=$(cd "$T_TOP/l" && pwd) || { echo "cannot make the scratch link under $T_TOP" >&2; exit 2; }
 T_TOP=${T%/l}; mkdir -p $T/bin $T/tmux $T/local
@@ -33,8 +54,9 @@ ROOT="Projects/_teamtest-$$"; VOL=${TEST_VOLUME:-}
 # messaging socket (#75). This is the one list of what is cleared; add any new launcher variable here.
 # It runs before anything below exports a TEAM_* variable (TEAM_VIEW=0), or it would clear it.
 # FACTORY_*: run under run-exclusive (#214), the run inherits its lock's variables; nothing in it may
-# take or skip the real lock, so the run has a lock of its own in $T.
-for v in $(compgen -e); do case $v in DISABLE_AUTOUPDATER|TEAM_*|CLAUDE*|TMUX*|FACTORY_*) unset "$v" ;; esac; done
+# take or skip the real lock, so the run has a lock of its own in $T. E2E_LOCK_PID and E2E_NO_LOCK
+# (#309, above): a test/e2e.sh that a case starts must not skip its lock step because this run did.
+for v in $(compgen -e); do case $v in DISABLE_AUTOUPDATER|TEAM_*|CLAUDE*|TMUX*|FACTORY_*|E2E_LOCK_PID|E2E_NO_LOCK) unset "$v" ;; esac; done
 export TMUX_TMPDIR=$T/tmux TEAM_STATE_DIR=$T/state FACTORY_RUN_LOCK=$T/rx-lock/run-exclusive.lock
 # No run may drive iTerm (#93). A stand-in osascript first on PATH records every call and does
 # nothing, and the run fails at the end if it was called: `up` opens a real iTerm window unless told

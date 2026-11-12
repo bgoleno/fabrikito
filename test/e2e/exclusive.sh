@@ -295,6 +295,101 @@ out=$(rx_bound $S run-exclusive -- sh -c 'echo ran' 2>&1); rc=$?
 [ $rc = 0 ] && [ "$out" = ran ] && [ ! -e $qd/00000000000000000001-1 ] && [ ! -e $qd/.tmp-99 ] && [ ! -L $qd/00000000000000000002-2 ] && [ -d $qd/00000000000000000003-3 ] && [ "$(cat $rx/ord.marks | wc -l)" = "$before" ] \
   && ok "run-exclusive: a stale ticket is not waited for and is removed, and a link or folder in the queue is never followed" || { bad "run-exclusive: stale tickets (rc=$rc)"; echo "$out" | tail -2; ls -A $qd; }
 rmdir $qd/00000000000000000003-3; rmdir $qd 2>/dev/null
+
+# test/e2e.sh takes the lock itself (#309): it starts itself again under run-exclusive, whoever started it.
+# The file runs as it is, from a scratch tree where every area is a stub and the first one is a fixture (as
+# in test/e2e-exit-trap.sh), with the real fabrikito behind a link: a run takes a few seconds, starts no
+# tmux server, and takes this run's lock (FACTORY_RUN_LOCK), never the real one. The fixture writes down
+# what it finds inside the run: its arguments, what is left of the lock step's variables, whether the
+# caller's lock is held and by which command, and whether the run's own lock works. With $el/wait there,
+# it then waits for $el/ego. Ordering is checked from the marks, as above.
+echo "--- test/e2e.sh takes the run lock itself (#309)"
+el=$rx/el; mkdir -p $el/src/test/e2e $el/vol
+cp $SRC/test/e2e.sh $el/src/test/e2e.sh; ln -s $SRC/fabrikito $el/src/fabrikito
+echo 'int main(void) { return 0; }' > $el/src/test/e2e/fake-claude.c
+for el_a in lib $AREAS; do echo "e2e_end=$el_a" > $el/src/test/e2e/$el_a.sh; done
+{ echo "el_d=$el; el_lock=$FACTORY_RUN_LOCK"; cat <<'EOF'
+echo "$T_TOP" > $el_d/top; echo "E start" >> $el_d/marks
+{ echo "args=$#:${2-}"; echo "var=${EL_VAR-unset}"
+  echo "left=${E2E_LOCK_PID-unset},${E2E_NO_LOCK-unset},${FACTORY_RUN_EXCLUSIVE_HELD-unset}"
+  [ "$FACTORY_RUN_LOCK" = "$T/rx-lock/run-exclusive.lock" ] && echo "own=yes" || echo "own=no"
+  echo "outer=$(ruby -e 'f = (File.open(ARGV[0]) rescue exit); puts f.flock(File::LOCK_EX | File::LOCK_NB) ? "free" : "held"' "$el_lock")"
+  echo "holder=$(ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0]))["cmd"]' "$el_lock.holder" 2>/dev/null)"
+  echo "inner=$($S run-exclusive -- sh -c 'echo ran' 2>&1)$([ -f "$T/rx-lock/run-exclusive.lock" ] && echo ", on its own lock")"
+} > $el_d/seen
+if [ -e $el_d/wait ]; then until [ -e $el_d/ego ]; do sleep 0.1; done; fi
+echo "E end" >> $el_d/marks
+EOF
+  echo "e2e_end=${AREAS%% *}"; } > $el/src/test/e2e/${AREAS%% *}.sh
+el_cmd="env TEST_VOLUME=$el/vol $BASH $el/src/test/e2e.sh"
+el_reset() { rm -f $el/marks $el/seen $el/top $el/out $el/wait $el/ego $el/hgo; }
+el_result() { grep -qE '^RESULT pass=[1-9][0-9]* fail=0$'; }
+el_show() { echo "  marks: $(tr '\n' ' ' < $el/marks 2>/dev/null)"; sed 's/^/  seen: /' $el/seen 2>/dev/null; }
+
+# Outside the lock, and the lock is free: the run takes it, and holds it while the cases run.
+el_reset
+out=$(EL_VAR=kept rx_bound $el_cmd one "two words" 2>&1); rc=$?
+[ $rc = 0 ] && echo "$out" | el_result && grep -qx 'outer=held' $el/seen && grep -q "^holder=.* $el/src/test/e2e.sh one two words\$" $el/seen \
+  && ok "test/e2e.sh started outside the lock takes it: the lock is held while the cases run, by this run" || { bad "test/e2e.sh outside the lock (rc=$rc)"; echo "$out" | tail -3; el_show; }
+grep -qx 'left=unset,unset,unset' $el/seen && grep -qx 'own=yes' $el/seen && grep -qx 'inner=ran, on its own lock' $el/seen \
+  && ok "test/e2e.sh under the lock it took: none of the lock's variables is left, and the run's own lock works" || { bad "test/e2e.sh: the run's own lock and what is left of the variables"; el_show; }
+grep -qx 'args=2:two words' $el/seen && grep -qx 'var=kept' $el/seen \
+  && ok "test/e2e.sh: arguments and the environment reach the run it starts under the lock" || { bad "test/e2e.sh: arguments and environment after the lock step"; el_show; }
+# Outside the lock while another run holds it: it waits, says so, and runs after that run.
+el_reset
+$S run-exclusive -- $rx/hold H $el/marks $el/hgo 2>/dev/null &
+h=$!
+rx_until "grep -q 'H start' $el/marks 2>/dev/null"
+$el_cmd > $el/out 2>&1 &
+e=$!
+rx_until "grep -q 'waiting for the lock' $el/out"; waiting=$?
+before=$(cat $el/marks 2>/dev/null)
+touch $el/hgo; rx_wait $h; hrc=$?; rx_wait $e; erc=$?
+[ $waiting = 0 ] && [ "$before" = "H start" ] && [ $hrc = 0 ] && [ $erc = 0 ] && el_result < $el/out && [ "$(tr '\n' ' ' < $el/marks)" = "H start H end E start E end " ] \
+  && ok "test/e2e.sh started while another run holds the lock waits for it, says so, and runs after it" || { bad "test/e2e.sh while the lock is held (waiting=$waiting h=$hrc e=$erc)"; tail -3 $el/out; el_show; }
+# Under run-exclusive already (the command the docs gave until #309): it does not wait for itself.
+el_reset
+out=$(rx_bound $S run-exclusive -- $el_cmd 2>&1); rc=$?
+[ $rc = 0 ] && echo "$out" | el_result && ! echo "$out" | grep -q 'waiting for the lock' && grep -qx 'outer=held' $el/seen && grep -q "^holder=env TEST_VOLUME=$el/vol " $el/seen \
+  && ok "test/e2e.sh under run-exclusive runs at once: it does not wait for itself, and the lock stays with the run that took it" || { bad "test/e2e.sh under run-exclusive (rc=$rc)"; echo "$out" | tail -3; el_show; }
+# The explicit option: E2E_NO_LOCK=1 runs without the lock, here while another run holds it.
+el_reset
+$S run-exclusive -- $rx/hold H $el/marks $el/hgo 2>/dev/null &
+h=$!
+rx_until "grep -q 'H start' $el/marks 2>/dev/null"
+out=$(E2E_NO_LOCK=1 rx_bound $el_cmd 2>&1); rc=$?
+during=$(tr '\n' ' ' < $el/marks)
+touch $el/hgo; rx_wait $h; hrc=$?
+[ $rc = 0 ] && echo "$out" | el_result && [ "$during" = "H start E start E end " ] && [ $hrc = 0 ] && grep -q "^holder=$rx/hold H " $el/seen && grep -qx 'left=unset,unset,unset' $el/seen \
+  && ok "test/e2e.sh with E2E_NO_LOCK=1 runs without the lock, while another run holds it, and the option is not left for what it starts" || { bad "test/e2e.sh with E2E_NO_LOCK=1 (rc=$rc h=$hrc during: $during)"; echo "$out" | tail -3; el_show; }
+# E2E_LOCK_PID alone is not trusted: one that names another process, here the very run that holds the
+# lock, does not skip the lock. Then TERM to the waiting run ends it, and nothing of the run starts.
+el_reset
+$S run-exclusive -- $rx/hold H $el/marks $el/hgo 2>/dev/null &
+h=$!
+rx_until "grep -q 'H start' $el/marks 2>/dev/null"
+E2E_LOCK_PID=$h $el_cmd > $el/out 2>&1 &
+e=$!
+rx_until "grep -q 'waiting for the lock' $el/out"; waiting=$?
+[ $waiting = 0 ] && [ "$(cat $el/marks)" = "H start" ] \
+  && ok "test/e2e.sh does not trust E2E_LOCK_PID alone: one that names another process, even the lock's holder, still waits for the lock" || { bad "test/e2e.sh skipped the lock on an E2E_LOCK_PID that is not its own (waiting=$waiting)"; tail -3 $el/out; el_show; }
+kill -TERM $e; rx_wait $e; erc=$?
+touch $el/hgo; rx_wait $h; hrc=$?
+[ $erc = 143 ] && [ $hrc = 0 ] && [ "$(tr '\n' ' ' < $el/marks)" = "H start H end " ] && [ ! -e $el/top ] && ! grep -q -e RESULT -e ABORTED $el/out \
+  && ok "TERM to test/e2e.sh while it waits for the lock ends the wait (143), and nothing of the run starts" || { bad "TERM to test/e2e.sh while it waits (e=$erc h=$hrc)"; tail -3 $el/out; el_show; }
+# TERM during the run goes to the pid the caller started, which is run-exclusive now: it must still reach
+# the run's exit trap (#306), and the lock must come free.
+el_reset; touch $el/wait
+$el_cmd > $el/out 2>&1 &
+e=$!
+rx_until "[ -s $el/seen ]"; started=$?
+kill -TERM $e; rx_wait $e; erc=$?
+el_top=$(cat $el/top 2>/dev/null)
+after=$(rx_bound $S run-exclusive -- sh -c 'echo ran' 2>&1)
+[ $started = 0 ] && [ $erc = 143 ] && grep -q '^ABORTED before the end' $el/out && [ "$(cat $el/marks)" = "E start" ] && [ -n "$el_top" ] && [ ! -e "$el_top" ] && [ "$after" = ran ] \
+  && ok "TERM to test/e2e.sh during the run reaches its exit trap through run-exclusive: the scratch folder is removed, exit 143, and the lock is free" || { bad "TERM to test/e2e.sh during the run (started=$started e=$erc after=$after)"; tail -3 $el/out; el_show; }
+# Only a failure leaves that run's scratch folder: removed by the path it wrote down, if shaped like one.
+case $el_top in "$e2e_tmp"/team-e2e.????) if [ -d "$el_top" ]; then rm -rf "$el_top"; fi ;; esac
 # Only a guard for a machine that has no real folder yet: where one exists, as after this is merged and
 # used, this cannot fail, since it cannot tell a folder the e2e made from one that was there.
 { [ $real_was = 1 ] || [ ! -e "$real" ]; } && ok "the e2e never made the real lock's folder ($real)" || bad "the e2e made the real lock's folder $real"
