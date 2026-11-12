@@ -1,8 +1,8 @@
 # Release notes: 0.3.0
 
-For someone who runs a team on 0.2.0. This page says what changed since the tag `v0.2.0`, what to do
-when you upgrade, and what the release still does not do. It describes `main`: until the tag `v0.3.0`
-exists, the latest release is still 0.2.0 (see [Project facts](facts.md#status)).
+For someone who runs a team on 0.2.0. This page says what changed between the tags `v0.2.0` and
+`v0.3.0`, what to do when you upgrade, and what the release still does not do. 0.3.0 is the latest
+release (see [Project facts](facts.md#status)).
 
 ## When you upgrade
 
@@ -113,10 +113,8 @@ still there as a shim that prints a notice.
 
 - An interrupt while git is still adding a new worktree removes that worktree and starts no seat
   ([New worktrees](team-file.md#new-worktrees)).
-- A team whose state folder has a non-ASCII character in its path loads in any locale, `LC_ALL=C`
-  and no locale at all (cron, launchd, `env -i`) included; before, outside a UTF-8 locale, every
-  command that loads the team file stopped with an error once `up` had filled the state folder
-  ([#360](../../../issues/360)).
+- A state folder with a non-ASCII character in its path no longer stops every command under
+  `LC_ALL=C` or with no locale set ([#360](../../../issues/360)).
 
 **The shared rules and the skills**
 
