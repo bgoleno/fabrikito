@@ -8,9 +8,10 @@ pull request until `sec` clears it, and three rules for a pull request in review
 
 Every change starts as an issue. The shared prompt (`roles/common.md`) makes this a hard rule for every
 seat: no change starts without an issue, and the engineering manager files one when it is missing. A
-pull request that completes its issue says `Closes #<n>`, and one that does not says `Refs #<n>` (see
-`.github/pull_request_template.md`), so the issue closes exactly when its change lands and the board
-stays honest.
+pull request names at least one issue. It says `Closes #<n>` for each issue it completes (one pull
+request may close several issues, one `Closes #<n>` each) and `Refs #<n>` for an issue it does not
+complete (see `.github/pull_request_template.md`), so each issue closes exactly when its change lands
+and the board stays honest.
 
 GitHub closes an issue at the merge when a closing keyword (`close`, `fix`, `resolve` and their forms)
 comes right before its reference, whatever the words around it: "does not close #12" closes #12
