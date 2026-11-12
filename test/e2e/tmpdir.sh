@@ -368,28 +368,28 @@ own_sweep() { local s; for s in ow-oa ow-ob; do
   if tmux has-session -t "=$s" 2>/dev/null; then bad "$1 left $s running"; tmux kill-session -t "=$s" 2>/dev/null; sleep 1; fi; done; }
 own_sweep "the two-team sections"
 
-echo "--- a stored state folder with a non-ASCII character in its path reads back whole in any locale"
+echo "--- a state folder under a folder with a non-ASCII character: the team reaches its own seats in any locale"
 # The launcher reads what up stored in a session back from tmux, and a tmux client outside a UTF-8 locale
 # prints an underscore for each non-ASCII character unless it is asked for UTF-8. The team's own seat
-# must not read as another team's then: under LC_ALL=C and with no locale at all (cron, launchd,
-# env -i), status has no notice for it and down stops it.
-# The session is made by hand, with the two values up would store, and the state folder stays empty:
-# once up has filled a state folder with such a path, the team file's parser stops outside a UTF-8
-# locale before any command gets as far as the session (lib/team_config.rb, so on main as well), and
-# a seat that up started cannot show what this case is about.
-own_E=$'\xc3\xa9'; U=$T/own/u/team.yaml; own_team $U tou Seat; mkdir -p "$T/own-na/s$own_E"
-own_na=$(cd "$T/own-na/s$own_E" && pwd -P)
-own_na_seat() { tmux new-session -d -s ow-oa -e "TEAM_STATE_REAL=$own_na" -e TEAM_GITHUB=local/origin.git "sleep 600"; }
-own_na_c() { env LC_ALL=C TEAM_STATE_DIR="$T/own-na/s$own_E" "$@"; }
-own_na_none() { env -i PATH="$PATH" HOME="$HOME" TMUX_TMPDIR="$TMUX_TMPDIR" TEAM_STATE_DIR="$T/own-na/s$own_E" "$@"; }
-own_na_seat
+# must not read as another team's then: a say under LC_ALL=C and one with no locale at all (cron,
+# launchd, env -i) are delivered, status has no notice for the seat, and down stops it.
+# The layout is the one of a home folder with an accent: the state folder has an ASCII name, lies under
+# a folder with a non-ASCII character, and nothing with a non-ASCII name lies beside it. (A state folder
+# whose own name, or a neighbour's, has such a character stops the team file's parser outside a UTF-8
+# locale before any command reaches a session, with this check or without: lib/team_config.rb.)
+own_E=$'\xc3\xa9'; U=$T/own/u/team.yaml; own_team $U tou Seat; own_na="$T/own-h$own_E/state"
+own_na_c() { env LC_ALL=C TEAM_STATE_DIR="$own_na" "$@"; }
+own_na_none() { env -i PATH="$PATH" HOME="$HOME" TMUX_TMPDIR="$TMUX_TMPDIR" TEAM_STATE_DIR="$own_na" "$@"; }
+TEAM_STATE_DIR="$own_na" $S -c $U up --no-view oa >/dev/null 2>&1; sleep 1
+tmux has-session -t '=ow-oa' 2>/dev/null || bad "test setup: the seat with a state folder under a non-ASCII folder did not start"
+own_na_c env TEAM_ROLE=ob $S -c $U say oa "c locale OWN-NA-1" > $T/own-na.out 2>&1; rc1=$?
+own_na_none env TEAM_ROLE=ob $S -c $U say oa "no locale OWN-NA-2" >> $T/own-na.out 2>&1; rc2=$?; sleep 1
+[ $rc1 = 0 ] && [ $rc2 = 0 ] && keytext $T/keys-oa.log | grep -q "OWN-NA-1" && keytext $T/keys-oa.log | grep -q "OWN-NA-2" \
+  && ok "say under LC_ALL=C and with no locale reaches the team's own seat when its state folder lies under a folder with a non-ASCII character" || { bad "say outside a UTF-8 locale to a seat whose state folder lies under a non-ASCII folder (rc=$rc1,$rc2)"; cut -c1-500 $T/own-na.out | head -4; }
 out1=$(own_na_c $S -c $U status 2>&1); out2=$(own_na_none $S -c $U status 2>&1)
 echo "$out1" | grep -q "^oa .* ow-oa  *up " && ! echo "$out1" | grep -q "^NOTICE" && echo "$out2" | grep -q "^oa .* ow-oa  *up " && ! echo "$out2" | grep -q "^NOTICE" \
-  && ok "status under LC_ALL=C and with no locale has no notice for the team's own session when the stored state folder has a non-ASCII character" || { bad "status outside a UTF-8 locale and a stored non-ASCII state folder"; { echo "$out1"; echo "$out2"; } | grep -v "^ob \|^ROLE" | cut -c1-400 | tail -4; }
-own_na_c $S -c $U down --yes oa >/dev/null 2>&1
-! tmux has-session -t '=ow-oa' 2>/dev/null && ok "down --yes under LC_ALL=C stops the team's own session when the stored state folder has a non-ASCII character" || { bad "down under LC_ALL=C left the session with a stored non-ASCII state folder"; tmux kill-session -t '=ow-oa' 2>/dev/null; sleep 1; }
-own_na_seat
-own_na_none $S -c $U down --yes oa >/dev/null 2>&1
-! tmux has-session -t '=ow-oa' 2>/dev/null && ok "down --yes with no locale stops the team's own session when the stored state folder has a non-ASCII character" || bad "down with no locale left the session with a stored non-ASCII state folder"
+  && ok "status under LC_ALL=C and with no locale has no notice for the team's own seat when its state folder lies under a folder with a non-ASCII character" || { bad "status outside a UTF-8 locale for a seat whose state folder lies under a non-ASCII folder"; { echo "$out1"; echo "$out2"; } | grep -v "^ob \|^ROLE" | cut -c1-400 | tail -4; }
+own_na_c $S -c $U down --yes >/dev/null 2>&1
+! tmux has-session -t '=ow-oa' 2>/dev/null && ok "down --yes under LC_ALL=C stops the team's own seat when its state folder lies under a folder with a non-ASCII character" || bad "down under LC_ALL=C left the seat whose state folder lies under a non-ASCII folder"
 own_sweep "the section with a non-ASCII state folder"
 e2e_end=tmpdir # the last line: test/e2e.sh checks that the file ran to here
