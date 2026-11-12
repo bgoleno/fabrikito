@@ -374,6 +374,44 @@ rx_until "grep -q 'old start' $m 2>/dev/null"
 out=$(FACTORY_RUN_EXCLUSIVE_HELD="$legacy:$oh" FAKE_HOME=$fh rx_bound env -u FABRIKITO_RUN_LOCK -u FACTORY_RUN_LOCK -u FABRIKITO_RUN_EXCLUSIVE_HELD ruby $rx/shim.rb $SRC/lib/run_exclusive.rb -- echo inner 2>&1); rc=$?
 touch $rx/go; rx_wait $oh
 [ $rc = 0 ] && [ "$out" = inner ] && ok "run-exclusive: a run inside a run of the old version, which holds the old lock, starts without waiting for its parent" || { bad "run-exclusive: nested in an old-name run (rc=$rc)"; echo "$out" | tail -2; }
+# The old lock has a queue of its own (#283), and a run of this version takes a place in it once it holds
+# the new lock, so it passes no run of an older checkout and none passes it (tl on #273). An older
+# checkout's run is stood in for by this version's code with the old file named as its lock: the same
+# code on the same file, queue folder and holder record.
+rx_old() { env -u FACTORY_RUN_LOCK -u FABRIKITO_RUN_EXCLUSIVE_HELD -u FACTORY_RUN_EXCLUSIVE_HELD FABRIKITO_RUN_LOCK="$legacy" ruby $SRC/lib/run_exclusive.rb -- "$@"; }
+rx_tickets() { ls "$1.queue" 2>/dev/null | grep -c -E '^[0-9]{20}-[0-9]+$'; }
+# An older run that was already waiting when this version's run came goes first.
+m=$rx/leg4.marks; rm -f $rx/go $m
+rx_old $rx/hold H $m $rx/go 2>/dev/null &
+ph=$!
+rx_until "grep -q 'H start' $m 2>/dev/null"
+rx_old $rx/hold O $m $rx/go 2>$rx/leg4-o.err &
+po=$!
+rx_until "grep -q 'waiting for the lock' $rx/leg4-o.err"
+rx_def $rx/hold N $m $rx/go 2>$rx/leg4-n.err &
+pn=$!
+rx_until "grep -q 'old-name lock' $rx/leg4-n.err"; waiting=$?
+tickets=$(rx_tickets "$legacy")
+touch $rx/go; rx_wait $ph; rx_wait $po; ro=$?; rx_wait $pn; rn=$?
+[ $waiting = 0 ] && [ "$tickets" = 2 ] && grep -qF "waiting for the old-name lock ($legacy)" $rx/leg4-n.err && grep -q "old-name lock .*; 1 earlier run is waiting ahead of this one" $rx/leg4-n.err && [ $ro = 0 ] && [ $rn = 0 ] \
+  && [ "$(tr '\n' ' ' < $m)" = "H start H end O start O end N start N end " ] \
+  && ok "run-exclusive: a run of this version takes a place in the old lock's queue, behind an older run that was already waiting" || { bad "run-exclusive: place in the old queue (waiting=$waiting tickets=$tickets rc $ro $rn marks: $(tr '\n' ' ' < $m))"; cat $rx/leg4-n.err; }
+[ ! -e "$legacy.queue" ] && [ ! -e "$newlock.queue" ] && [ ! -e "$legacy.holder" ] \
+  && ok "run-exclusive: both queues are empty and removed once those runs have ended" || { bad "run-exclusive: queues left behind"; ls -A "$legacy.queue" "$newlock.queue" 2>&1; }
+# An older run that comes after this version's run has its place waits behind it.
+m=$rx/leg5.marks; rm -f $rx/go $m
+rx_old $rx/hold H $m $rx/go 2>/dev/null &
+ph=$!
+rx_until "grep -q 'H start' $m 2>/dev/null"
+rx_def $rx/hold N $m $rx/go 2>$rx/leg5-n.err &
+pn=$!
+rx_until "grep -q 'old-name lock' $rx/leg5-n.err"
+rx_old $rx/hold O $m $rx/go 2>$rx/leg5-o.err &
+po=$!
+rx_until "grep -q 'waiting for the lock' $rx/leg5-o.err"; waiting=$?
+touch $rx/go; rx_wait $ph; rx_wait $pn; rn=$?; rx_wait $po; ro=$?
+[ $waiting = 0 ] && grep -q "; 1 earlier run is waiting ahead of this one" $rx/leg5-o.err && [ $ro = 0 ] && [ $rn = 0 ] && [ "$(tr '\n' ' ' < $m)" = "H start H end N start N end O start O end " ] \
+  && ok "run-exclusive: an older run that comes after this version's run has its place in the old queue waits behind it" || { bad "run-exclusive: an older run behind this version's place (waiting=$waiting rc $rn $ro marks: $(tr '\n' ' ' < $m))"; cat $rx/leg5-o.err; }
 # Only a guard for a machine that has no real folder yet: where one exists, as after this is merged and
 # used, this cannot fail, since it cannot tell a folder the e2e made from one that was there.
 { [ $real_was = 1 ] || [ ! -e "$real" ]; } && ok "the e2e never made the real lock's folder ($real)" || bad "the e2e made the real lock's folder $real"

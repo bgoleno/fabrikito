@@ -19,8 +19,9 @@
 # FACTORY_RUN_LOCK and FACTORY_RUN_EXCLUSIVE_HELD. For one release the old variables are still read
 # (the new one wins when both are set), and a run on the default lock also holds the old default lock
 # and writes the old holder record and variable, so that a checkout that still has the old names
-# excludes this one, and the other way round, and nests with it. Remove the fallback, and the old
-# folder with it, after that release (docs/gate.md).
+# excludes this one, and the other way round, and nests with it. It takes the old lock through the old
+# lock's own queue, after the new one, so no run of either version is passed there. Remove the
+# fallback, and the old folder with it, after that release (docs/gate.md).
 #
 # Waiting runs get the lock in the order they arrived (#283). Each takes a ticket, a file named by its
 # arrival time in <lock>.queue/, flocked for as long as the run waits; only the earliest live ticket
@@ -271,91 +272,84 @@ end
   end
 end
 
-started = Time.now
-waited = false
-reminded = started
-f = nil
-qdir = "#{lock}.queue"
-tf, tpath = take_ticket(qdir)
-tname = File.basename(tpath)
-# However this run ends (a signal, a refusal, the end of its command) its ticket goes, and the folder
-# with it when it is the last (a leftover folder would change nothing but the listing).
-at_exit do
-  (File.unlink(tpath) rescue nil)
-  (tf.close rescue nil)
-  (Dir.rmdir(qdir) rescue nil)
-end
-loop do
-  # Show the line this run is alive (its flock does not tell a stopped run from a running one). If the
-  # ticket is gone, the others took this run for stopped (it was, or the machine stalled it for
-  # TICKET_STALE seconds): it takes a new place at the end. Mutual exclusion is the main lock, not this.
-  begin
-    File.utime(nil, nil, tpath)
-  rescue SystemCallError
+# Waits for one lock in the order of its queue (#283), and returns the open file with the lock on it and
+# whether this run had to wait. old_name: the lock is the old default lock (#273), and the messages say so.
+def wait_for(lock, holder, started, old_name)
+  what = old_name ? "the old-name lock" : "the lock"
+  waited = false
+  reminded = Time.now
+  f = nil
+  qdir = "#{lock}.queue"
+  tf, tpath = take_ticket(qdir)
+  tname = File.basename(tpath)
+  # However this run ends (a signal, a refusal, the end of its command) its ticket goes, and the folder
+  # with it when it is the last (a leftover folder would change nothing but the listing).
+  at_exit do
+    (File.unlink(tpath) rescue nil)
     (tf.close rescue nil)
-    tf, tpath = take_ticket(qdir)
-    tname = File.basename(tpath)
+    (Dir.rmdir(qdir) rescue nil)
   end
-  n = ahead(qdir, tname)
-  # Only the earliest waiting run tries the lock; the others wait their turn, however free it is.
-  f = n == 0 ? open_lock(lock) : nil
-  if f && f.flock(File::LOCK_EX | File::LOCK_NB)
-    # The lock is on the open file, not the name. A waiter can open the file, have its name removed
-    # and made again by another run, then lock the old file once its holder ends: it would hold a lock
-    # nobody else takes, and overlap the run on the new file. So the name must still lead to the file
-    # locked; if not, take the lock again, on what the name leads to now (tl on #214).
-    cur = (File.lstat(lock) rescue nil)
-    fs = f.stat
-    break if cur && cur.file? && !cur.symlink? && cur.dev == fs.dev && cur.ino == fs.ino
-    f.close
-    next
-  end
-  f.close if f
-  now = Time.now
-  line = n.zero? ? "" : "; #{n} earlier run#{n == 1 ? " is" : "s are"} waiting ahead of this one"
-  if !waited
-    say "waiting for the lock (#{lock}), held by #{who(record(holder))}#{line}"
-    waited = true
-  elsif now - reminded >= REMIND
-    say "still waiting, since #{started.strftime("%H:%M:%S")} (#{(now - started).round}s), for #{who(record(holder))}#{line}"
-    reminded = now
-  end
-  sleep LOCK_POLL
-end
-
-# This run's turn is over: its ticket goes, and the next in line may try the lock.
-(File.unlink(tpath) rescue nil)
-
-# For one release (#273) a run on the default lock also holds the old default lock, taken after the
-# new one, so that a checkout with the old names, which knows only the old file, waits for this run and
-# this run waits for it. Waiting here keeps the new lock: no other run of this version gets past it.
-# Not a queue: the old file has none (the old version's own tickets are beside it and do not matter).
-legacy_f = nil
-if legacy
-  lock_dir!(File.dirname(legacy))
-  legacy_waited = false
-  legacy_reminded = Time.now
   loop do
-    lf = open_lock(legacy)
-    if lf.flock(File::LOCK_EX | File::LOCK_NB)
-      cur = (File.lstat(legacy) rescue nil)
-      fs = lf.stat
-      if cur && cur.file? && !cur.symlink? && cur.dev == fs.dev && cur.ino == fs.ino
-        legacy_f = lf
-        break
-      end
+    # Show the line this run is alive (its flock does not tell a stopped run from a running one). If the
+    # ticket is gone, the others took this run for stopped (it was, or the machine stalled it for
+    # TICKET_STALE seconds): it takes a new place at the end. Mutual exclusion is the main lock, not this.
+    begin
+      File.utime(nil, nil, tpath)
+    rescue SystemCallError
+      (tf.close rescue nil)
+      tf, tpath = take_ticket(qdir)
+      tname = File.basename(tpath)
     end
-    lf.close
+    n = ahead(qdir, tname)
+    # Only the earliest waiting run tries the lock; the others wait their turn, however free it is.
+    f = n == 0 ? open_lock(lock) : nil
+    if f && f.flock(File::LOCK_EX | File::LOCK_NB)
+      # The lock is on the open file, not the name. A waiter can open the file, have its name removed
+      # and made again by another run, then lock the old file once its holder ends: it would hold a lock
+      # nobody else takes, and overlap the run on the new file. So the name must still lead to the file
+      # locked; if not, take the lock again, on what the name leads to now (tl on #214).
+      cur = (File.lstat(lock) rescue nil)
+      fs = f.stat
+      break if cur && cur.file? && !cur.symlink? && cur.dev == fs.dev && cur.ino == fs.ino
+      f.close
+      next
+    end
+    f.close if f
     now = Time.now
-    if !legacy_waited
-      say "waiting for the old-name lock (#{legacy}), held by #{who(record(legacy_holder))}: a checkout from before the rename of this lock"
-      legacy_waited = true
-    elsif now - legacy_reminded >= REMIND
-      say "still waiting, since #{started.strftime("%H:%M:%S")} (#{(now - started).round}s), for #{who(record(legacy_holder))}"
-      legacy_reminded = now
+    line = n.zero? ? "" : "; #{n} earlier run#{n == 1 ? " is" : "s are"} waiting ahead of this one"
+    if !waited
+      say "waiting for #{what} (#{lock}), held by #{who(record(holder))}#{line}#{old_name ? " (the lock of a checkout from before the rename)" : ""}"
+      waited = true
+    elsif now - reminded >= REMIND
+      say "still waiting#{old_name ? " for #{what}" : ""}, since #{started.strftime("%H:%M:%S")} (#{(now - started).round}s), for #{who(record(holder))}#{line}"
+      reminded = now
     end
     sleep LOCK_POLL
   end
+  # This run's turn is over: its ticket goes, and the next in line may try the lock.
+  (File.unlink(tpath) rescue nil)
+  [f, waited]
+end
+
+started = Time.now
+f, waited = wait_for(lock, holder, started, false)
+
+# For one release (#273) a run on the default lock also holds the old default lock, taken after the
+# new one, so that a checkout with the old names, which knows only the old file, waits for this run and
+# this run waits for it. The old file has a queue of its own, the older checkout's (#283), and this run
+# takes a place in it like any run of that checkout: it passes none of them, and those that come later
+# wait behind it. Its place dates from now, not from its arrival: runs of an older checkout that came
+# in while it waited for the new lock go first.
+# The place in the old queue is taken only once the new lock is held, never before (tl on #273). A run
+# with a place in the old queue while it still waited for the new lock could stand there ahead of the
+# run that holds the new lock: each would wait for the other for good, with every run on the host
+# behind them. This way only one run of this version is ever in the old queue, and runs of an older
+# checkout never wait for the new lock, so there is no cycle. Waiting here keeps the new lock: no other
+# run of this version gets past it.
+legacy_f = nil
+if legacy
+  lock_dir!(File.dirname(legacy))
+  legacy_f, legacy_waited = wait_for(legacy, legacy_holder, started, true)
   waited ||= legacy_waited
 end
 

@@ -121,9 +121,11 @@ command at a time across every seat of every team on the host, and the owner's s
     `FACTORY_RUN_EXCLUSIVE_HELD` of a parent run is accepted as the new one is.
   - On the default lock, a run also takes the old file (`software-factory/run-exclusive.lock`) once it has
     the new one, and writes the old holder record and sets the old variable for its command. A run of an
-    older checkout, which knows only the old file, then waits for it, and it waits for that run. It
-    waits in the order of the new queue only: the old file has no queue of its own, so an older
-    checkout's run can pass one of this version's waiting runs. The wait says it is for the old-name lock.
+    older checkout, which knows only the old file, then waits for it, and it waits for that run. The old
+    file has the older checkout's queue beside it, and the run takes a place in it as a run of that
+    checkout does: nobody is passed in the old queue. Its place there dates from the moment it got the
+    new lock, not from its arrival, so runs of an older checkout that came in meanwhile go first. While
+    it waits there, its messages name the old-name lock and who holds it.
   - A lock named by a variable (old or new) is one file for both versions and needs nothing more.
   - **Migration:** nothing to do. The first run creates `fabrikito/` beside the old folder. Once no
     checkout from before this release is in use on the machine, the old folder
