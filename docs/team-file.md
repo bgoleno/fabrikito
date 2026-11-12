@@ -110,7 +110,7 @@ keeps out nobody on a volume mounted `noowners` (Finder's "ignore ownership on t
 seat runs as the same user in any case. Separate folders keep two seats' temp files apart, and two
 teams', by accident guard only, as with the other rules in [Safety](safety.md): this is not a security
 boundary between seats, and any seat can read and write another seat's folder: nothing denies it, and in
-a permission mode that prompts its file tools ask first.
+a permission mode that prompts its `Edit` and `Write` tools ask first.
 
 In a permission mode that prompts, a `Write` outside a seat's working directory would wait for a human, so
 the generated settings give each seat an `Edit` allow on everything in its own `tmpdir`

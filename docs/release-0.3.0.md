@@ -31,16 +31,17 @@ use.
    restart".
 4. **If you add the writer role with `repo.docs_repos`:** protect the default branch of each listed
    repository with a ruleset on that repository. The ask on a push to the base branch does not see a
-   push from a clone of such a repository ([Safety](safety.md)); [#346](../../../issues/346) tracks
-   the fix.
+   push written `git -C <clone> push`, the form the writer prompt gives for a clone of such a
+   repository ([Safety](safety.md)); [#346](../../../issues/346) tracks the fix.
 5. **Progress notes get a first line.** From its restart on, each seat starts its note with a
    `Status:` line, and writes it the next time it rewrites the note. Until then the engineering
    manager's check lists the seat with "no Status line"
    ([The Status line](workflow.md#the-status-line-and-the-check-for-seats-without-work)). Nothing
    rewrites a note for you.
 6. **The message log changes from the restart on.** The text of a message to or from `sec` is left
-   out of new lines ([The message log](messaging.md#the-message-log)). Lines already in the log stay
-   as they are.
+   out of new lines, which show `[body not logged: sec]` in its place, and a message to an address the
+   logging hook could not resolve to a seat shows `[body not logged: unresolved address]`
+   ([The message log](messaging.md#the-message-log)). Lines already in the log stay as they are.
 
 Nothing in 0.3.0 renames a command or a team-file key. `factory.sh`, the old name of the launcher, is
 still there as a shim that prints a notice.

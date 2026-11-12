@@ -169,7 +169,8 @@ During the overlap, old and new seats share the state folder: the message log, t
 `say` takes and the claude copies. They can message each other, and both write the same log. That is
 safe only while the two releases agree on two things:
 
-- **The state layout.** If the new release's notes (its tag's message: `git -C <install> tag -n99 -l <new>`)
+- **The state layout.** If the new release's notes (its tag's message: `git -C <install> tag -n99 -l <new>`;
+  for 0.3.0 also [Release notes: 0.3.0](release-0.3.0.md), step 3)
   say it changed what is kept in the state folder, or how, upgrade with a full restart instead.
 - **The team file.** Each checkout has its own copy of the team file, and an old seat's `say` reads the
   old copy. A changed team file (a role added or removed, a changed prefix or session name, a changed
