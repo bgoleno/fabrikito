@@ -43,7 +43,10 @@ repo:
   # prompt as @@DOCS_REPOS@@ (one line, or `none`); only roles/writer.md uses it. fabrikito makes no
   # checkout or worktree of them and adds no permission rules for them: the writer clones one under
   # its own TMPDIR, and the prompt restates hard rules 2 and 8 for it (see docs/safety.md, which
-  # says what the push and merge rules do for a repository that is not `github`).
+  # says what the push and merge rules do for a repository that is not `github`). That clone is
+  # outside the seat's working directory: in a permission mode that prompts, an edit there waits for
+  # a human unless a permission rule allows it, so give the writer seat a `tmpdir` (docs/team-file.md,
+  # "Temp files").
   # docs_repos: [owner/name-docs, owner/handbook]
 
 project:

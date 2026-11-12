@@ -12,7 +12,10 @@ the reference for each key, and the file to copy.
   `repo.docs_repos` (optional) lists up to 10 more repositories (`owner/name`, none equal to
   `repo.github`, none twice) that a Technical Writer seat may change; `check` lists them and every prompt
   can name them as `@@DOCS_REPOS@@`. fabrikito makes no checkout of them and adds no permission rules
-  for them: see [Safety](safety.md).
+  for them: see [Safety](safety.md). The writer clones one under its own `TMPDIR`, which is outside the
+  seat's working directory, so in a permission mode that prompts, an edit there waits for a human unless
+  a permission rule allows it. Give the writer seat a `tmpdir` ([Temp files](#temp-files)), so that its
+  clones are in one known folder a rule can name.
 - `storage`: `volume` and `root`. Every worktree is created under `<volume>/<root>/`. The volume must be
   mounted, checked from the mount table when a worktree is created; the launcher never falls back to
   another disk.
