@@ -9,6 +9,9 @@ a good start.
 
 - Start only the seats a task needs: `./fabrikito up em tl fs1`. Add one later with `up fs2`, and stop
   one that is done with `down --yes fs2` (its worktree is kept).
+- Add a Technical Writer seat (`dw`, commented in `teams/example.yaml`) when the project's docs fall
+  behind its changes or a documentation repository needs its own PRs; a team that rarely changes
+  behaviour users can see does not need one.
 - An idle seat spends little (Claude Code's session recap and idle compaction can still use some
   tokens). A message delivered to it starts a turn that sends its whole conversation again, so a seat
   that is sent many messages keeps spending.
