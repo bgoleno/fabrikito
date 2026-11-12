@@ -379,7 +379,9 @@ echo "--- a state folder under a folder with a non-ASCII character: the team rea
 # locale before any command reaches a session, with this check or without: lib/team_config.rb.)
 own_E=$'\xc3\xa9'; U=$T/own/u/team.yaml; own_team $U tou Seat; own_na="$T/own-h$own_E/state"
 own_na_c() { env LC_ALL=C TEAM_STATE_DIR="$own_na" "$@"; }
-own_na_none() { env -i PATH="$PATH" HOME="$HOME" TMUX_TMPDIR="$TMUX_TMPDIR" TEAM_STATE_DIR="$own_na" "$@"; }
+# env -i drops the tmux guard's variables with the rest, and the guard then refuses every call (#307), so
+# they are passed on, as test/e2e/say.sh does.
+own_na_none() { env -i PATH="$PATH" HOME="$HOME" TMUX_TMPDIR="$TMUX_TMPDIR" TMUX_GUARD_ROOTS="$TMUX_GUARD_ROOTS" TMUX_GUARD_LOG="$TMUX_GUARD_LOG" TEAM_STATE_DIR="$own_na" "$@"; }
 TEAM_STATE_DIR="$own_na" $S -c $U up --no-view oa >/dev/null 2>&1; sleep 1
 tmux has-session -t '=ow-oa' 2>/dev/null || bad "test setup: the seat with a state folder under a non-ASCII folder did not start"
 own_na_c env TEAM_ROLE=ob $S -c $U say oa "c locale OWN-NA-1" > $T/own-na.out 2>&1; rc1=$?
