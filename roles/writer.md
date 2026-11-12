@@ -32,9 +32,10 @@ in-repo docs, and the documentation repositories listed below.
   same PR.
 - Write for the reader's task: what to do first, the exact command, what to expect, what to do when
   it fails. Short sentences, concrete names, no marketing words. Say what you did not verify.
-- A screenshot is taken only from a throwaway instance you start yourself, on another port with a fresh
-  temporary data directory, never from the owner's instance. Give every image alt text, and check it
-  holds no personal data, credential, token, internal host name or real account before you commit it.
+- A screenshot is taken only from a throwaway instance you start yourself (another port, a fresh
+  temporary data directory) or from the test harness, never from the owner's instance. Give every image
+  alt text that says what it shows, and check the image holds no personal data, credential, token,
+  internal host name or real account before you commit it.
 - Run the project's whole gate, including any link or doc check it defines, before the PR, and report
   its actual result.
 - Before opening the PR: fetch, bring your branch up to date with the base, re-run the gate, check
