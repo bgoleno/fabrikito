@@ -1,5 +1,6 @@
 # Sourced by test/e2e.sh, in its shell and in the order of AREAS there (#70); not run alone.
-# up and the other commands on the default tmux server; test/live-env.sh (#66).
+# up and the other commands on the default tmux server; test/live-env.sh (#66); test/e2e.sh's own exit
+# trap and cleanup, which may stop no server but the run's (#306, test/e2e-exit-trap.sh).
 echo "--- live tests: up refuses the default tmux server for a throwaway team; test/live-env.sh (#66)"
 # Every up below runs with a stand-in tmux first on PATH that logs its arguments and fails, so no case
 # can reach a real tmux server, the user's default one included, even when the refusal is missing.
@@ -163,4 +164,10 @@ printf '#!/bin/sh\necho "$*" >> %s/nomktemp.log\nexit 1\n' $T > $T/nomktemp/mkte
 out=$(PATH=$T/nomktemp:$PATH TMPDIR=$E2L TEST_VOLUME=$VOL $SRC/test/e2e.sh 2>&1); rc=$?
 [ $rc = 64 ] && echo "$out" | grep -qF "TMPDIR is too long" && echo "$out" | grep -qF "takes at most $e2e_max" && [ ! -e $T/nomktemp.log ] && [ -z "$(ls -A $E2L)" ] \
   && ok "test/e2e.sh refuses a TMPDIR too long for tmux's socket, says the longest it takes, and makes nothing" || { bad "test/e2e.sh with a TMPDIR too long (rc=$rc)"; echo "$out" | tail -3; }
+# The exit trap and the cleanup of test/e2e.sh itself (#306), by test/e2e-exit-trap.sh: nested runs of
+# test/e2e.sh with stub areas, and a stand-in tmux first on PATH that records and runs nothing, so none of
+# them can reach a real tmux server. It is a script of its own so that it can run alone, on old code too.
+out=$($SRC/test/e2e-exit-trap.sh 2>&1); rc=$?
+[ $rc = 0 ] && echo "$out" | grep -qE '^e2e-exit-trap: [1-9][0-9]* checks, 0 failed$' \
+  && ok "test/e2e-exit-trap.sh: the exit trap and the cleanup of test/e2e.sh reach no tmux server but the run's own, and a child that exits early cleans up nothing" || { bad "test/e2e-exit-trap.sh (rc=$rc)"; echo "$out"; }
 e2e_end=live # the last line: test/e2e.sh checks that the file ran to here
