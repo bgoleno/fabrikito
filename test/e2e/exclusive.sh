@@ -311,7 +311,7 @@ for el_a in lib $AREAS; do echo "e2e_end=$el_a" > $el/src/test/e2e/$el_a.sh; don
 { echo "el_d=$el; el_lock=$FACTORY_RUN_LOCK"; cat <<'EOF'
 echo "$T_TOP" > $el_d/top; echo "E start" >> $el_d/marks
 { echo "args=$#:${2-}"; echo "var=${EL_VAR-unset}"
-  echo "left=${E2E_LOCK_PID-unset},${E2E_NO_LOCK-unset},${FACTORY_RUN_EXCLUSIVE_HELD-unset}"
+  echo "left=${E2E_LOCK_PID-unset},${E2E_NO_LOCK-unset},${FACTORY_RUN_EXCLUSIVE_HELD-unset}"; echo "tree=${E2E_LOCK_TREE-unset}"
   [ "$FACTORY_RUN_LOCK" = "$T/rx-lock/run-exclusive.lock" ] && echo "own=yes" || echo "own=no"
   echo "outer=$(ruby -e 'f = (File.open(ARGV[0]) rescue exit); puts f.flock(File::LOCK_EX | File::LOCK_NB) ? "free" : "held"' "$el_lock")"
   echo "holder=$(ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0]))["cmd"]' "$el_lock.holder" 2>/dev/null)"
@@ -388,9 +388,65 @@ el_top=$(cat $el/top 2>/dev/null)
 after=$(rx_bound $S run-exclusive -- sh -c 'echo ran' 2>&1)
 [ $started = 0 ] && [ $erc = 143 ] && grep -q '^ABORTED before the end' $el/out && [ "$(cat $el/marks)" = "E start" ] && [ -n "$el_top" ] && [ ! -e "$el_top" ] && [ "$after" = ran ] \
   && ok "TERM to test/e2e.sh during the run reaches its exit trap through run-exclusive: the scratch folder is removed, exit 143, and the lock is free" || { bad "TERM to test/e2e.sh during the run (started=$started e=$erc after=$after)"; tail -3 $el/out; el_show; }
+# Whatever the result: the fixture waits for this file, and rx_wait's limit bounds run-exclusive, not the
+# run under it. If TERM did not get through, which is what the case is for, the run would loop for ever.
+touch $el/ego
 # Only a failure leaves that run's scratch folder: removed by the path it wrote down, if shaped like one.
 case $el_top in "$e2e_tmp"/team-e2e.????) if [ -d "$el_top" ]; then rm -rf "$el_top"; fi ;; esac
-# Only a guard for a machine that has no real folder yet: where one exists, as after this is merged and
-# used, this cannot fail, since it cannot tell a folder the e2e made from one that was there.
-{ [ $real_was = 1 ] || [ ! -e "$real" ]; } && ok "the e2e never made the real lock's folder ($real)" || bad "the e2e made the real lock's folder $real"
+# el_queued [command...]: a run queued behind a held lock. The command runs while the run waits, then the
+# lock is released. Leaves waiting, hrc (the holder) and erc (the run); EL_RUN replaces the run's command.
+el_queued() {
+  el_reset
+  $S run-exclusive -- $rx/hold H $el/marks $el/hgo 2>/dev/null &
+  h=$!
+  rx_until "grep -q 'H start' $el/marks 2>/dev/null"
+  ${EL_RUN:-$el_cmd} > $el/out 2>&1 &
+  e=$!
+  rx_until "grep -q 'waiting for the lock' $el/out"; waiting=$?
+  [ $# -eq 0 ] || "$@"
+  touch $el/hgo; rx_wait $h; hrc=$?; rx_wait $e; erc=$?
+}
+el_ran() { [ $waiting = 0 ] && [ $hrc = 0 ] && [ $erc = 0 ] && el_result < $el/out && [ "$(tr '\n' ' ' < $el/marks)" = "H start H end E start E end " ]; }
+el_stopped() { [ $waiting = 0 ] && [ $hrc = 0 ] && [ $erc = 64 ] && [ "$(tr '\n' ' ' < $el/marks)" = "H start H end " ] && [ ! -e $el/top ] && ! grep -q -e RESULT -e ABORTED $el/out; }
+el_git() { git -C $el/src -c user.name=e2e -c user.email=e2e@example.invalid "$@"; }
+# The option is 1 and nothing else (sec2 on #356): any other value takes the lock, as no value does.
+EL_RUN="env E2E_NO_LOCK=0 $el_cmd" el_queued
+el_ran && grep -qx 'left=unset,unset,unset' $el/seen \
+  && ok "test/e2e.sh with E2E_NO_LOCK=0 takes the lock like a run without the option: only 1 runs without it" || { bad "test/e2e.sh with E2E_NO_LOCK=0 (waiting=$waiting h=$hrc e=$erc)"; tail -3 $el/out; el_show; }
+# A run that waited tests the tree as it is after the wait, so it stops when that is no longer the tree it
+# was queued for (sec2 on #356): a seat that moves its worktree to its next task while its run queues
+# would otherwise report a result for another commit. Only a tree that is itself the top of a git checkout
+# is recorded and compared. The stub tree above was none, and its runs went on; one that merely sits
+# inside some other checkout is not judged by that checkout's state either (tl on #356).
+git init -q $el && git -C $el -c user.name=e2e -c user.email=e2e@example.invalid commit -q --allow-empty -m outer
+el_queued git -C $el -c user.name=e2e -c user.email=e2e@example.invalid commit -q --allow-empty -m "outer moved"
+el_ran && ok "test/e2e.sh in a tree that only sits inside another git checkout is not judged by that checkout: the run goes on after its wait" || { bad "test/e2e.sh in a tree inside another checkout (waiting=$waiting h=$hrc e=$erc)"; tail -3 $el/out; el_show; }
+git init -q $el/src && el_git add -A && el_git commit -q -m tree || bad "test setup: could not make the stub tree a git checkout"
+el_h1=$(el_git rev-parse HEAD)
+el_queued
+el_ran && grep -qx 'tree=unset' $el/seen \
+  && ok "test/e2e.sh in a git checkout that did not change while the run waited runs as before, and the record of the tree is not left for what it starts" || { bad "test/e2e.sh in an unchanged checkout (waiting=$waiting h=$hrc e=$erc)"; tail -3 $el/out; el_show; }
+el_queued el_git commit -q --allow-empty -m "the next task"
+el_h2=$(el_git rev-parse HEAD)
+el_stopped && grep -F "$el_h1" $el/out | grep -F "$el_h2" | grep -qF "export" \
+  && ok "test/e2e.sh stops (64) before anything is made when HEAD moved while the run waited, naming both commits and the export" || { bad "test/e2e.sh after HEAD moved during the wait (waiting=$waiting h=$hrc e=$erc)"; tail -3 $el/out; el_show; }
+el_queued touch $el/src/a-new-file
+el_stopped && grep -F "$el_h2" $el/out | grep -qF "changed or new files" \
+  && ok "test/e2e.sh stops (64) when the tree's changed or new files differ after the wait, at the same commit" || { bad "test/e2e.sh after a new file during the wait (waiting=$waiting h=$hrc e=$erc)"; tail -3 $el/out; el_show; }
+rm -f $el/src/a-new-file
+# git missing or failing, at either start, means no record and no check, never a new failure (tl on #356).
+# Here git answers at the first start and fails at the second, with HEAD moved in between.
+mkdir -p $el/nogit; printf '#!/bin/sh\nif [ -e %s/gitfails ]; then for a in "$@"; do [ "$a" = --show-toplevel ] && exit 1; done; fi\nexec %s "$@"\n' $el "$(command -v git)" > $el/nogit/git; chmod +x $el/nogit/git
+el_break() { touch $el/gitfails; el_git commit -q --allow-empty -m "moved, and git fails"; }
+# A script puts the stand-in first on PATH: PATH may hold a space, and EL_RUN is split into words.
+printf '#!/bin/sh\nPATH=%s/nogit:$PATH exec env TEST_VOLUME=%s/vol %s %s/src/test/e2e.sh\n' $el $el "$BASH" $el > $el/nogit/run; chmod +x $el/nogit/run
+EL_RUN=$el/nogit/run el_queued el_break
+rm -f $el/gitfails
+el_ran && ok "test/e2e.sh goes on when git cannot describe the tree after the wait: no check, never a new failure" || { bad "test/e2e.sh with a git that fails after the wait (waiting=$waiting h=$hrc e=$erc)"; tail -3 $el/out; el_show; }
+# What this can show is that the cases of this area, which all run on the run's own lock, did not make
+# the real lock's folder. It says nothing about the run as a whole: started plainly, the run's own lock
+# step (#309) took the real lock before this area began, and made the folder then if it was not there.
+# So it can fail only where the folder was missing when the area began: a run with E2E_NO_LOCK=1 or with
+# a lock elsewhere, on a machine that has none yet. Where the folder exists it cannot tell who made it.
+{ [ $real_was = 1 ] || [ ! -e "$real" ]; } && ok "this area's cases, on the run's own lock, did not make the real lock's folder ($real)" || bad "this area's cases made the real lock's folder $real"
 e2e_end=exclusive # the last line: test/e2e.sh checks that the file ran to here

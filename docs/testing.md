@@ -40,7 +40,15 @@ Ctrl-C or TERM while it waits ends it before anything is made. With no other run
 is free and the run starts at once. Started under `run-exclusive` already, it does not wait for itself.
 Inside, the run uses a lock of its own for its run-exclusive cases, never the real one.
 
-`E2E_NO_LOCK=1` runs it without the lock:
+The run that starts after the wait reads the tree again, so it tests the tree as it is then. When the
+tree is the top of a git checkout, the run notes its commit and its changed and new files before it
+waits, and stops (exit 64, before anything is made) if either differs afterwards: a result for a commit
+other than the one you queued is worse than none. It does not see a further edit to a file that was
+already changed when the run was queued, and it checks nothing where git cannot describe the tree. So
+for a run that will wait while you go on working, queue it from an export or a separate worktree of
+the commit, and keep working in your own tree.
+
+`E2E_NO_LOCK=1` (exactly `1`; any other value takes the lock) runs it without the lock:
 
 ```
 E2E_NO_LOCK=1 env -u TMUX TEST_VOLUME=/Volumes/YourDrive test/e2e.sh
@@ -50,6 +58,8 @@ That is right only where no other heavy run can be on the machine and the lock i
 runner or a container that runs one job and has no home folder the lock's file can be made in. On a
 machine you share with a team, or with your own second terminal, leave it out: a free lock costs nothing.
 The stand-in runs inside `test/e2e-exit-trap.sh` set it too, as they take a few seconds and start nothing.
+It is also how to trace a whole run: `bash -x test/e2e.sh` traces only up to the lock step, where the
+run starts itself again, and with `E2E_NO_LOCK=1` there is no second start.
 
 ### Its temp folder
 

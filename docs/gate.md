@@ -70,7 +70,8 @@ command at a time across every seat of every team on the host, and the owner's s
 ```
 
 This repository's own `test/e2e.sh` needs no `run-exclusive` in front: it takes the lock itself
-([Testing](testing.md#one-run-at-a-time)). With one in front, it runs at once as a nested run.
+([Testing](testing.md#one-run-at-a-time)). With one in front, that outer `run-exclusive` waits its turn like any other run, and the step inside then
+does not wait a second time.
 
 - **It waits, and never fails for a busy lock.** It prints who holds the lock (role, team file, pid,
   folder), since when and the command, then a reminder every 5 minutes, and "got the lock" when its
