@@ -25,6 +25,54 @@ e2e_real=$(cd "$e2e_tmp" && pwd -P) || { echo "TMPDIR ($e2e_tmp) is not a folder
 for e2e_p in "$e2e_tmp" "$e2e_real"; do
   [ ${#e2e_p} -le $e2e_max ] || { echo "TMPDIR is too long: $e2e_p has ${#e2e_p} characters and this test takes at most $e2e_max, because tmux's socket goes $e2e_sock below it (see docs/testing.md)" >&2; exit 64; }
 done
+# One heavy run at a time on the host (#309): the run starts itself again under fabrikito run-exclusive,
+# whoever started it and from wherever, so two runs never overlap and nobody has to remember the lock. It
+# waits its turn there, and run-exclusive says who holds the lock. Started under run-exclusive already,
+# the call below is a nested one, which runs at once instead of waiting for itself.
+# The step comes after the refusals above (a run that would be refused must not wait in the queue first)
+# and before anything is made or cleared: the clearing below removes the lock's variables and gives the
+# run a lock of its own, which is what keeps its run-exclusive cases off the real lock (#214). Arguments
+# and the environment go to the second start as they are, so a run of part of the cases is covered too.
+# The second start knows itself by E2E_LOCK_PID, the pid of the first start. run-exclusive keeps that pid
+# (the first start execs it), so it is this shell's parent, or this shell itself when the call was nested
+# (run-exclusive then execs the command). The variable alone is never trusted: left in an environment by
+# anything else it names some other process, and the run takes the lock again. It is cleared below with
+# the launcher's variables, so nothing the run starts has it.
+# E2E_NO_LOCK=1 skips the step (docs/testing.md says when that is right), and only 1 does: any other
+# value takes the lock, as the docs say (sec2 on #356). The stand-in runs inside test/e2e-exit-trap.sh
+# set it: their tree's fabrikito is a stand-in, and they take a few seconds.
+# The second start reads this file, and the tree, again after its wait, so what runs is the tree as it is
+# then. A seat that moved its worktree to the next task while its run queued would get a result for
+# another commit than the one it names (sec2 on #356). So the first start hands on what the tree was
+# (E2E_LOCK_TREE, from e2e_tree), and the second stops, before anything is made, when that has changed.
+# Not seen: more edits to a file that was already changed when the run queued, as its status line stays
+# the same. docs/testing.md says to queue a run that will wait from an export of the commit.
+# e2e_tree prints "<HEAD> <a digest of git status>", or nothing where there is nothing to hold the run
+# to: $SRC is not itself the top of a git checkout (a stub tree or an export inside some other repository
+# must not be judged by that repository's state), there is no commit yet, or git is missing or fails.
+# Nothing recorded, or nothing to compare with after the wait, means no check, never a new failure.
+e2e_tree() {
+  local top head st
+  top=$(GIT_OPTIONAL_LOCKS=0 git -C "$SRC" rev-parse --show-toplevel 2>/dev/null) && [ -n "$top" ] || return 0
+  [ "$(cd "$top" 2>/dev/null && pwd -P)" = "$(cd "$SRC" && pwd -P)" ] || return 0
+  head=$(git -C "$SRC" rev-parse --verify -q HEAD 2>/dev/null) && [ -n "$head" ] || return 0
+  # GIT_OPTIONAL_LOCKS=0: reading the status must not rewrite the index of a tree someone works in.
+  st=$(GIT_OPTIONAL_LOCKS=0 git -C "$SRC" status --porcelain 2>/dev/null) || return 0
+  st=$(printf '%s' "$st" | git hash-object --stdin 2>/dev/null) && [ -n "$st" ] || return 0
+  echo "$head $st"
+}
+if [ "${E2E_NO_LOCK:-}" != 1 ]; then
+  case ${E2E_LOCK_PID:-} in
+    "$PPID" | "$$")
+      e2e_now=$(e2e_tree)
+      if [ -n "${E2E_LOCK_TREE:-}" ] && [ -n "$e2e_now" ] && [ "$e2e_now" != "$E2E_LOCK_TREE" ]; then
+        if [ "${e2e_now%% *}" = "${E2E_LOCK_TREE%% *}" ]; then e2e_what="its changed or new files are no longer the same"; else e2e_what="it is now at ${e2e_now%% *}"; fi
+        echo "test/e2e.sh: the tree changed while this run waited for the lock: it was queued at commit ${E2E_LOCK_TREE%% *}, and $e2e_what. Nothing was run, as the result would be for another tree than the one queued. Start the run again; to keep working while a run waits, queue it from an export or a separate worktree of the commit (docs/testing.md)." >&2
+        exit 64
+      fi ;;
+    *) E2E_LOCK_PID=$$ E2E_LOCK_TREE=$(e2e_tree) exec "$S" run-exclusive -- "$BASH" "$SRC/test/e2e.sh" ${1+"$@"} ;;
+  esac
+fi
 T_TOP=$(mktemp -d "$e2e_tmp/team-e2e.XXXX") || { echo "cannot make a scratch folder under $e2e_tmp" >&2; exit 2; }
 mkdir "$T_TOP/r" && ln -s r "$T_TOP/l" && T=$(cd "$T_TOP/l" && pwd) || { echo "cannot make the scratch link under $T_TOP" >&2; exit 2; }
 T_TOP=${T%/l}
@@ -39,8 +87,10 @@ ROOT="Projects/_teamtest-$$"; VOL=${TEST_VOLUME:-}
 # messaging socket (#75). This is the one list of what is cleared; add any new launcher variable here.
 # It runs before anything below exports a TEAM_* variable (TEAM_VIEW=0), or it would clear it.
 # FACTORY_*: run under run-exclusive (#214), the run inherits its lock's variables; nothing in it may
-# take or skip the real lock, so the run has a lock of its own in $T.
-for v in $(compgen -e); do case $v in DISABLE_AUTOUPDATER|TEAM_*|CLAUDE*|TMUX*|FACTORY_*) unset "$v" ;; esac; done
+# take or skip the real lock, so the run has a lock of its own in $T. E2E_LOCK_PID, E2E_LOCK_TREE and
+# E2E_NO_LOCK (#309, above): a test/e2e.sh that a case starts must not skip its lock step because this
+# run did, nor be held to this run's tree.
+for v in $(compgen -e); do case $v in DISABLE_AUTOUPDATER|TEAM_*|CLAUDE*|TMUX*|FACTORY_*|E2E_LOCK_PID|E2E_LOCK_TREE|E2E_NO_LOCK) unset "$v" ;; esac; done
 export TMUX_TMPDIR=$T/tmux TEAM_STATE_DIR=$T/state FACTORY_RUN_LOCK=$T/rx-lock/run-exclusive.lock
 # No run may drive iTerm (#93). A stand-in osascript first on PATH records every call and does
 # nothing, and the run fails at the end if it was called: `up` opens a real iTerm window unless told
