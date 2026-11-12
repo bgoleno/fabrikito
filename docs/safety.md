@@ -26,7 +26,15 @@ role's (team first; a role can add or tighten a rule, never loosen one), plus wh
 - an `ask` on any push to the base branch (from `repo.base`), forced or not, since changes land through
   PRs. It is an early warning for a project whose base branch has no protection. The real control is a
   ruleset on the base branch that blocks force-push and deletion and requires a PR; where one exists,
-  this ask is redundant;
+  this ask is redundant. It matches command text, not a repository, and it does not see a push from a
+  clone of a repository listed in `repo.docs_repos`, for any branch name. The clone is outside the
+  seat's working directory, where a `cd` does not last to the next command, so the writer prompt has
+  the seat write every git command there as `git -C <clone> ...`, and `git -C <clone> push` is not
+  matched (see the first item under "What the rules cannot do" below). The writer prompt is the only
+  guard the team provides against a push to such a repository's default branch. The real control is
+  the same as for the base: a ruleset on that repository's default branch that requires a PR. The
+  merge denies and asks name no
+  repository, so they cover a `gh pr merge` in a docs repository clone as they do anywhere;
 - an `Edit` allow on the seat's own progress note (see [Progress notes](workflow.md#progress-notes)), which is
   outside its working directory and would otherwise prompt in a mode other than bypass, and an `Edit`
   deny on every other seat's note: a note is put into its seat's context at each start, so a seat
@@ -69,7 +77,8 @@ role's (team first; a role can add or tighten a rule, never loosen one), plus wh
   team has run `up` (a pinned team working on fabrikito lists `<install>/.state/<team>`). If
   it exists, it must be a team's state folder itself (holding `settings/`, `launch/` and `prompts/`),
   not its checkout or `.state/` above it. Outside them, one that doesn't exist yet, or is still empty,
-  is accepted, and `check` says so. `check` lists the
+  is accepted, and `check` says so. A folder that holds only a `.DS_Store` file counts as empty; a
+  folder or a link of that name is content ([#229](../../../issues/229)). `check` lists the
   other teams found and listed, and each seat's denies. Settings are written at `up`, so a team that starts
   after a seat does is covered from that seat's next restart. Teams on one machine still share the
   machine user, so these denies are an accident guard, like the others: a command that reads or
@@ -161,6 +170,10 @@ What the rules cannot do:
   worktree, and a separate `claude` process a seat starts from Bash. That process loads the project
   settings of its own folder and does not get the seat's generated `--settings` file at all, which is
   the general limit above: the rules guard against accidents. Severity as sec rated it: low.
+- The hard rules are prompt text, and the shared prompt treats a subagent as knowing only its brief.
+  It tells a seat to put into the brief the rules that apply to the subagent's work (the hard rules,
+  what is out of bounds, where temp files go), and that the seat answers for what the subagent does
+  ([#246](../../../issues/246)). The launcher does not check a brief.
 - "Never force-push a branch you did not create" cannot be written as a pattern. Engineers keep
   force-pushing their own branches; only the EM is asked.
 - Any process running as this user can type into a seat's pane, so an ask rule guards against

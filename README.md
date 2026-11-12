@@ -66,8 +66,8 @@ can change any prompt.
    definition of done, branch, tools, boundaries and reviewers.
 3. **Pull request.** The engineer works on a branch in its worktree, runs the whole gate, and opens a PR
    with `Closes #<n>`. A seat held by `gate_on_stop` is also stopped at the gate.
-4. **Review.** The tech lead reviews every PR against its issue and gives one verdict at an exact commit,
-   `READY at <sha>` or `CHANGES NEEDED`.
+4. **Review.** The tech lead reviews every PR against each issue it closes and gives one verdict at an
+   exact commit, `READY at <sha>` or `CHANGES NEEDED`.
 5. **Verification.** QA runs the behavior in a throwaway environment and reports pass, fail or could not
    check, with evidence. The security seat reviews what is security-sensitive. A security point found in a
    review is sent privately to the security seat, and the PR gets a marker that the merge procedure
@@ -128,6 +128,7 @@ The reference lives in [`docs/`](docs/README.md). Start with [How it works](docs
 | [The fabrikito plugin](docs/plugin.md) | How fabrikito's skills reach every seat. |
 | [Pinned releases](docs/pinned-release.md) | Run a team from a checkout fixed at a release. |
 | [Updating Claude Code](docs/updating-claude-code.md) | Update Claude Code on a running team. |
+| [Project facts](docs/facts.md) | Describe the project elsewhere: checked statements on what it does, the safety model and its limits. |
 | [Testing](docs/testing.md) | A live test on a private tmux server, and the end-to-end test. |
 | [Troubleshooting](docs/troubleshooting.md) | Find what you see (an error, a refused message, a silent seat) and what to do. |
 
@@ -141,10 +142,12 @@ See [SECURITY.md](SECURITY.md).
 
 ## Contributing
 
-Every change starts as a GitHub issue, and its pull request links the issue and fills in the pull request
-template. Nothing tracked may name a specific project, person, drive or path. Before a pull request, run
-the gate: `bash -n fabrikito factory.sh test/e2e.sh test/e2e-exit-trap.sh test/e2e-tmux-guard.sh test/guard/tmux lib/stop_gate.sh lib/session_start.sh lib/log_message.sh`,
-`ruby -c lib/team_config.rb`, and `env -u TMUX TEST_VOLUME=/Volumes/<a mounted, writable volume> test/e2e.sh`.
+Every change starts as a GitHub issue, and its pull request links each issue it completes (one pull request
+may close several) and fills in the pull request template. Nothing tracked may name a specific project,
+person, drive or path. Before a pull request, run
+the gate: `bash -c 'rc=0; for f in "$@"; do bash -n "$f" || rc=1; done; exit $rc' gate fabrikito factory.sh lib/*.sh test/*.sh test/e2e/*.sh test/guard/tmux`,
+`bash -c 'rc=0; for f in "$@"; do ruby -c "$f" || rc=1; done; exit $rc' gate lib/*.rb`
+(one check for each file: `bash -n a b` and `ruby -c a b` check only `a`), and `env -u TMUX TEST_VOLUME=/Volumes/<a mounted, writable volume> test/e2e.sh`.
 See [Testing](docs/testing.md).
 
 ## License
