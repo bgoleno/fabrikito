@@ -37,8 +37,9 @@ together in one iTerm tab. Read `README.md` for use and `teams/example.yaml` for
 - Do not run the e2e test, or any experiment, against the user's real tmux server: unset `TMUX` and use
   `TMUX_TMPDIR`, as the test does. Never kill or restart seats of a running team without being asked.
 - Commit or push only when asked. The repository is public: write issue, PR, comment and commit text for a
-  public reader, with no local paths, drive names, user names or other projects' names. Use the placeholders
-  the docs use, such as `/Volumes/YourDrive`.
+  public reader, with no local paths, drive names, people's names, e-mail addresses or other projects'
+  names, no credential or token, and nothing about an unfixed security finding (report one as `SECURITY.md`
+  says). Use the placeholders the docs use, such as `/Volumes/YourDrive`.
 
 ## Things that cost time
 - tmux: a session target written `=name` needs a trailing colon (`=name:`) for pane and option commands,
