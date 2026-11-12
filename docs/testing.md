@@ -76,6 +76,20 @@ assertion passed (`RESULT pass=<n> fail=0`), and non-zero when any assertion fai
 early (a setup error, a signal). A run that stops early still removes what it made and says
 `ABORTED` on stderr. That makes it safe as a `repo.gate` command, which is judged by its exit code.
 
+### Its own tmux server, and no other
+
+The run stops its tmux server by its socket (`tmux -S <scratch>/tmux/tmux-<uid>/default kill-server`), only
+when that socket is there, and before it removes the scratch folder ([#306](../../../issues/306)). It never
+runs a bare `tmux kill-server`: that finds its server through `TMUX_TMPDIR`, and once the folder is gone
+tmux falls back to the default server. Only the shell that started the run cleans up. bash 3.2 runs the
+exit trap in a child too, when an unset variable ends a command in a pipeline
+(`echo "$out" | grep -q "$unset"`), and such a child now removes nothing and stops nothing.
+
+`test/e2e-exit-trap.sh` checks this, and the run includes it as one case. It runs `test/e2e.sh` from a
+scratch tree where the areas are stubs, with a stand-in `tmux` that records each call and runs nothing. It
+starts no tmux server, so it can run alone, and against another copy of the file:
+`test/e2e-exit-trap.sh /path/to/an/older/e2e.sh`.
+
 ### The one failure to rerun
 
 One failure is not ours to fix ([#101](../../../issues/101)). Under heavy load (a load average of about
