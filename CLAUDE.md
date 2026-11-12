@@ -2,7 +2,8 @@
 
 A launcher that starts a team of Claude Code sessions for a software project: one persistent tmux
 session per seat, each told its role, each in its own git worktree, able to message each other, shown
-together in one iTerm tab. Read `README.md` for use and `teams/example.yaml` for every config key.
+together in one iTerm tab. Read `README.md` for the overview, `docs/` for use, and
+`teams/example.yaml` for every config key.
 
 ## Layout
 - `fabrikito`: the launcher (bash). Commands: check, up, view, titles, status, say, flush, attach, migrate, down,
@@ -20,7 +21,7 @@ together in one iTerm tab. Read `README.md` for use and `teams/example.yaml` for
   `e2e_end=<its name>`.
 - `test/e2e-exit-trap.sh`: checks that the exit trap and the cleanup of `test/e2e.sh` reach no tmux server but
   the run's own (#306). Stand-in tmux only, so it starts no server and can run alone; one e2e case runs it.
-- `test/live-env.sh`: a private tmux server and state folder for a live test (README: Tests).
+- `test/live-env.sh`: a private tmux server and state folder for a live test (docs/testing.md, Live tests).
 - Git-ignored, local to each project: `teams/*` other than the example, `projects/`, `.state/`.
 
 ## Rules for this repo
