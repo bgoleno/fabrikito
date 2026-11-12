@@ -14,6 +14,7 @@ Reference documentation for fabrikito. The [README](../README.md) introduces the
 | [Pinned releases](pinned-release.md) | Run a team from a checkout of its own, fixed at a release, so changes here do not reach its running seats: the one-time move of its state, a rolling upgrade, and removing an old release. |
 | [Safety](safety.md) | See what the generated permission rules cover (protected files, the base-branch push ask, the message log, other teams' state, auto memory) and what they cannot do. |
 | [Updating Claude Code](updating-claude-code.md) | Update Claude Code on a running team: why seats run the team's own copy of claude, how to update, and how to remove old copies. |
+| [Project facts](facts.md) | Describe the project elsewhere (a site, a talk) without overclaiming: checked statements on what it is, what it does, what it needs, the safety model, known limits and status, each with its source. |
 | [Testing](testing.md) | Run a live test on a private tmux server, and run, extend or read the end-to-end test. |
 | [Troubleshooting](troubleshooting.md) | Find what you see (an error, a refused message, a silent seat) and what to do about it. |
 

@@ -13,7 +13,7 @@ This page shows how the parts fit together. Each section links to the page with 
 
 | Part | What it is |
 |---|---|
-| `fabrikito` | The launcher. Every command (`check`, `up`, `view`, `titles`, `status`, `say`, `attach`, `migrate`, `down`) is a function in it. `run-exclusive` hands over to `lib/run_exclusive.rb` before any team file is read. |
+| `fabrikito` | The launcher. Every command (`check`, `up`, `view`, `titles`, `status`, `say`, `flush`, `attach`, `migrate`, `down`) is a function in it. `run-exclusive` hands over to `lib/run_exclusive.rb` before any team file is read. |
 | `lib/run_exclusive.rb` | `fabrikito run-exclusive`: runs one heavy command at a time on the host. See [One heavy run at a time](gate.md#one-heavy-run-at-a-time). |
 | `lib/team_config.rb` | Reads and validates the team file, and generates what each seat is started with: its prompt, kickoff, settings (permission rules and hooks) and claude flags. `fabrikito` calls it for every value. |
 | `lib/session_start.sh` | A `SessionStart` hook: shows a seat its progress note and the state of its working directory. |

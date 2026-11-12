@@ -119,7 +119,10 @@ command ([docs](https://code.claude.com/docs/en/worktrees)):
   tmux variables of a seat that runs `up`: every variable whose name starts with
   `CLAUDE_CODE_MESSAGING_` (today `CLAUDE_CODE_MESSAGING_SOCKET` and `CLAUDE_CODE_MESSAGING_TOKEN`,
   and any that a later Claude Code adds), `CLAUDECODE`, `TMUX` and `TMUX_PANE`. So a seat's messaging
-  token does not reach an install script. Every other variable of the shell that runs `up` does reach it, and an
+  token does not reach an install script. A role with a `tmpdir` ([Temp files](#temp-files)) has that
+  folder as the bootstrap's `TMPDIR`, as its seat does, so an install's temp files go to the same place
+  ([#253](../../../issues/253)); a role without one keeps the `TMPDIR` of the shell that runs `up`.
+  Every other variable of the shell that runs `up` does reach it, and an
   install command runs third-party scripts (package install hooks, for example) with them. There is no
   time limit. If it fails, or `up` is interrupted meanwhile
   (Ctrl-C, TERM, HUP), `up` stops the bootstrap and stops before starting the seat; a worktree it has
@@ -131,6 +134,10 @@ before the seat starts when the mark is missing: after a start that was killed o
 when `repo.copy` or `repo.bootstrap` was added after the worktree was made. A failure there leaves
 that existing worktree as it is (it may hold work). Neither runs for a `project` workdir. `check`
 shows them.
+
+An interrupt (Ctrl-C, TERM, HUP) while git is still adding a new worktree is handled the same way, with
+or without a setup: once git returns, `up` removes that worktree by its exact path and starts no seat
+([#198](../../../issues/198)).
 
 `up` starts the roles in file order and stops at the first one it cannot start, this setup included:
 the seats started before it keep running, and the next `up` starts the rest (it skips running seats).

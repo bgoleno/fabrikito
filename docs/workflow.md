@@ -2,7 +2,7 @@
 
 Two rules every seat follows, and what the launcher does to support them: every change starts as an
 issue, and every seat keeps a progress note. Then how a security point found in a review is held on a
-pull request until `sec` clears it.
+pull request until `sec` clears it, and three rules for a pull request in review.
 
 ## Issues first
 
@@ -11,6 +11,13 @@ seat: no change starts without an issue, and the engineering manager files one w
 pull request that completes its issue says `Closes #<n>`, and one that does not says `Refs #<n>` (see
 `.github/pull_request_template.md`), so the issue closes exactly when its change lands and the board
 stays honest.
+
+GitHub closes an issue at the merge when a closing keyword (`close`, `fix`, `resolve` and their forms)
+comes right before its reference, whatever the words around it: "does not close #12" closes #12
+([#245](../../../issues/245)). So a closing keyword goes only before an issue the pull request completes.
+The pull request template says so, and
+[`fabrikito:ready-for-review`](../plugin/skills/ready-for-review/SKILL.md) has the author check what
+GitHub will close (`gh pr view <pr> --json closingIssuesReferences`) before asking for review.
 
 ## Progress notes
 
@@ -43,7 +50,10 @@ a record: when it and the repository disagree, the repository wins.
 
 ## Held security points
 
-A reviewer or QA seat that finds a security point does not write it on the pull request: only `sec`
+Rule 5 of the shared prompt applies to every seat: a possible security finding goes to `sec` and the
+engineering manager first, and nothing about it goes in an issue, a pull request or a commit until
+`sec` rates it ([#239](../../../issues/239)). So a reviewer or QA seat that finds a security point does
+not write it on the pull request: only `sec`
 rates a finding, and anyone who can read the repository can read a PR comment. The point goes to `sec`
 and the engineering manager, and the PR gets a marker that holds its merge until `sec` clears it
 ([#184](../../../issues/184), [#203](../../../issues/203)). The skills hold the exact steps; this is
@@ -81,3 +91,26 @@ Where each part lives:
 | [`fabrikito:verify-behavior`](../plugin/skills/verify-behavior/SKILL.md), step 8 | The same for QA's report. |
 | [`fabrikito:security-triage`](../plugin/skills/security-triage/SKILL.md), step 6 | `sec`'s own marker, and the clearance line. |
 | [`fabrikito:merge-train`](../plugin/skills/merge-train/SKILL.md), step 5 | What holds a merge and what clears it, and the order by id. |
+
+## A pull request in review
+
+Three rules keep a head that a reviewer has judged from changing under the review. They are prompt and
+skill text: nothing in the launcher enforces them.
+
+- **No push to a judged head without notice.** Once a reviewer has posted READY or PASS at a pull
+  request's head, QA or `sec` says it is checking that head, or the engineering manager says it is
+  merging it, the author does not push to that branch without first telling the manager and those
+  reviewers why. A needed fix is a new head, announced as one, and an update with a base that has
+  moved is pushed only when the manager or the merge procedure asks for it. The rule is in the shared
+  prompt (`roles/common.md`, [#235](../../../issues/235)).
+- **A follow-up comment has two forms.** `fabrikito:merge-train` stops and asks when a required reviewer
+  posts a comment that names the head after that reviewer's latest verdict and the comment is not a
+  verdict. So a reviewer's or QA's note about a head already judged either names no commit and points at
+  the earlier verdict by its URL, or is a whole new verdict (or QA report) for that head
+  ([#243](../../../issues/243)). The forms are in
+  [`fabrikito:review-pr`](../plugin/skills/review-pr/SKILL.md) and
+  [`fabrikito:verify-behavior`](../plugin/skills/verify-behavior/SKILL.md), each under "A follow-up about
+  a head you already" judged or checked. A comment in neither form still stops the merge.
+- **A closing keyword only before an issue the pull request completes:** see
+  [Issues first](#issues-first).
+

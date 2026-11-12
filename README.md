@@ -56,6 +56,7 @@ project's specifics stay out of this repository. Every command and option is in
 | [Pinned releases](docs/pinned-release.md) | Run a team from a checkout fixed at a release. |
 | [Safety](docs/safety.md) | What the permission rules in each seat's settings cover, and what they cannot do. |
 | [Updating Claude Code](docs/updating-claude-code.md) | Update Claude Code on a running team, and remove old copies of claude. |
+| [Project facts](docs/facts.md) | Describe the project elsewhere: checked statements on what it does, the safety model and its limits. |
 | [Testing](docs/testing.md) | Run a live test on a private tmux server, and the end-to-end test. |
 | [Troubleshooting](docs/troubleshooting.md) | Find what you see (an error, a refused message, a silent seat) and what to do. |
 

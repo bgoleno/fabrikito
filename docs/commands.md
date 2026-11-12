@@ -42,6 +42,9 @@ Options:
   `teams/` run on the default tmux server: see [Throwaway teams](#throwaway-teams). On `say` and
   `attach` it must be the first argument.
 - `-c` (or `--config`) comes before the command.
+- `fabrikito` can be run through a symlink to its file (relative or absolute, or a chain of links, for
+  example one in a folder on your `PATH`): it follows the links to the real file and finds its `lib/`
+  beside that one ([#263](../../../issues/263)).
 - `run-exclusive` takes the command after `--`, as an argument list. See
   [One heavy run at a time](gate.md#one-heavy-run-at-a-time) for the lock and what it covers.
 
