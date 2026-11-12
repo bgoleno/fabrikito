@@ -4,16 +4,22 @@
 # Every call here that the guard must refuse is one that only reads (ls, has-session through the
 # launcher's status): were the guard wrong, it would list the user's own server and change nothing. Calls
 # that stop or type (kill-server, send-keys) are tried against a recording stand-in only, in
-# test/e2e-tmux-guard.sh and test/e2e-exit-trap.sh. A refusal asked for here goes to a record of its own
-# ($GREF), not to the run's, which test/e2e.sh checks is empty at the end.
+# test/e2e-tmux-guard.sh and test/e2e-exit-trap.sh. And no such call is made before its caller has seen
+# that its tmux is the guard (gguard here, the same test in the seat's script): if it is not, the case
+# fails and the call is not made. That is the rule for any case that makes a call the guard must refuse: in
+# the first full run of this area a seat's tmux was the real one, and its two ls went to the user's server.
+# A refusal asked for here goes to a record of its own ($GREF), not to the run's, which test/e2e.sh checks
+# is empty at the end.
 echo "--- tmux guard (#307): no tmux call of the run reaches a server that is not the run's own"
 GREF=$T/guard-refused.log; GDEF=/tmp/tmux-$(id -u)/default; GOWN=$(cd $T/tmux && pwd -P)/tmux-$(id -u)/default
 got=$(tmux display-message -p -t '=tt-em:' '#{socket_path}' 2>&1)
 [ "$(command -v tmux)" = "$SRC/test/guard/tmux" ] && [ "$got" = "$GOWN" ] && ok "tmux in the test's shell is the guard, and a bare call reaches the run's own server through it" || { bad "the guard in the test's shell (tmux is $(command -v tmux))"; echo "$got"; }
+gguard() { [ "$(command -v tmux)" = "$SRC/test/guard/tmux" ]; }
 # grefused <how the call is made> <command...>: it fails at the guard, with one message that names the
 # call, and that refusal is the one line recorded.
 grefused() {
   local how=$1 out rc; shift; : > $GREF
+  gguard || { bad "tmux ls $how: not tried, as tmux here is $(command -v tmux) and not the guard"; return; }
   out=$(TMUX_GUARD_LOG=$GREF "$@" 2>&1); rc=$?
   [ $rc -ne 0 ] && [ "$(echo "$out" | grep -c '^tmux-guard: refused: tmux .*ls: ')" = 1 ] && [ "$(cat $GREF)" = "$out" ] \
     && ok "the guard refuses tmux ls $how, naming the call" || { bad "tmux ls $how was not refused by the guard (rc=$rc)"; echo "$out" | head -3 | cut -c1-200; }
@@ -31,18 +37,25 @@ grefused "with -L and TMUX_TMPDIR unset" env -u TMUX_TMPDIR tmux -L default ls
 $S -c $T/team.yaml status 2>&1 | grep -qE '^em +.* tt-em +up ' || bad "test setup: status does not show em as up"
 gstatus() {
   local how=$1 out; shift; : > $GREF
+  gguard || { bad "status $how: not tried, as tmux here is $(command -v tmux) and not the guard"; return; }
   out=$(TMUX_GUARD_LOG=$GREF "$@" $S -c $T/team.yaml status 2>&1)
   [ -s $GREF ] && ! grep -qv '^tmux-guard: refused: tmux has-session ' $GREF && echo "$out" | grep -qE '^em +.* tt-em +down ' \
     && ok "the launcher's status $how: each of its tmux calls fails at the guard, and it shows em as down" || { bad "status $how"; echo "$out" | head -4 | cut -c1-200; head -3 $GREF | cut -c1-200; }
 }
 gstatus "with TMUX_TMPDIR naming a folder that is not there" env TMUX_TMPDIR=$T/no-such-dir
 gstatus "with TMUX naming the socket in /tmp" env TMUX=$GDEF,1,0
-# A stand-in seat. Its PATH and the guard's variables reach it through the run's tmux server, and TMUX
-# names the run's socket in its pane. The script runs as a seat's command would (a submitted ! line).
+# A stand-in seat. The guard's variables reach it through the run's tmux server, and TMUX names the run's
+# socket in its pane. Its PATH does not: the pane runs a login shell, whose profile builds PATH again with
+# the system's folders first, so the stand-in claude puts the guard first on its own PATH when it starts
+# (test/e2e.sh, where it is compiled). The script runs as a seat's command would (a submitted ! line), and
+# calls tmux only once it has seen that its tmux is the guard.
 cat > $T/gseat.sh <<G
-{ command -v tmux; tmux display-message -p '#{socket_path}'
-  TMUX_GUARD_LOG=$GREF.seat env -u TMUX TMUX_TMPDIR=$T/no-such-dir tmux ls; echo "rc=\$?"
-  TMUX_GUARD_LOG=$GREF.seat env TMUX=$GDEF,1,0 tmux ls; echo "rc=\$?"; } > $T/gseat.out 2>&1
+{ command -v tmux
+  if [ "\$(command -v tmux)" = "$SRC/test/guard/tmux" ]; then
+    tmux display-message -p '#{socket_path}'
+    TMUX_GUARD_LOG=$GREF.seat env -u TMUX TMUX_TMPDIR=$T/no-such-dir tmux ls; echo "rc=\$?"
+    TMUX_GUARD_LOG=$GREF.seat env TMUX=$GDEF,1,0 tmux ls; echo "rc=\$?"
+  else echo "tmux here is not the guard: no call made"; fi; } > $T/gseat.out 2>&1
 touch $T/gseat.done
 G
 rm -f $T/gseat.out $T/gseat.done $GREF.seat

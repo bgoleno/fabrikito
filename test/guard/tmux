@@ -24,7 +24,9 @@
 # passed on as written; one from TMUX_TMPDIR by its resolved path, as tmux itself would use it.
 #
 # It guards against mistakes, not against a process that means to get out: one that runs the real tmux by
-# its path, or sets these variables, is not held.
+# its path, or sets these variables, is not held. Nor is a caller whose PATH was built again without the
+# guard first, which is what the login shell of a tmux pane does: test/e2e.sh has its stand-in claude put
+# the guard back first, and the seats of a team with the real claude in a live test are not held.
 # Its messages must not hold the words the launcher's own refusals are recognised by in the tests
 # ("default tmux server", "--default-socket"): test/e2e-tmux-guard.sh checks that.
 call="tmux $*"

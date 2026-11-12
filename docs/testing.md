@@ -26,10 +26,11 @@ and falls back to the default server, silently, when `TMUX_TMPDIR` is empty or n
 exist. A throwaway team's worktrees on the volume are not removed by `down`; remove them by their paths.
 
 `run` also puts the [tmux guard](#the-tmux-guard) first on `PATH`, for that folder: a tmux call the command
-makes, or anything it starts, gets through only to a socket inside `$d`, whatever `TMUX`, `TMUX_TMPDIR`,
-`-L` or `-S` it comes with. Any other call fails with a message that names it
-(`tmux-guard: refused: tmux kill-server: ...`). A command that runs tmux by its full path, or changes
-`PATH`, is not held.
+makes, or a command it runs makes, gets through only to a socket inside `$d`, whatever `TMUX`,
+`TMUX_TMPDIR`, `-L` or `-S` it comes with. Any other call fails with a message that names it
+(`tmux-guard: refused: tmux kill-server: ...`). Not held: a command that runs tmux by its full path or
+changes `PATH`, and the seats of a team started in the environment, whose panes run a login shell that
+builds `PATH` again.
 
 ## The end-to-end test
 
@@ -101,8 +102,10 @@ starts no tmux server, so it can run alone, and against another copy of the file
 Exporting `TMUX_TMPDIR` keeps a run's tmux calls private only while nothing goes wrong: one bare `tmux`
 call after the folder is gone, or with `TMUX` set, reaches the default server. So the `tmux` first on the
 `PATH` of a run is a guard, `test/guard/tmux` ([#307](../../../issues/307)). It is the tmux of the test's
-own shell, of every area file, of the launcher under test and of every stand-in seat, which inherit `PATH`
-through the run's tmux server. A new area file gets it without doing anything.
+own shell, of every area file and of the launcher under test, which inherit that `PATH`. A stand-in seat
+does not: its pane runs a login shell, whose profile builds `PATH` again with the system's folders first.
+So the stand-in `claude` puts the guard first on its own `PATH` when it starts, and everything a stand-in
+seat runs has it. A new area file gets all of this without doing anything.
 
 - It works out the socket a call would use as tmux does (`-S`, else `-L`, else the one `TMUX` names, else
   `tmux-<uid>/default` under `TMUX_TMPDIR`), without tmux's fallback to `/tmp`.
@@ -122,7 +125,19 @@ through the run's tmux server. A new area file gets it without doing anything.
   `TMUX_GUARD_ROOTS` on, as it passes `TMUX_TMPDIR`.
 
 It guards against mistakes, not against a process that means to get out: a call to the real tmux by its
-full path is not held.
+full path is not held. Two more callers are not held, for the reason above (a pane's login shell builds
+`PATH` again, and the real tmux is then the first one on it):
+
+- a command typed at the bare shell of a pane, outside the stand-in `claude`;
+- the seats of a team with the real `claude`, started through `test/live-env.sh run`: the guard is the
+  tmux of the command `run` starts and of what that command runs directly, not of what runs in the panes.
+
+In a pane `TMUX` names the pane's own server, so a bare tmux call there stays on it; the call that can get
+out is one that unsets `TMUX` or names another socket.
+
+A case that makes a call the guard must refuse first checks that its `tmux` is the guard
+(`command -v tmux`), and fails without making the call if it is not; where it can, it makes a call that
+only reads. Otherwise a guard that is missing sends the very call that proves it to the user's own server.
 
 `test/e2e-tmux-guard.sh` checks the guard call by call, for `tmux ls` and `tmux kill-server`: what it
 refuses and what it passes on, and the same through `test/live-env.sh run` and `down`. The real tmux

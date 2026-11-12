@@ -47,6 +47,10 @@ together in one iTerm tab. Read `README.md` for use and `teams/example.yaml` for
 - In an e2e run and under `test/live-env.sh run`, `tmux` is the guard (#307): a call whose socket is outside
   the run's folders fails with `tmux-guard: refused`. A case that means to reach another server names that
   folder in `TMUX_GUARD_ROOTS`, and a command run with `env -i` passes the variable on.
+- A seat's pane runs a login shell, whose profile builds `PATH` again with the system's folders first: a
+  stand-in first on the `PATH` of `up` is not first in the seat. Other variables do reach it. The stand-in
+  `claude` of the e2e puts the tmux guard first itself; a case that makes a call the guard must refuse
+  checks `command -v tmux` first and does not make the call otherwise (#307).
 - bash 3.2 runs the EXIT trap in the child forked for a pipeline or `&` when an unset variable ends a simple
   command there under `set -u`, and `BASH_SUBSHELL` is 0 in it. A trap that cleans up checks it is the top
   shell by pid (`e2e_top` in `test/e2e.sh`).

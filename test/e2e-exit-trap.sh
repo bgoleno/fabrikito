@@ -33,7 +33,8 @@ X=$(mktemp -d "$xt_tmp/e2e-trap.XXXXXX") || { echo "cannot make a scratch folder
 LOG=$X/calls.log; uid=$(id -u)
 mkdir -p "$X/bin" "$X/src/test/e2e" "$X/vol"
 cp "$UNDER" "$X/src/test/e2e.sh" || exit 2
-echo 'int main(void) { return 0; }' > "$X/src/test/e2e/fake-claude.c"
+# The stand-in claude of the tree this script is in, as the file under test compiles it: one case runs it.
+cp "$SRC/test/e2e/fake-claude.c" "$X/src/test/e2e/fake-claude.c" || exit 2
 for a in lib $areas; do echo "e2e_end=$a" > "$X/src/test/e2e/$a.sh"; done
 if [ -f "$SRC/test/guard/tmux" ]; then mkdir "$X/src/test/guard" && cp "$SRC/test/guard/tmux" "$X/src/test/guard/tmux" && chmod +x "$X/src/test/guard/tmux" || exit 2; fi
 # The stand-ins. Each line they write is one call: what it would have reached, then its arguments. They
@@ -297,6 +298,28 @@ e2e_end='"$first"
 [ "$rc" != 0 ] && [ "$(aborted)" = 0 ] && printf '%s\n' "$out" | grep -qE '^RESULT pass=[1-9][0-9]* fail=1$' && printf '%s\n' "$out" | grep -qE '^FAIL the tmux guard refused 1 tmux call'; check "unasked refusal: the run reaches its end and fails, with one failure that says the guard refused a call (exit $rc)" $?
 printf '%s\n' "$out" | grep -qF 'tmux-guard: refused: tmux has-session -t =tt-em:'; check "unasked refusal: the run shows the call that was refused" $?
 [ -z "$(leaks)" ]; check "unasked refusal: the call reached no tmux" $?
+finish
+
+# A seat's pane runs a login shell, whose profile builds PATH again with the system's folders first: the
+# guard, first on the run's PATH, is not first there (seen in a full run, where a seat's tmux was the real
+# one). So the stand-in claude, as the file under test compiles it, puts the guard first itself. It is
+# started here with a PATH that has neither the guard nor the stand-in tmux, and given one submitted !
+# line, as a seat's command is. The line calls tmux only once it has seen that its tmux is the guard.
+echo "--- the stand-in claude of the run puts the guard first on its own PATH"
+rm -f "$X/seat" "$X/seat.done"
+nested 'xt_socket "$xt_sock"; xt_mark "at the start"
+cat > "$T/seat.sh" <<S
+{ command -v tmux
+  if [ "\$(command -v tmux)" -ef "$SRC/test/guard/tmux" ]; then tmux ls; echo "rc=\$?"; else echo "no call made"; fi; } > "$xt_x/seat" 2>&1
+touch "$xt_x/seat.done"
+S
+printf "!sh %s/seat.sh\r" "$T" | env PATH=/usr/bin:/bin "$T/bin/claude" > /dev/null 2>&1
+for xt_i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do [ -e "$xt_x/seat.done" ] && break; sleep 0.25; done
+e2e_end='"$first"
+seat1=$(sed -n 1p "$X/seat" 2>/dev/null)   # before the check: a $( ) among its words would set the $? it is given
+[ -e "$X/seat.done" ] && [ "$seat1" = "$X/src/test/guard/tmux" ]; check "stand-in claude: tmux in a ! line it runs is the guard, though its own PATH did not have it (it is: ${seat1:-none})" $?
+[ "$(grep '^tmux	' "$LOG" | head -1)" = "tmux	tmpdir=$t/tmux	dir=yes	TMUX=unset	sock=yes	-S $ownp ls" ]; check "stand-in claude: the call of its ! line goes through the guard, to the run's own socket" $?
+rm -f "$X/seat" "$X/seat.done"
 finish
 
 echo "--- the file under test will not start without its guard"

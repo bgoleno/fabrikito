@@ -22,8 +22,9 @@
 # where tmux keeps the default server. A command that sets its own TMUX, TMUX_TMPDIR, -L or -S is held
 # by the tmux guard (test/guard/tmux, #307), which run puts first on PATH: a tmux call gets through only
 # to a socket inside <dir>, and any other fails with a message that names it. Outside its reach: a
-# command that runs tmux by its full path or changes PATH, and worktrees a throwaway team made on a
-# volume (down --yes keeps them).
+# command that runs tmux by its full path or changes PATH; the seats of a team started in <dir>, whose
+# panes run a login shell that builds PATH again, with the real tmux first; and worktrees a throwaway
+# team made on a volume (down --yes keeps them).
 #
 # run sets TEAM_ROLE=live-test, the driver label (#115): say run through it sends as [from live-test],
 # whichever seat drives the test, and never as [from owner]. say refuses that label on the default
