@@ -131,6 +131,7 @@ The reference lives in [`docs/`](docs/README.md). Start with [How it works](docs
 | [Pinned releases](docs/pinned-release.md) | Run a team from a checkout fixed at a release. |
 | [Updating Claude Code](docs/updating-claude-code.md) | Update Claude Code on a running team. |
 | [Project facts](docs/facts.md) | Describe the project elsewhere: checked statements on what it does, the safety model and its limits. |
+| [Release notes: 0.3.0](docs/release-0.3.0.md) | Upgrade from 0.2.0: what to do, what is new, what changed. |
 | [Testing](docs/testing.md) | A live test on a private tmux server, and the end-to-end test. |
 | [Troubleshooting](docs/troubleshooting.md) | Find what you see (an error, a refused message, a silent seat) and what to do. |
 
