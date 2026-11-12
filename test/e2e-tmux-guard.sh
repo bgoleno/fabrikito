@@ -145,6 +145,9 @@ mkdir -p "$X/out/a" "$X/out/a
 $X/out"
 both "-S into a folder outside the run's with a line break in its path" -- -S "$X/out/a
 $X/out/default"
+# The same folder named as the run's: the second line of its resolved path would be read as a root.
+both "-S outside the run's, when a root's path has a line break and its second line names that folder" "TMUX_GUARD_ROOTS=$X/out/a
+$X/out" -- -S "$X/out/d/default"
 g -- -S "$DEF" -S "$OWN" ls; passed "-S twice: the last one counts, as for tmux, and it is the run's" -S "$OWN" ls
 both "-S twice, the last one the socket in /tmp" -- -S "$OWN" -S "$DEF"
 # The user's id comes from the system. bash 3.2 and dash both take UID from the environment when it is there.
@@ -157,6 +160,8 @@ for sh in /bin/sh /bin/dash; do
   [ -x "$sh" ] || continue
   : > "$LOG"; call="-S -/sock kill-server"; limited env -i PATH="$X/g:$X/bin:$sys" "OLDPWD=$X/cwd/-" "TMUX_GUARD_ROOTS=$R" "TMUX_GUARD_REAL=$X/bin/tmux" "$sh" "$X/g/tmux" -S -/sock kill-server; rec=$(cat "$LOG")
   refused; check "refused, -S into a folder named - outside the run's, which is also the folder before, OLDPWD ($sh)" $?
+  : > "$LOG"; limited env -i PATH="$X/g:$X/bin:$sys" "OLDPWD=$R/tmux" "TMUX_GUARD_ROOTS=$R" "TMUX_GUARD_REAL=$X/bin/tmux" "$sh" "$X/g/tmux" -S -/sock kill-server; rec=$(cat "$LOG")
+  refused; check "refused, -S into a folder named - outside the run's, when the folder before is one of the run's ($sh)" $?
 done
 both "-S written in one word (-S<path>)" -- "-S$DEF"
 
