@@ -113,6 +113,10 @@ still there as a shim that prints a notice.
 
 - An interrupt while git is still adding a new worktree removes that worktree and starts no seat
   ([New worktrees](team-file.md#new-worktrees)).
+- A team whose state folder has a non-ASCII character in its path loads in any locale, `LC_ALL=C`
+  and no locale at all (cron, launchd, `env -i`) included; before, outside a UTF-8 locale, every
+  command that loads the team file stopped with an error once `up` had filled the state folder
+  ([#360](../../../issues/360)).
 
 **The shared rules and the skills**
 
