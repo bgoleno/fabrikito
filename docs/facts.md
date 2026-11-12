@@ -21,7 +21,7 @@ Source: [How it works](how-it-works.md), first paragraph; the [README](../README
 | Starts each role as a tmux session running `claude`, in file order, and skips a seat that is already running. | [What `up` does](how-it-works.md#what-up-does), step 4 |
 | Gives a `worktree` seat its own git worktree on the storage volume you name, and can copy files into a new one and run an install command there. An existing worktree is never reset. | [New worktrees](team-file.md#new-worktrees) |
 | Generates, for each seat, a prompt (shared rules, role prompt, roster), a read-only settings file and a launch script. | [What a seat is made of](how-it-works.md#what-a-seat-is-made-of) |
-| Writes permission rules into each seat's settings: denies on the files that would change a seat's own rules, and an ask on a push to the base branch. | [Safety](safety.md), first list |
+| Writes permission rules into each seat's settings: denies on the files that would change a seat's own rules, a deny on a typed `tmux kill-server` or `tmux kill-session`, and an ask on a push to the base branch. | [Safety](safety.md), first list |
 | Lets seats message each other by session name with Claude Code's `SendMessage`, and lets you (or a script) type a message into a seat with `say`. | [How seats talk](how-it-works.md#how-seats-talk) |
 | Records every `say` and every `SendMessage` a seat sends in one message log per team. The text of a message to or from the security seat (`sec`) is left out. | [The message log](messaging.md#the-message-log) |
 | Shows each seat its own progress note, branch, uncommitted files and last commits at every start and after every compaction. | [Progress notes](workflow.md#progress-notes) |
