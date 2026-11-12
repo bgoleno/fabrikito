@@ -15,6 +15,7 @@
 #                      scratch folder: a tmux there would be gone with it, and the next one on PATH is real.
 #   TMUX_GUARD_REAL    the real tmux. Without it: the next tmux on PATH after this one.
 #   TMUX_GUARD_LOG     a file each refusal is appended to, as printed.
+#   TMUX_GUARD_VIA     set by the guard itself: the guards a call has come through (see "The real tmux").
 #
 # The socket is worked out as tmux 3.7 does, minus the fallback: -S, else -L under TMUX_TMPDIR, else the
 # one TMUX names, else tmux-<uid>/default under TMUX_TMPDIR. Its folder is resolved through every link
@@ -29,8 +30,9 @@
 call="tmux $*"
 refuse() {
   msg="tmux-guard: refused: $call: $1"
-  echo "$msg" >&2
-  if [ -n "${TMUX_GUARD_LOG:-}" ]; then { echo "$msg" >> "$TMUX_GUARD_LOG"; } 2>/dev/null; fi
+  # printf, not echo: the echo of /bin/sh reads backslashes in the call's own words (\c ends the line)
+  printf '%s\n' "$msg" >&2
+  if [ -n "${TMUX_GUARD_LOG:-}" ]; then { printf '%s\n' "$msg" >> "$TMUX_GUARD_LOG"; } 2>/dev/null; fi
   exit 1
 }
 nl='
@@ -41,17 +43,28 @@ split() {
   name=${1##*/}
 }
 
-# The real tmux: the one named, unless that is this guard again; else the first one on PATH after this
-# guard (after, so that two copies of the guard on one PATH do not call each other for ever), or the
-# first one at all when the guard was not reached through PATH.
+# The real tmux: the one named; else the first one on PATH after this guard, or the first one at all when
+# the guard was not reached through PATH. After, because a stand-in that an area puts before the guard
+# and that passes its calls on to it must not get them back. And never a guard that has passed this call
+# on already, this one or a copy (TMUX_GUARD_VIA, one path to a line, which each adds itself to): two
+# copies on one PATH, a tree and an export of it, would otherwise hand a call to each other for ever. A
+# copy that has not seen the call yet may get it, and judges it as this one does.
+via=${TMUX_GUARD_VIA:-}
+passed_on() {
+  pifs=$IFS; IFS=$nl; pglob=; case $- in *f*) ;; *) set -f; pglob=1 ;; esac; pfound=1
+  for v in $via; do if [ "$1" -ef "$v" ]; then pfound=0; break; fi; done
+  IFS=$pifs; [ -z "$pglob" ] || set +f
+  return $pfound
+}
 real=${TMUX_GUARD_REAL:-}
-if [ -z "$real" ] || [ ! -x "$real" ] || [ -d "$real" ] || [ "$real" -ef "$0" ]; then
+if [ -z "$real" ] || [ ! -x "$real" ] || [ -d "$real" ] || passed_on "$real"; then
   real=; first=; seen=
   oifs=$IFS; IFS=:; set -f
   for d in $PATH; do
     c=${d:-.}/tmux
     [ -x "$c" ] && [ ! -d "$c" ] || continue
     if [ "$c" -ef "$0" ]; then seen=1; continue; fi
+    passed_on "$c" && continue
     if [ -n "$seen" ]; then real=$c; break; fi
     [ -n "$first" ] || first=$c
   done
@@ -59,6 +72,7 @@ if [ -z "$real" ] || [ ! -x "$real" ] || [ -d "$real" ] || [ "$real" -ef "$0" ];
   [ -n "$real" ] || [ -n "$seen" ] || real=$first
   [ -n "$real" ] || refuse "no tmux but this guard is on PATH, and TMUX_GUARD_REAL names none"
 fi
+passed_on "$0" || { TMUX_GUARD_VIA=${via:+$via$nl}$0; export TMUX_GUARD_VIA; }
 
 # tmux's own options, up to the command. -V and -h print and exit, and reach no server.
 flags=; path=; label=; conf=; shcmd=; feat=; has_s=; has_l=; has_f=; has_c=; has_t=
@@ -72,14 +86,20 @@ while getopts ':2CDhlNuVvc:f:L:S:T:' o; do
     f) [ -z "$has_f" ] || refuse "more than one -f, which this guard does not pass on"
        conf=$OPTARG; has_f=1 ;;
     c) shcmd=$OPTARG; has_c=1 ;;
-    T) feat=$OPTARG; has_t=1 ;;
+    T) [ -z "$has_t" ] || refuse "more than one -T, which this guard does not pass on"
+       feat=$OPTARG; has_t=1 ;;
     :) refuse "the option -$OPTARG lacks its value" ;;
     *) refuse "the option -$OPTARG is not one this guard knows" ;;
   esac
 done
 shift $((OPTIND - 1))
+# What is left is the command. After -- it may begin with a dash, and tmux then takes it for a command
+# (and fails). Behind this guard's own -S it would be an option again, and of two -S tmux takes the last.
+case ${1:-} in -*) refuse "the command begins with a dash ($1), which tmux would read as one of its options behind this guard's own" ;; esac
 
-uid=${UID:-$(id -u)}
+# From the system, not from UID: bash 3.2 and dash both take that from the environment when it is there.
+uid=$(id -u) || refuse "id -u failed"
+case $uid in ""|*[!0-9]*) refuse "id -u gave no user id ($uid)" ;; esac
 case ${TMUX_GUARD_ROOTS:-} in
   "") refuse "TMUX_GUARD_ROOTS is not set, so no folder is this run's" ;;
   *"$nl"*) refuse "TMUX_GUARD_ROOTS holds a line break" ;;
@@ -92,16 +112,19 @@ forbidden=/tmp/tmux-$uid
 # be entered) and roots to the run's folders, resolved the same way, one to a line. A root that is not
 # absolute or is not there is left out. One child does all of it, as this runs for every tmux call.
 resolve() {
+  # ./ before a relative folder, and nothing cd prints is kept: cd takes - for the folder before, and
+  # prints where it went, which would be read here as one more line, that is, as one more root.
+  case $1 in /*) f=$1 ;; *) f=./$1 ;; esac
   r=$(
     CDPATH=
-    { cd -P -- "$1" 2>/dev/null && pwd -P; } || echo
+    { cd -P -- "$f" >/dev/null 2>&1 && pwd -P; } || echo
     IFS=:; set -f
     # (/*) with both parentheses: bash 3.2 takes a lone ) inside $( ) for the end of the substitution
-    for d in $TMUX_GUARD_ROOTS; do case $d in (/*) cd -P -- "$d" 2>/dev/null && pwd -P ;; esac; done
+    for d in $TMUX_GUARD_ROOTS; do case $d in (/*) cd -P -- "$d" >/dev/null 2>&1 && pwd -P ;; esac; done
   )
   case $r in *"$nl"*) pdir=${r%%"$nl"*}; roots=${r#*"$nl"} ;; *) pdir=$r; roots= ;; esac
   # A folder whose resolved path holds a line break would be cut short above: it must be the same folder.
-  [ -z "$pdir" ] || [ "$pdir" -ef "$1" ] || pdir=
+  [ -z "$pdir" ] || [ "$pdir" -ef "$f" ] || pdir=
 }
 # inside <folder, resolved>: it is one of the roots or below one. / is no root.
 inside() {

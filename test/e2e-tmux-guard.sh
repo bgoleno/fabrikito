@@ -139,8 +139,25 @@ both "-S into a folder that is not there (the guard makes none for -S)" -- -S "$
 xt_socket "$X/out/d/default"; ln -s "$X/out/d/default" "$R/tmux/tmux-$uid/linked"
 both "-S to a link in the run's folder that leads to a socket outside it" -- -S "$R/tmux/tmux-$uid/linked"
 both "-S in a cluster of options (-uS)" -- -uS "$DEF"
+# A folder with a line break in its path, made so that its second line reads as a folder of its own: the
+# guard reads resolved paths one to a line, and must not take the first line for the socket's folder.
+mkdir -p "$X/out/a" "$X/out/a
+$X/out"
+both "-S into a folder outside the run's with a line break in its path" -- -S "$X/out/a
+$X/out/default"
 g -- -S "$DEF" -S "$OWN" ls; passed "-S twice: the last one counts, as for tmux, and it is the run's" -S "$OWN" ls
 both "-S twice, the last one the socket in /tmp" -- -S "$OWN" -S "$DEF"
+# The user's id comes from the system. bash 3.2 and dash both take UID from the environment when it is there.
+both "UID in the environment is another user's, the roots are /tmp, -S to the socket in /tmp" UID=12345 TMUX_GUARD_ROOTS=/tmp -- -S "$DEF"
+g UID=12345 -- ls; passed "UID in the environment is another user's: the socket is still in tmux-<the real uid>" -S "$OWN" ls
+# cd takes a folder named - for the one before (dash does, even after --): the socket's folder would then
+# be judged as some other folder. Run under dash where there is one, as /bin/sh is not dash everywhere.
+mkdir "$X/cwd/-" "$X/cwd/-/tmux-$uid"
+for sh in /bin/sh /bin/dash; do
+  [ -x "$sh" ] || continue
+  : > "$LOG"; call="-S -/sock kill-server"; limited env -i PATH="$X/g:$X/bin:$sys" "OLDPWD=$X/cwd/-" "TMUX_GUARD_ROOTS=$R" "TMUX_GUARD_REAL=$X/bin/tmux" "$sh" "$X/g/tmux" -S -/sock kill-server; rec=$(cat "$LOG")
+  refused; check "refused, -S into a folder named - outside the run's, which is also the folder before, OLDPWD ($sh)" $?
+done
 both "-S written in one word (-S<path>)" -- "-S$DEF"
 
 echo "--- the run's folders: TMUX_GUARD_ROOTS"
@@ -173,6 +190,14 @@ echo "--- tmux's own options"
 g -- -2 -u -f /dev/null -T "256,RGB" new-session -d -s "a b" "echo 'x  y'"; passed "options before the command are kept, and every argument as given" -S "$OWN" -2u -f /dev/null -T "256,RGB" new-session -d -s "a b" "echo 'x  y'"
 g -- -CC -N attach; passed "a flag given twice (-CC)" -S "$OWN" -CCN attach
 g -- -- ls; passed "-- before the command" -S "$OWN" ls
+# The guard puts its own -S before the caller's words. A word with a dash after -- is a command to tmux
+# (and an error); passed on without the --, it would be an option, and a second -S is the one tmux takes.
+both "-- and then -S: an option where the command belongs" -- -- -S "$DEF"
+g -- -- -x; refused; check "refused, -- and then another word with a dash" $?
+both "-T twice (tmux adds them up, the guard passes one)" -- -T 256 -T RGB
+both "-f twice (tmux loads both, the guard passes one)" -- -f /dev/null -f /dev/null
+g TMUX_TMPDIR= -- send-keys 'a\tb\c' x; refused && case $err in *'send-keys a\tb\c x: TMUX_TMPDIR is not set or is empty'*) true ;; *) false ;; esac
+check "a refusal names the call as it was given, backslashes and all, and still gives its reason" $?
 g -- ; passed "no command at all" -S "$OWN"
 g -TMUX_GUARD_ROOTS -TMUX_TMPDIR -- -V; passed "-V reaches no server: passed on as it is, whatever the environment" -V
 both "an option the guard does not know" -- -Z
@@ -182,6 +207,19 @@ echo "--- finding the real tmux, and the record of refusals"
 g -TMUX_GUARD_REAL -- ls; passed "TMUX_GUARD_REAL not set: the first tmux on PATH that is not the guard" -S "$OWN" ls
 g "TMUX_GUARD_REAL=$X/g/tmux" -- ls; passed "TMUX_GUARD_REAL names the guard itself: the next tmux on PATH, no loop" -S "$OWN" ls
 g "TMUX_GUARD_REAL=$X/none/tmux" -- ls; passed "TMUX_GUARD_REAL names nothing: the next tmux on PATH" -S "$OWN" ls
+# Two copies of the guard (a tree and an export of it, both with a guard on PATH) must not hand a call to
+# each other for ever: a copy that has passed the call on is not taken for the real tmux again.
+mkdir "$X/g2"; cp "$X/g/tmux" "$X/g2/tmux"; chmod +x "$X/g2/tmux"
+: > "$LOG"; call=ls; limited env -i PATH="$X/g:$X/g2:$X/g:$X/bin:$sys" "TMUX_GUARD_ROOTS=$R" "TMUX_TMPDIR=$R/tmux" tmux ls; rec=$(cat "$LOG")
+passed "two copies of the guard on PATH, the first one twice: the call ends at the real tmux" -S "$OWN" ls
+: > "$LOG"; call=-V; limited env -i PATH="$X/g:$X/g2:$X/g:$X/bin:$sys" tmux -V; rec=$(cat "$LOG")
+passed "two copies of the guard on PATH, the first one twice, -V" -V
+g "TMUX_GUARD_REAL=$X/g2/tmux" -- ls; passed "TMUX_GUARD_REAL names a second copy of the guard that is not on PATH: the call ends at the real tmux" -S "$OWN" ls
+# A stand-in before the guard on PATH that passes its calls on to it, as the areas of test/e2e/ build
+# them: the guard must not take that stand-in for the real tmux, or the two call each other for ever.
+mkdir "$X/shim"; printf '#!/bin/sh\nexec %s "$@"\n' "$X/g/tmux" > "$X/shim/tmux"; chmod +x "$X/shim/tmux"
+: > "$LOG"; call=ls; limited env -i PATH="$X/shim:$X/g:$X/bin:$sys" "TMUX_GUARD_ROOTS=$R" "TMUX_TMPDIR=$R/tmux" tmux ls; rec=$(cat "$LOG")
+passed "a stand-in before the guard on PATH that passes on to it: the real tmux is the one after the guard" -S "$OWN" ls
 mkdir "$X/via"; ln -s "$X/g/tmux" "$X/via/tmux"
 : > "$LOG"; limited env -i PATH="$X/via:$sys" "TMUX_GUARD_ROOTS=$R" "TMUX_GUARD_REAL=$X/bin/tmux" "TMUX_TMPDIR=$R/tmux" tmux ls; rec=$(cat "$LOG"); call=ls
 passed "the guard reached through a link, with no other tmux on PATH" -S "$OWN" ls
