@@ -38,7 +38,8 @@ together in one iTerm tab. Read `README.md` for the overview, `docs/` for use, a
 - Gates: `bash -c 'rc=0; for f in "$@"; do bash -n "$f" || rc=1; done; exit $rc' gate fabrikito factory.sh lib/*.sh test/*.sh test/e2e/*.sh test/guard/tmux`,
   `bash -c 'rc=0; for f in "$@"; do ruby -c "$f" || rc=1; done; exit $rc' gate lib/*.rb`
   (one check for each file: `bash -n a b` and `ruby -c a b` check only `a`), and
-  `TEST_VOLUME=/Volumes/<a mounted, writable volume> test/e2e.sh` (all assertions must pass).
+  `env -u TMUX TEST_VOLUME=/Volumes/<a mounted, writable volume> test/e2e.sh` (all assertions must pass; it takes the
+  host's run lock itself and waits for its turn, #309).
 - Do not run the e2e test, or any experiment, against the user's real tmux server: unset `TMUX` and use
   `TMUX_TMPDIR`, as the test does. Never kill or restart seats of a running team without being asked.
 - Commit or push only when asked. The repository is public: write issue, PR, comment and commit text for a

@@ -148,7 +148,8 @@ may close several) and fills in the pull request template. Nothing tracked may n
 person, drive or path. Before a pull request, run
 the gate: `bash -c 'rc=0; for f in "$@"; do bash -n "$f" || rc=1; done; exit $rc' gate fabrikito factory.sh lib/*.sh test/*.sh test/e2e/*.sh test/guard/tmux`,
 `bash -c 'rc=0; for f in "$@"; do ruby -c "$f" || rc=1; done; exit $rc' gate lib/*.rb`
-(one check for each file: `bash -n a b` and `ruby -c a b` check only `a`), and `env -u TMUX TEST_VOLUME=/Volumes/<a mounted, writable volume> test/e2e.sh`.
+(one check for each file: `bash -n a b` and `ruby -c a b` check only `a`), and `env -u TMUX TEST_VOLUME=/Volumes/<a mounted, writable volume> test/e2e.sh`
+(it takes the host's run lock itself and waits for its turn).
 See [Testing](docs/testing.md).
 
 ## License

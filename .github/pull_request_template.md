@@ -17,6 +17,7 @@ bash -c 'rc=0; for f in "$@"; do ruby -c "$f" || rc=1; done; exit $rc' gate lib/
 env -u TMUX TEST_VOLUME=/Volumes/<a mounted, writable volume> test/e2e.sh   (all assertions must pass)
 The first two run one check for each file: "bash -n a b" and "ruby -c a b" check only a.
 Run the e2e with TMUX unset, as CLAUDE.md requires, so it never touches the tmux server you work in.
+It takes the host's run lock itself and waits for its turn: no run-exclusive in front is needed.
 This text is public: write commands and log paths with placeholders (/Volumes/YourDrive, $TMPDIR/gate.log),
 never with a local path, a drive name or a user name. -->
 
