@@ -358,6 +358,8 @@ roles:
   #   effort: medium
   #   summary: keeps the documentation true, small and findable
   #   workdir: { type: worktree }
+  #   # Set a tmpdir when repo.docs_repos is used: the writer's clones go under it (see docs_repos above).
+  #   # tmpdir: /Volumes/YourDrive/tmp/example/dw
   #   prompt: ../roles/writer.md
   #   skills:
   #     - "fabrikito:start-task": when you take an assigned issue, before changing anything
