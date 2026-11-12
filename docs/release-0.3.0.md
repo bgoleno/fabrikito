@@ -137,6 +137,10 @@ still there as a shim that prints a notice.
 - The gate's syntax step checks every script, one file at a time, with the two commands in
   `CLAUDE.md`. The end-to-end test and `test/live-env.sh run` put a tmux guard first on `PATH`, so a
   test's tmux call reaches only the run's own server ([The tmux guard](testing.md#the-tmux-guard)).
+- `test/e2e.sh` takes the host's run lock itself and waits for its turn, whoever starts it, so it no
+  longer needs `run-exclusive` in front of it. It stops before it makes anything if the tree changed
+  while it waited, and `E2E_NO_LOCK=1` runs it without the lock
+  ([One run at a time](testing.md#one-run-at-a-time)).
 
 ## Known limits
 
@@ -150,6 +154,9 @@ that the changes in this release touch:
   script that runs one, `sh -c`, tmux under another path, and a signal to the tmux process
   (`pkill tmux`) are not caught ([Safety](safety.md), "What the rules cannot do";
   [#358](../../../issues/358)).
+- **The stop gate does not take the run lock,** and a gate command that takes it itself, as this
+  repository's `test/e2e.sh` now does, waits inside the gate's time limit while another heavy run holds
+  the lock ([How it behaves](gate.md#how-it-behaves), [#236](../../../issues/236)).
 - **The writer prompt is long.** The example's writer seat renders 195 lines of the 199 that `check`
   warns above, so a team with more than a few lines of `prompts.project` gets that warning for the
   writer ([#347](../../../issues/347)).
