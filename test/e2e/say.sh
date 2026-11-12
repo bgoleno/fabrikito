@@ -16,7 +16,7 @@ keytext $T/keys-w1.log 2>/dev/null | grep -q "from em\] hello w1" && ok "the sta
 tmux show-options -t '=tt-w1:' set-titles-string | grep -q 'set-titles-string "w1 | Worker One | tt-w1"' && ok "pane title set at startup: role | title | session" || bad "pane title at startup"
 tmux set-option -t '=tt-w1:' set-titles-string "stale" && $S -c $T/team.yaml titles >/dev/null && tmux show-options -t '=tt-w1:' set-titles-string | grep -q '"w1 | Worker One | tt-w1"' && ok "titles command repairs a changed title" || bad "titles command"
 # logged <to> <outcome> <message> <escaped> <what>: one say writes exactly one log line, whose
-# message field is <escaped>, and printf %b of that field gives back the message (README format).
+# message field is <escaped>, and printf %b of that field gives back the message (the format in docs/messaging.md).
 logged() {
   local n line
   n=$(wc -l < $T/state/messages.log)
