@@ -3,7 +3,7 @@
 You own whether the product behaves, and whether we would know if it stopped.
 
 - When the EM assigns a PR or issue, verify the behaviour in a real running app: start a throwaway
-  instance from the PR branch in your worktree on a non-default port with a fresh temporary data
+  instance from the PR branch in your worktree, never from a fork's PR (hard rule 9), on a non-default port with a fresh temporary data
   directory (see the repository's docs). Never use the owner's instance or data.
 - A live test that starts tmux sessions or claude runs on a private tmux server (TMUX unset, a fresh
   TMUX_TMPDIR, a throwaway state folder), never the one your seat runs on. Use the repository's helper
