@@ -170,6 +170,59 @@ out=$(TEAM_STATE_DIR=$T/state-tz $S -c $T/td-tz.yaml check 2>&1)
 echo "$out" | grep -F 'added:' | sed -n 1p | grep -qF "Edit allow on its own temp folder ($TD/tz/w1)" && ! echo "$out" | grep -F 'added:' | sed -n 3p | grep -qF "own temp folder" && ok "check shows the temp folder allow for a seat that has one, and not for one that has none" || { bad "check shows the tmpdir allow"; echo "$out" | grep -F 'added:'; }
 rm -rf "$TD/tz" "$TD/ty" 2>/dev/null
 
+echo "--- temp folders: a tmpdir overlaps nothing else of the team (#300)"
+# A seat gets an Edit allow on everything in its temp folder (#252), so the folder may not be, hold or sit
+# inside another role's temp folder, the state folder, the repository or a working directory, nor be or hold
+# the worktree folder. Each case is one team file, tv, that loading must refuse, naming the role, both
+# paths and what is overlapped. check stops at loading here: no case needs tmux, and none makes a folder
+# but the one case that needs a repository on the volume, which makes it under $TD and removes it.
+# tdo <what> <em's tmpdir> <more role lines> <sed script for the file, or ""> <part of the message>... [-- VAR=value...]
+tdo() {
+  local what=$1 t=$2 more=$3 script=$4 out rc m good=1 e=; shift 4
+  mk "" "" ", tmpdir: \"$t\""
+  [ -z "$more" ] || echo "$more" >> $T/v.yaml
+  [ -z "$script" ] || sed -i '' "$script" $T/v.yaml
+  local parts=(); while [ $# -gt 0 ] && [ "$1" != -- ]; do parts+=("$1"); shift; done
+  [ $# -eq 0 ] || shift
+  out=$(env "$@" $S -c $T/v.yaml check 2>&1); rc=$?
+  for m in "${parts[@]}"; do echo "$out" | grep -qF -- "$m" || good=; done
+  if [ $rc -ne 0 ] && [ -n "$good" ]; then ok "rejects $what"; else bad "rejects $what (rc=$rc)"; echo "$out" | tail -2; fi
+}
+tdo_w2() { echo "  w2: { title: W, workdir: { type: $1 }, prompt_text: \"p\"${2:+, tmpdir: \"$2\"} }"; }
+TW=$VOL/$ROOT
+tdo "a tmpdir inside another role's tmpdir" "$TD/tv/em" "$(tdo_w2 "project, path: $T/proj" "$TD/tv/em/w2")" "" \
+  "roles.w2.tmpdir ($TD/tv/em/w2) is, holds or sits inside roles.em.tmpdir ($TD/tv/em)"
+tdo "a tmpdir that holds another role's tmpdir" "$TD/tv/w2/em" "$(tdo_w2 "project, path: $T/proj" "$TD/tv/w2")" "" \
+  "roles.w2.tmpdir ($TD/tv/w2) is, holds or sits inside roles.em.tmpdir ($TD/tv/w2/em)"
+tdo "two roles that name one folder as their tmpdir" "$TD/tv/em/w2" "$(tdo_w2 "project, path: $T/proj" "$TD/tv/em/w2")" "" \
+  "roles.w2.tmpdir ($TD/tv/em/w2) is, holds or sits inside roles.em.tmpdir ($TD/tv/em/w2)"
+tdo "a tmpdir that holds the state folder (TEAM_STATE_DIR)" "$TD/tv/em" "" "" \
+  "roles.em.tmpdir ($TD/tv/em) is, holds or sits inside this team's state folder ($TD/tv/em/state, from TEAM_STATE_DIR in the environment)" -- TEAM_STATE_DIR=$TD/tv/em/state
+# The state folder of this one is beside the worktree folder, not in it: a state: inside it is refused for that.
+TS=$VOL/_teamtest-state-$$
+tdo "a tmpdir inside the state folder (state: in the team file)" "$TS/tv/em" "" "s#^roles:#state: $TS\\
+roles:#" \
+  "roles.em.tmpdir ($TS/tv/em) is, holds or sits inside this team's state folder ($TS, from state: in the team file)" -- -u TEAM_STATE_DIR
+[ ! -e "$TS" ] || bad "test setup: check made $TS"
+mkdir -p $TD/tdo-repo
+tdo "a tmpdir inside the repository" "$TD/tdo-repo/tv/em" "" "s#^repo: { path: [^,]*,#repo: { path: $TD/tdo-repo,#" \
+  "roles.em.tmpdir ($TD/tdo-repo/tv/em) is, holds or sits inside this team's repository (repo.path: $TD/tdo-repo)"
+rm -rf "$TD"
+tdo "a tmpdir inside another seat's working directory" "$TW/team-w2/tv/em" "$(tdo_w2 worktree)" "" \
+  "roles.em.tmpdir ($TW/team-w2/tv/em) is, holds or sits inside seat w2's working directory ($TW/team-w2)"
+tdo "a tmpdir inside the seat's own working directory" "$TD/tv/em" "$(tdo_w2 worktree "$TW/team-w2/tmp/tv/w2")" "" \
+  "roles.w2.tmpdir ($TW/team-w2/tmp/tv/w2) is, holds or sits inside seat w2's working directory ($TW/team-w2)"
+# With a worktree seat, whose working directory that tmpdir holds as well: the worktree folder is what is named.
+tdo "a tmpdir that holds the worktree folder" "$TD/tv/em" "$(tdo_w2 worktree)" "s#^storage: .*#storage: { volume: $VOL, root: $ROOT/tmp/tv/em/wt }#" \
+  "roles.em.tmpdir ($TD/tv/em) is or holds this team's worktree folder ($TD/tv/em/wt)"
+tdo "a tmpdir that is the worktree folder" "$TD/tv/em" "" "s#^storage: .*#storage: { volume: $VOL, root: $ROOT/tmp/tv/em }#" \
+  "roles.em.tmpdir ($TD/tv/em) is or holds this team's worktree folder ($TD/tv/em)"
+# Still accepted, beside the cases above this section (which pass unchanged): the tmpdirs of two roles side
+# by side inside the worktree folder, one of them a worktree seat's, with the state folder on the volume too.
+mk "" "" ", tmpdir: \"$TD/tv/em\""; tdo_w2 worktree "$TD/tv/w2" >> $T/v.yaml
+out=$(TEAM_STATE_DIR=$TW/tdo-state $S -c $T/v.yaml check 2>&1); rc=$?
+[ $rc -eq 0 ] && [ ! -e $TD ] && [ ! -e $TW/tdo-state ] && ok "accepts two roles' tmpdirs side by side inside the worktree folder, beside a worktree and a state folder on the volume, and check makes none of them" || { bad "tmpdirs side by side (rc=$rc)"; echo "$out" | tail -2; }
+
 echo "--- two team files with one session prefix: a command acts only on its own team's sessions"
 # Two team files that share sessions.prefix give the same session names on one tmux server. up stores
 # in each session it starts the real path of its state folder and the team's repository, and every
