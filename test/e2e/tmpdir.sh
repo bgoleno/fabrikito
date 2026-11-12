@@ -246,17 +246,22 @@ tmux send-keys -t '=ow-oa:' -l "!env -u TEAM_ROLE TEAM_STATE_DIR=$T/own/sb $S -c
 for own_i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do [ "$(cat $T/own/sb/messages.log 2>/dev/null | wc -l | tr -d ' ')" -gt "$own_n" ] && break; sleep 0.5; done; sleep 1
 [ "$(tail -n +$((own_n + 1)) $T/own/sb/messages.log | cut -f2-4)" = "?	ob	NOT-DELIVERED" ] && grep -q "another team's" $T/own-in.out \
   && ok "say with TEAM_ROLE unset inside another team's session that has a seat's name is refused, not labelled as that seat" || { bad "say from inside another team's session with a seat's name"; tail -n +$((own_n + 1)) $T/own/sb/messages.log | cut -c1-200; cat $T/own-in.out 2>&1 | tail -2; }
-# The first file still reaches its own seat: by its path, and by another spelling of it (a link to its folder).
-ln -s $T/own/a $T/own/alink
+# The first team still reaches its own seat: with its state folder as written, and by another spelling of
+# that folder (through a link above it): the stored value is the folder's real path.
+ln -s $T/own $T/ownlink
 oa env TEAM_ROLE=ob $S -c $OA say oa "from its own file OWN-OK-1" >/dev/null 2>&1; rc1=$?
-oa env TEAM_ROLE=ob $S -c $T/own/alink/team.yaml say oa "through a link OWN-OK-2" >/dev/null 2>&1; rc2=$?; sleep 1
-[ $rc1 = 0 ] && [ $rc2 = 0 ] && keytext $T/keys-oa.log | grep -q "OWN-OK-1" && keytext $T/keys-oa.log | grep -q "OWN-OK-2" && ok "the team file that started a seat still reaches it, by its path and through a link to its folder" || { bad "say from the seat's own team file (rc=$rc1,$rc2)"; }
-# A state folder that was moved while the seat ran: the refusal gives the command that hands the session
-# over, with the value that decides, and that works.
-own_out=$(ob env TEAM_ROLE=ob $S -c $OB say oa "x" 2>&1)
-echo "$own_out" | grep -qF "tmux set-environment -t '=ow-oa' TEAM_STATE_REAL $own_real/sb" && tmux set-environment -t '=ow-oa' TEAM_STATE_REAL $own_real/sb \
+TEAM_STATE_DIR=$T/ownlink/sa TEAM_ROLE=ob $S -c $OA say oa "through a link OWN-OK-2" >/dev/null 2>&1; rc2=$?; sleep 1
+[ $rc1 = 0 ] && [ $rc2 = 0 ] && keytext $T/keys-oa.log | grep -q "OWN-OK-1" && keytext $T/keys-oa.log | grep -q "OWN-OK-2" && ok "the team that started a seat still reaches it, with its state folder as written and through a link that leads to that folder" || { bad "say from the seat's own team (rc=$rc1,$rc2)"; }
+# A state folder that was moved while the seat ran: the refusal prints the command that hands the session
+# over. It names the tmux server, so it is run here as printed from a shell that would reach another one
+# (no TMUX_TMPDIR), and only when it is exactly the expected command: a wrong one never reaches the
+# default server.
+own_sock="$(cd $T/tmux/tmux-$(id -u) && pwd -P)/default"; own_t="tmux -S $own_sock set-environment -t '=ow-oa'"
+own_fix() { own_fixed=${own_out##*hand it over: }; own_fixed=${own_fixed%%$'\n'*}; }
+own_out=$(ob env TEAM_ROLE=ob $S -c $OB say oa "x" 2>&1); own_fix
+[ "$own_fixed" = "$own_t TEAM_STATE_REAL $own_real/sb" ] && env -u TMUX -u TMUX_TMPDIR bash -c "$own_fixed" \
   && ob env TEAM_ROLE=ob $S -c $OB say oa "after the handover OWN-OK-3" >/dev/null 2>&1 && sleep 1 && keytext $T/keys-oa.log | grep -q "OWN-OK-3" \
-  && ok "the refusal names the tmux command that hands a session over, with the value that differs, and after it the team reaches the seat" || { bad "handing a session over to another team"; echo "$own_out" | tail -2; }
+  && ok "the refusal prints the tmux command that hands a session over, with its server and the value that differs; run as printed from a shell that reaches another server, it gives the team the seat" || { bad "handing a session over to another team"; echo "$own_out" | tail -2 | cut -c1-600; }
 ob $S -c $OB down --yes >/dev/null 2>&1
 ! tmux has-session -t '=ow-oa' 2>/dev/null && ok "down --yes from the team a session belongs to stops it" || { bad "down from the owning team left the seat"; tmux kill-session -t '=ow-oa' 2>/dev/null; }
 
@@ -294,6 +299,44 @@ echo "$own_last" | grep -qF "its repository is local/origin.git, this team's is 
 own_refused "down --yes for a team file with the first one's state folder and another repository stops nothing" $S -c $G down --yes
 own_refused "say for a team file with the first one's state folder and another repository delivers nothing" $S -c $G say oa "from the copied file OWN-MARK-G"
 tmux capture-pane -p -t '=ow-oa:' | grep -q "OWN-MARK-G" && bad "the copied file's say shows in the seat"
-op $S -c $P2 down --yes >/dev/null 2>&1
-! tmux has-session -t '=ow-oa' 2>/dev/null || { bad "the pinned team's down left a seat"; tmux kill-session -t '=ow-oa' 2>/dev/null; }
+# Both values differ (the copied file with a state folder of its own): the refusal prints one command per
+# value. Run as printed, they hand the seat over, and that team's say and down then reach it.
+og() { TEAM_STATE_DIR=$T/own/sg "$@"; }
+own_out=$(og env TEAM_ROLE=ob $S -c $G say oa "x" 2>&1); own_fix
+[ "$own_fixed" = "$own_t TEAM_STATE_REAL $own_real/sg; $own_t TEAM_GITHUB local/other.git" ] && env -u TMUX -u TMUX_TMPDIR bash -c "$own_fixed" \
+  && og env TEAM_ROLE=ob $S -c $G say oa "after both values OWN-OK-4" >/dev/null 2>&1 && sleep 1 && keytext $T/keys-oa.log | grep -q "OWN-OK-4" \
+  && ok "a refusal for two values that differ prints two commands, each with its server; run as printed, they give the team the seat" || { bad "handing a session over when both values differ"; echo "$own_out" | tail -2 | cut -c1-700; }
+og $S -c $G down --yes >/dev/null 2>&1
+! tmux has-session -t '=ow-oa' 2>/dev/null && ok "down --yes from the team a session was handed to, with both values, stops it" || bad "down from the team the session was handed to left the seat"
+# own_sweep <which sections>: nothing of them may stay for what comes after. A seat one of the refused
+# commands started after all, or one a refused down left, is a failure, and is stopped here by name, so
+# the next section starts with no seat and fails or passes for its own reason.
+own_sweep() { local s; for s in ow-oa ow-ob; do
+  if tmux has-session -t "=$s" 2>/dev/null; then bad "$1 left $s running"; tmux kill-session -t "=$s" 2>/dev/null; sleep 1; fi; done; }
+own_sweep "the two-team sections"
+
+echo "--- a stored state folder with a non-ASCII character in its path reads back whole in any locale"
+# The launcher reads what up stored in a session back from tmux, and a tmux client outside a UTF-8 locale
+# prints an underscore for each non-ASCII character unless it is asked for UTF-8. The team's own seat
+# must not read as another team's then: under LC_ALL=C and with no locale at all (cron, launchd,
+# env -i), status has no notice for it and down stops it.
+# The session is made by hand, with the two values up would store, and the state folder stays empty:
+# once up has filled a state folder with such a path, the team file's parser stops outside a UTF-8
+# locale before any command gets as far as the session (lib/team_config.rb, so on main as well), and
+# a seat that up started cannot show what this case is about.
+own_E=$'\xc3\xa9'; U=$T/own/u/team.yaml; own_team $U tou Seat; mkdir -p "$T/own-na/s$own_E"
+own_na=$(cd "$T/own-na/s$own_E" && pwd -P)
+own_na_seat() { tmux new-session -d -s ow-oa -e "TEAM_STATE_REAL=$own_na" -e TEAM_GITHUB=local/origin.git "sleep 600"; }
+own_na_c() { env LC_ALL=C TEAM_STATE_DIR="$T/own-na/s$own_E" "$@"; }
+own_na_none() { env -i PATH="$PATH" HOME="$HOME" TMUX_TMPDIR="$TMUX_TMPDIR" TEAM_STATE_DIR="$T/own-na/s$own_E" "$@"; }
+own_na_seat
+out1=$(own_na_c $S -c $U status 2>&1); out2=$(own_na_none $S -c $U status 2>&1)
+echo "$out1" | grep -q "^oa .* ow-oa  *up " && ! echo "$out1" | grep -q "^NOTICE" && echo "$out2" | grep -q "^oa .* ow-oa  *up " && ! echo "$out2" | grep -q "^NOTICE" \
+  && ok "status under LC_ALL=C and with no locale has no notice for the team's own session when the stored state folder has a non-ASCII character" || { bad "status outside a UTF-8 locale and a stored non-ASCII state folder"; { echo "$out1"; echo "$out2"; } | grep -v "^ob \|^ROLE" | cut -c1-400 | tail -4; }
+own_na_c $S -c $U down --yes oa >/dev/null 2>&1
+! tmux has-session -t '=ow-oa' 2>/dev/null && ok "down --yes under LC_ALL=C stops the team's own session when the stored state folder has a non-ASCII character" || { bad "down under LC_ALL=C left the session with a stored non-ASCII state folder"; tmux kill-session -t '=ow-oa' 2>/dev/null; sleep 1; }
+own_na_seat
+own_na_none $S -c $U down --yes oa >/dev/null 2>&1
+! tmux has-session -t '=ow-oa' 2>/dev/null && ok "down --yes with no locale stops the team's own session when the stored state folder has a non-ASCII character" || bad "down with no locale left the session with a stored non-ASCII state folder"
+own_sweep "the section with a non-ASCII state folder"
 e2e_end=tmpdir # the last line: test/e2e.sh checks that the file ran to here

@@ -41,7 +41,10 @@ tests, and wins over the key. (`up` gives the seat's session the folder it used 
 `TEAM_STATE_DIR` in its own environment.) `check` prints the state folder and where it came from, and
 warns when the default `<checkout>/.state/<team>` also exists and leads somewhere else: the key moves
 nothing, so a team that adds it to a running team's state moves the old folder there first. Running
-seats keep their old settings until they restart.
+seats keep their old settings until they restart. Stop them before the folder moves: once the team's
+state folder is another one, `down` and the other commands that reach a seat stop at a seat started
+with the old one, until it is handed over with the command the refusal prints
+([`sessions`](team-file.md)).
 
 ## Set up a release checkout
 

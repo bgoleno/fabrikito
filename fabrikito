@@ -151,9 +151,14 @@ alive() { tmux has-session -t "=$(session "$1")" 2>/dev/null; }
 # set the values. That is also the way out when a state folder was moved or a repository renamed
 # while seats ran (down is refused then too), and the answer gives the command.
 foreign_session() {
-  local sess env line st="" gh="" file="" mine why="" fix=""
+  local sess env line st="" gh="" file="" mine="" why="" fix="" t from
   sess=$(session "$1")
-  env=$(tmux show-environment -t "=$sess" 2>/dev/null) || return 0
+  # -u: a tmux client outside a UTF-8 locale (LC_ALL=C, or no locale at all: cron, launchd, env -i)
+  # prints an underscore for each non-ASCII character of a value. A state folder with such a
+  # character in its path (a home folder with an accent) would then never equal this command's own:
+  # every command would take the team's own seats for another team's, and the handover, which sets
+  # the value that is already there, would change nothing. With -u the value comes back whole.
+  env=$(tmux -u show-environment -t "=$sess" 2>/dev/null) || return 0
   while IFS= read -r line; do
     case $line in
       TEAM_STATE_REAL=*) st=${line#*=} ;;
@@ -162,19 +167,33 @@ foreign_session() {
     esac
   done <<<"$env"
   # The stored path is a real one, so only a state folder written another way needs resolving.
+  # If the path cannot be resolved (ruby failed), the folder is compared as written: with an empty
+  # value here the handover would set the stored value to nothing, which ends the check for the session.
   if [ -n "$st" ] && [ "$st" != "$STATE" ]; then
-    mine=$(real_path "$STATE")
-    if [ "$st" != "$mine" ]; then
-      why="its state folder is $(log_field "$st"), this team's is $mine"
-      fix="tmux set-environment -t '=$sess' TEAM_STATE_REAL $(printf '%q' "$mine")"
-    fi
+    mine=$(real_path "$STATE") || mine=""
+    [ -n "$mine" ] || mine=$STATE
+    if [ "$st" != "$mine" ]; then why="its state folder is $(log_field "$st"), this team's is $mine"; else mine=""; fi
+  else mine=""
   fi
   if [ -n "$gh" ] && [ "$gh" != "$GITHUB" ]; then
     why="${why:+$why, and }its repository is $(log_field "$gh"), this team's is $GITHUB"
-    fix="${fix:+$fix; }tmux set-environment -t '=$sess' TEAM_GITHUB $(printf '%q' "$GITHUB")"
+  else gh=""
   fi
   [ -n "$why" ] || return 0
-  echo "session $sess is another team's${file:+ (started with the team file $(log_field "$file"))}, not this team's ($CONFIG): $why. Two team files with the same sessions.prefix name the same sessions on one tmux server, and so does one team file run with two state folders (TEAM_STATE_DIR). Give this team a prefix of its own, or run the command as the session's team: with its team file (-c) and its state folder. If the session is this team's own (its state folder was moved, or its repository renamed, while the seat ran), hand it over: $fix"
+  # The handover names the tmux server this command reached, as the view's attach does (attach_cmd):
+  # the refusal may be read in one shell and its command typed in another (a refusal in a live test,
+  # its command pasted into a plain terminal), where a bare `tmux set-environment` would relabel a
+  # session of the same name on another server, which with a copied team file is the real team's seat.
+  t="tmux -S $(printf '%q' "$(tmux_socket)") set-environment -t '=$sess'"
+  [ -z "$mine" ] || fix="$t TEAM_STATE_REAL $(printf '%q' "$mine")"
+  [ -z "$gh" ] || fix="${fix:+$fix; }$t TEAM_GITHUB $(printf '%q' "$GITHUB")"
+  # The file that started the session is named when it is another one. With one team file and two
+  # state folders it is this command's own, and the same path printed twice would say nothing.
+  if [ -z "$file" ]; then from=""
+  elif [ "$file" = "$CONFIG" ]; then from=" (started with this same team file)"
+  else from=" (started with the team file $(log_field "$file"))"
+  fi
+  echo "session $sess is another team's$from, not this team's ($CONFIG): $why. Two team files with the same sessions.prefix name the same sessions on one tmux server, and so does one team file run with two state folders (TEAM_STATE_DIR). Give this team a prefix of its own, or run the command as the session's team: with its team file (-c) and its state folder. If the session is this team's own (its state folder was moved, or its repository renamed, while the seat ran), hand it over: $fix"
 }
 
 # The socket a plain `tmux` command run from here reaches, worked out the way tmux 3.7 picks it: the
@@ -614,8 +633,9 @@ cmd_up() {
   [ -z "$tdir" ] || { mkdir -p -m 700 "$tdir" && chmod 700 "$tdir"; }
   ensure_claude_copy
   # What every session is given to say whose it is (foreign_session): the state folder exists by
-  # now, so this is its whole real path.
-  sreal=$(real_path "$STATE")
+  # now, so this is its whole real path (the path as written, should it not resolve: never nothing).
+  sreal=$(real_path "$STATE") || sreal=""
+  [ -n "$sreal" ] || sreal=$STATE
   # Roles start in the order given (file order by default).
   for r in $roles; do
     sess=$(session "$r")

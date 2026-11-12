@@ -552,6 +552,7 @@ grep -qF "hello-from-key-state" $T/ks3/messages.log 2>/dev/null && [ ! -e $SRC/.
 # with. It stops nothing and names both folders; the down with the seat's own folder stops it.
 out=$($S -c $T/k.yaml down --yes 2>&1); rc=$?
 [ $rc -ne 0 ] && tmux has-session -t '=tk-em' 2>/dev/null && echo "$out" | grep -qF "its state folder is $RT/ks3, this team's is $RT/state" && echo "$out" | grep -qF "one team file run with two state folders (TEAM_STATE_DIR)" \
+  && echo "$out" | grep -qF "is another team's (started with this same team file), not this team's ($T/k.yaml)" \
   && ok "state: down with the seat's team file and another state folder stops nothing, and names both folders and TEAM_STATE_DIR" || { bad "state: down with another state folder than the seat's (rc=$rc)"; echo "$out" | tail -2; }
 nos $S -c $T/k.yaml down --yes >/dev/null 2>&1
 # up with TEAM_STATE_DIR set: the seat gets that folder (it wins over the key), so its say reads what up wrote.
