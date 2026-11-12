@@ -342,19 +342,24 @@ fi
 # nothing then, as mkdir does on a full or read-only volume. The run must stop there, before it exports a
 # TMUX_TMPDIR that names nothing. (Were it to go on, each bare tmux call would fail at the guard: that state
 # is the first half of this script's "removed mid-run" cases and of test/e2e-tmux-guard.sh.)
+# The stand-in writes down the folder it was asked for, which is how the run's scratch folder is known
+# here: the run ends before its first area, so the fixture never writes it. Not through a TMPDIR of this
+# case's own inside $X: that is 20 characters longer than the caller's, and test/e2e.sh refuses a TMPDIR
+# over its limit before it gets to the mkdir (qa on #350: the case failed with any TMPDIR over 45).
 echo "--- the run's tmux folder cannot be made"
 cat > "$X/bin/mkdir" <<'EOF'
 #!/bin/sh
-for a in "$@"; do case $a in */tmux) echo "mkdir: $a: the stand-in makes no folder named tmux" >&2; exit 1 ;; esac; done
+for a in "$@"; do case $a in */tmux) printf '%s\n' "$a" > "${0%/*}/../mkdir-asked"; echo "mkdir: $a: the stand-in makes no folder named tmux" >&2; exit 1 ;; esac; done
 PATH=/usr/bin:/bin exec mkdir "$@"
 EOF
-chmod +x "$X/bin/mkdir"; [ -d "$X/tmp" ] || /bin/mkdir "$X/tmp"
+chmod +x "$X/bin/mkdir"; rm -f "$X/mkdir-asked"
 nested 'xt_mark "the first area ran"
-e2e_end='"$first" TMPDIR="$X/tmp"
+e2e_end='"$first"
 rm -f "$X/bin/mkdir"
+asked=$(cat "$X/mkdir-asked" 2>/dev/null); top=${asked%/l/tmux}
 [ "$rc" = 2 ] && [ -z "$marks" ] && printf '%s\n' "$out" | grep -qE "cannot make .*/tmux"; check "tmux folder not made: the run stops before its first area, exit 2, naming the folder (exit $rc)" $?
 [ "$(calls tmux)" = 0 ] && [ "$(calls fabrikito)" = 0 ]; check "tmux folder not made: nothing was run, and no tmux call was made" $?
-[ -z "$(ls -A "$X/tmp")" ]; check "tmux folder not made: the scratch folder the run had begun is removed" $?
+case $top in "$xt_tmp"/team-e2e.????) [ ! -e "$top" ] ;; *) false ;; esac; check "tmux folder not made: the scratch folder the run had begun is removed" $?
 finish
 
 echo "--- the caller's environment has LIVE_D and TD, and the run ends before an area sets them"
