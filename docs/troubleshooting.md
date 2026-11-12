@@ -13,7 +13,7 @@ run `up` again. See [The team file](team-file.md).
 ### `up` stops: "refusing to start seats for ... on the default tmux server"
 
 The team file is outside `teams/`, so the launcher takes it for a throwaway copy, and a copy would
-reach the real team's seats. `down`, `say`, `attach`, `view` and `titles` refuse it the same way. Run
+reach the real team's seats. `down`, `say`, `flush`, `attach`, `view` and `titles` refuse it the same way. Run
 a test team on a private server with `test/live-env.sh`, as the message shows. If the team is meant to
 run on the default server, pass `--default-socket`. See [Throwaway teams](commands.md#throwaway-teams).
 
