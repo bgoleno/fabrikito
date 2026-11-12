@@ -150,4 +150,23 @@ m=$(grep -n '\$(mktemp' $S | grep -vE '\$\(mktemp "[^"]*\.X{6,}"')
 [ -z "$m" ] && grep -q '\$(mktemp' $S && ok "every mktemp in fabrikito has an explicit template" || { bad "a mktemp in fabrikito with no template"; echo "$m"; }
 tp=$(TEAM_STATE_DIR=$T/state ruby $SRC/lib/team_config.rb $T/team.yaml render em)
 echo "$tp" | grep -qF 'mktemp "$TMPDIR/name.XXXXXX"' && echo "$tp" | grep -qF "EPERM there" && echo "$tp" | grep -qF "never work" && ok "a seat's prompt says where temp files go and that EPERM is reported, not worked around" || { bad "the prompt on temp files"; echo "$tp" | grep -n -i "temp\|EPERM"; }
+
+echo "--- temp folders: an Edit allow on the seat's own folder (#252)"
+# In a mode that prompts, a Write in the seat's own temp folder (outside its working directory) would
+# wait for a human. The seat gets an Edit allow on that folder only: none on another role's or
+# team's folder, none without a tmpdir, and check shows it.
+tdz_team() { td_team tz "$TD/tz/w1" "  w2: { title: W, workdir: { type: project, path: $T/proj }, prompt_text: \"p\", tmpdir: \"$TD/tz/w2\" }
+  w3: { title: W, workdir: { type: project, path: $T/proj }, prompt_text: \"p\" }"; }
+tdz_team
+tdz_allow() { TEAM_STATE_DIR=$T/state-tz ruby $SRC/lib/team_config.rb $T/td-tz.yaml settings $1 | ruby -rjson -e 'puts JSON.parse(STDIN.read).dig("permissions","allow").grep(/tmp\/tz/)'; }
+a1=$(tdz_allow w1); a3=$(tdz_allow w3)
+[ "$a1" = "Edit(/$TD/tz/w1/**)" ] && ok "a seat with a tmpdir gets an Edit allow on everything in its own temp folder" || { bad "own tmpdir allow"; echo "$a1"; }
+! echo "$a1" | grep -q 'tz/w2' && [ "$(tdz_allow w2)" = "Edit(/$TD/tz/w2/**)" ] && ok "a seat gets no allow on another role's temp folder in the same team" || { bad "allow on another role's tmpdir"; echo "$a1"; }
+[ -z "$a3" ] && ok "a seat without a tmpdir gets no temp folder allow" || { bad "allow without tmpdir"; echo "$a3"; }
+sed -i '' 's/^team: tz/team: ty/' $T/td-tz.yaml; sed -i '' "s#$TD/tz/#$TD/ty/#g" $T/td-tz.yaml
+! TEAM_STATE_DIR=$T/state-tz ruby $SRC/lib/team_config.rb $T/td-tz.yaml settings w1 | grep -qF "$TD/tz/" && ok "a second team's seat gets no allow on the first team's temp folder" || bad "allow on another team's tmpdir"
+tdz_team
+out=$(TEAM_STATE_DIR=$T/state-tz $S -c $T/td-tz.yaml check 2>&1)
+echo "$out" | grep -F 'added:' | sed -n 1p | grep -qF "Edit allow on its own temp folder ($TD/tz/w1)" && ! echo "$out" | grep -F 'added:' | sed -n 3p | grep -qF "own temp folder" && ok "check shows the temp folder allow for a seat that has one, and not for one that has none" || { bad "check shows the tmpdir allow"; echo "$out" | grep -F 'added:'; }
+rm -rf "$TD/tz" "$TD/ty" 2>/dev/null
 e2e_end=tmpdir # the last line: test/e2e.sh checks that the file ran to here
