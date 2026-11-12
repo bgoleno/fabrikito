@@ -64,7 +64,10 @@ TOP_KEYS = %w[team owner repo project storage state sessions display prompts kic
 DISPLAY_KEYS = %w[iterm primary window].freeze
 PROJECT_KEYS = %w[name url].freeze
 EFFORTS = %w[low medium high xhigh max].freeze
-REPO_KEYS = %w[path github base gate gate_timeout gate_max_blocks bootstrap copy].freeze
+REPO_KEYS = %w[path github base gate gate_timeout gate_max_blocks bootstrap copy docs_repos].freeze
+# repo.docs_repos (#226): extra repositories a writer may change, written as repo.github is; at most this many.
+DOCS_REPOS_MAX = 10
+REPO_RE = %r{\A[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\z}.freeze
 STORAGE_KEYS = %w[volume root].freeze
 SESSION_KEYS = %w[prefix claude].freeze
 CLAUDE_KEYS = %w[wrapper args model effort permission_mode plugin auto_memory].freeze
@@ -290,6 +293,26 @@ class TeamConfig
     repo['github'].to_s
   end
 
+  # repo.docs_repos as written, or []. validate checks the shape first.
+  def docs_repos
+    (repo['docs_repos'] || []).map(&:to_s)
+  end
+
+  def validate_docs_repos
+    return unless repo.key?('docs_repos')
+
+    list = repo['docs_repos']
+    die 'repo.docs_repos must be a list of owner/name, e.g. [acme/widgets-docs]' unless list.is_a?(Array)
+    die "repo.docs_repos lists #{list.size} repositories (at most #{DOCS_REPOS_MAX})" if list.size > DOCS_REPOS_MAX
+    seen = {}
+    list.each do |e|
+      die "repo.docs_repos entry '#{e}' must be owner/name, e.g. acme/widgets-docs" unless e.is_a?(String) && e =~ REPO_RE
+      die "repo.docs_repos must not list repo.github (#{github}): it is already the project's repository" if e == github
+      die "repo.docs_repos lists '#{e}' twice" if seen[e]
+      seen[e] = true
+    end
+  end
+
   def storage
     section('storage', STORAGE_KEYS)
   end
@@ -397,6 +420,37 @@ class TeamConfig
     die "roles.#{id}.tmpdir (#{t}) must name the team and the role as folders, for example #{File.join(volume, 'tmp', @c['team'], id)}"
   end
 
+  # A role's temp folder overlaps nothing else of the team (#300). The seat gets an Edit allow on
+  # everything in it (#252), so a folder that is, holds or sits inside another role's temp folder, the
+  # state folder, the repository or a working directory (the seat's own included) would put those files
+  # under that allow, and two seats that share one would each hold an allow on the other's files. The
+  # worktree folder is different: a temp folder may sit inside it, beside the worktrees (the launcher
+  # only makes and lists git worktrees there), but may not be it or hold it. That is why
+  # own_work_overlap is not used here: it refuses "sits inside the worktree folder".
+  # validate runs this once every role's tmpdir has passed validate_tmpdir. Paths compare as for
+  # `state:` and other_teams (path_overlap?: real paths as far as they exist, so an unmounted volume
+  # is compared as written and stops nothing here).
+  def validate_tmpdir_overlap
+    with = roles.keys.select { |id| role(id).key?('tmpdir') }
+    with.each_with_index do |id, i|
+      t = tmpdir(id)
+      refuse = lambda do |what|
+        die "roles.#{id}.tmpdir (#{t}) #{what}: a seat may edit everything in its temp folder, so that folder is the seat's alone. " \
+            "Name a folder of its own, for example #{File.join(volume, 'tmp', @c['team'], id)}"
+      end
+      with.first(i).each do |o|
+        refuse.call("is, holds or sits inside roles.#{o}.tmpdir (#{tmpdir(o)})") if path_overlap?(t, tmpdir(o))
+      end
+      refuse.call("is, holds or sits inside this team's state folder (#{state_dir}, from #{state_source})") if path_overlap?(t, state_dir)
+      refuse.call("is, holds or sits inside this team's repository (repo.path: #{repo_path})") if path_overlap?(t, repo_path)
+      # Before the working directories: a folder that holds the worktree folder holds every worktree too.
+      refuse.call("is or holds this team's worktree folder (#{worktree_root})") if path_within?(worktree_root, t)
+      roles.each_key do |o|
+        refuse.call("is, holds or sits inside seat #{o}'s working directory (#{workdir(o)})") if path_overlap?(t, workdir(o))
+      end
+    end
+  end
+
   def read_prompt_file(rel)
     f = expand(rel)
     die "prompt file not found: #{f}" unless File.file?(f)
@@ -422,7 +476,8 @@ class TeamConfig
       'REPO' => repo_path, 'WORKDIR' => workdir(id), 'WORKTREE_ROOT' => worktree_root,
       'VOLUME' => volume, 'GITHUB_REPO' => github, 'GITHUB_URL' => "https://github.com/#{github}",
       'PROJECT_NAME' => project['name'].to_s, 'PROJECT_URL' => project['url'].to_s, 'TEAM' => @c['team'].to_s, 'OWNER' => owner, 'ROSTER' => roster,
-      'GATE_MAX_BLOCKS' => gate_max_blocks.to_s, 'NOTE' => note_real_path(id)
+      'GATE_MAX_BLOCKS' => gate_max_blocks.to_s, 'NOTE' => note_real_path(id),
+      'DOCS_REPOS' => docs_repos.empty? ? 'none' : docs_repos.join(', ')
     }
   end
 
@@ -1492,7 +1547,8 @@ class TeamConfig
     die "unknown top-level key(s): #{bad.join(', ')} (allowed: #{TOP_KEYS.join(', ')})" unless bad.empty?
     die "'team' is required" unless @c['team'].is_a?(String) && @c['team'] =~ PREFIX_RE
     die "repo.path is required" unless repo['path']
-    die "repo.github must be owner/name, e.g. acme/widgets" unless github =~ %r{\A[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\z}
+    die "repo.github must be owner/name, e.g. acme/widgets" unless github =~ REPO_RE
+    validate_docs_repos
     die "project.name is required" if project['name'].to_s.empty?
     die "project.url must be an https://github.com/ URL" unless project['url'].to_s.start_with?('https://github.com/')
     die "repo.path is not a directory: #{repo_path}" unless File.directory?(repo_path)
@@ -1575,6 +1631,7 @@ class TeamConfig
       kickoff(id)
     end
     validate_state_work
+    validate_tmpdir_overlap
     prompts_common
     prompts_project
     roles.each_key { |id| render(id) } # unknown @@placeholders and a project label fail here, not at launch
@@ -1604,6 +1661,7 @@ when 'get'
   when 'team' then puts cfg.instance_variable_get(:@c)['team']
   when 'repo.path' then puts cfg.repo_path
   when 'repo.github' then puts cfg.github
+  when 'repo.docs_repos' then puts cfg.docs_repos.join(', ')
   when 'project.name' then puts cfg.project['name']
   when 'project.url' then puts cfg.project['url']
   when 'repo.base' then puts(cfg.repo['base'] || 'origin/main')

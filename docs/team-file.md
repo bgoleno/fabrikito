@@ -9,6 +9,13 @@ the reference for each key, and the file to copy.
 - `repo`, `project`, `owner`: the local checkout, its GitHub repo (`owner/name`), the GitHub Project the
   team tracks work on, and the human it works for. The prompts name them, so this is the only edit to
   retarget a team. `repo.gate` is the repo's pass/fail command: see [The gate](gate.md).
+  `repo.docs_repos` (optional) lists up to 10 more repositories (`owner/name`, none equal to
+  `repo.github`, none twice) that a Technical Writer seat may change; `check` lists them and every prompt
+  can name them as `@@DOCS_REPOS@@`. fabrikito makes no checkout of them and adds no permission rules
+  for them: see [Safety](safety.md). The writer clones one under its own `TMPDIR`, which is outside the
+  seat's working directory, so in a permission mode that prompts, an edit there waits for a human unless
+  a permission rule allows it. Give the writer seat a `tmpdir` ([Temp files](#temp-files)), so that its
+  clones are in one known folder a rule can name.
 - `storage`: `volume` and `root`. Every worktree is created under `<volume>/<root>/`. The volume must be
   mounted, checked from the mount table when a worktree is created; the launcher never falls back to
   another disk.
@@ -86,6 +93,12 @@ The folder must be inside `storage.volume` and name both the team and the role a
 one host share role names, so a folder without the team can collide, and every command refuses it when
 it loads the team file. `check` shows each role's folder and also refuses, while the volume is mounted, a
 path that a symlink or another mount leads off the volume.
+
+Loading also refuses a `tmpdir` that is, holds or sits inside another role's `tmpdir` (two roles naming
+one folder included), the team's state folder, the repository or any seat's working directory, or that is
+or holds the worktree folder (inside it, beside the worktrees, is fine), and as every command loads the
+team file, one with such an overlap is refused by all of them after the upgrade, `say` and `down`
+included: run `check` with the new version before a restart ([#300](../../../issues/300)).
 
 `up` makes the folder and its `claude/`, owner-only, before it starts anything, for each seat it is about
 to start. It refuses if the volume is not mounted, the same as for a worktree, and creates nothing: `mkdir`

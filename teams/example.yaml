@@ -37,6 +37,17 @@ repo:
   # "New worktrees", for where package stores should live when worktrees are on another volume.
   # copy: [.env.local]
   # bootstrap: "npm ci"
+  # Other repositories (owner/name) a writer seat may also change, such as a documentation site or a
+  # handbook. Optional, at most 10, each written like `github`, none equal to `github`, none twice;
+  # `check` refuses anything else and lists the ones it accepts. They are rendered into every seat's
+  # prompt as @@DOCS_REPOS@@ (one line, or `none`); only roles/writer.md uses it. fabrikito makes no
+  # checkout or worktree of them and adds no permission rules for them: the writer clones one under
+  # its own TMPDIR, and the prompt restates hard rules 2 and 8 for it (see docs/safety.md, which
+  # says what the push and merge rules do for a repository that is not `github`). That clone is
+  # outside the seat's working directory: in a permission mode that prompts, an edit there waits for
+  # a human unless a permission rule allows it, so give the writer seat a `tmpdir` (docs/team-file.md,
+  # "Temp files").
+  # docs_repos: [owner/name-docs, owner/handbook]
 
 project:
   name: Your Project Board
@@ -117,6 +128,7 @@ prompts:
                                # @@GITHUB_REPO@@ @@GITHUB_URL@@ @@PROJECT_NAME@@ @@PROJECT_URL@@
                                # @@WORKDIR@@ @@WORKTREE_ROOT@@ @@VOLUME@@ @@ROSTER@@ @@GATE_MAX_BLOCKS@@
                                # @@NOTE@@ (the seat's progress note, <state>/notes/<role>.md)
+                               # @@DOCS_REPOS@@ (repo.docs_repos, one line, or none)
   # project: ../projects/myapp/project.md
                                # optional: your project's specifics (what the product is, folders
                                # that are off limits, a running instance never to touch, the gate,
@@ -338,3 +350,30 @@ roles:
         - Bash(gh api graphql*mergePullRequest*)
         - Bash(gh api graphql*enablePullRequestAutoMerge*)
         - Bash(gh api graphql*mergeBranch*)
+  # A Technical Writer keeps the documentation true: README, guides, reference pages, and the
+  # repo.docs_repos repositories. Start one when the project's docs fall behind its changes (README,
+  # "Right-sizing"). It writes docs and opens PRs like an engineer and never merges. Uncomment to use.
+  # dw:
+  #   title: Technical Writer
+  #   effort: medium
+  #   summary: keeps the documentation true, small and findable
+  #   workdir: { type: worktree }
+  #   # Set a tmpdir when repo.docs_repos is used: the writer's clones go under it (see docs_repos above).
+  #   # tmpdir: /Volumes/YourDrive/tmp/example/dw
+  #   prompt: ../roles/writer.md
+  #   skills:
+  #     - "fabrikito:start-task": when you take an assigned issue, before changing anything
+  #     - "fabrikito:ready-for-review": when a change is done, or a new head goes back to review
+  #     - "fabrikito:handoff": before /clear, /compact, a restart or the end of a session
+  #     - "superpowers:verification-before-completion": before saying work is done or opening a PR
+  #     - "superpowers:receiving-code-review": before acting on review comments
+  #   permissions:
+  #     deny:
+  #       - Bash(gh pr merge *)
+  #       - Bash(gh pr -* merge *)
+  #       - Bash(gh pr -* merge)
+  #       - Bash(gh api *pulls/*/merge*)
+  #       - Bash(gh api *repos/*/merges*)
+  #       - Bash(gh api graphql*mergePullRequest*)
+  #       - Bash(gh api graphql*enablePullRequestAutoMerge*)
+  #       - Bash(gh api graphql*mergeBranch*)
