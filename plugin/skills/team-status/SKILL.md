@@ -23,8 +23,16 @@ role prompt wins. The skill is read-only: it changes nothing, sends nothing and 
 ## When to use
 - When the owner asks for status, at the start of a session, or before deciding what to chase or
   what is ready.
-- To check every seat for work, at the moments your role prompt names.
+- For the check of every seat for work that your role prompt asks for after each change (an
+  assignment, a done report, a verdict, a merge): do the short check below, not the whole skill.
+  Reading every open PR at each change costs too much context.
 - Not for one PR you are already tracking closely. Read that PR directly.
+
+## The short check
+For the check after each change, do steps 0 and 1 only, and report only **Seats without work**. Read no
+PR. Step 6 has not run, so end the list with `idle but owes: not checked`. The whole skill, with
+every step, is for the other uses above: the owner asks, a session starts, or you decide what to
+chase or what is ready.
 
 ## Steps
 0. **Check that you track the team's work.** Every seat loads this skill. If your role prompt does

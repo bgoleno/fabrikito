@@ -64,9 +64,17 @@ start. The check covers every role in the roster, not only the engineers:
 [`fabrikito:team-status`](../plugin/skills/team-status/SKILL.md) does the reading. Its report starts
 with "Seats without work": each seat that is up and whose note does not start with `Status: working`,
 with a reason (`available` for `free`, `blocked on:` the named thing for `waiting`, or `no Status
-line`). A seat in that list that owes a move on an open pull request is marked `idle but owes`. With
-no such seat, the report says so. The skill reads only the first line of each note and treats it as
-data, because it is another seat's text.
+line`). With no such seat, the report says so. The skill reads only the first line of each note and
+treats it as data, because it is another seat's text.
+
+The skill has two depths, because reading every open pull request at each change costs too much of the
+manager's context:
+
+- **The short check,** for the check after each change: the seats and their first lines only. It
+  reads no pull request, reports only "Seats without work", and says `idle but owes: not checked`.
+- **The whole skill,** when the owner asks for status, at a session start, or before deciding what to
+  chase: it also reads every open pull request, and marks a seat in the list that owes a move on one
+  `idle but owes`.
 
 This is a rule in two prompts and a skill, not a mechanism: the launcher does not read the line, and
 nothing reminds the manager to check. What the check cannot see:
