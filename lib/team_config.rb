@@ -67,12 +67,19 @@ end
 # not recognised as its own once up had filled it, and every command ended in a backtrace (#360).
 # Ruby tags all of these with the default external encoding, so it is set once, here, before anything
 # is read: they then come back exactly as under a UTF-8 locale, whatever is listed or read later.
-# It does not retag what the locale tagged before this line runs (the environment, the command line,
-# this file's own folder), so utf8, env_utf8 and home_utf8 above are not leftovers: they stay, and a
-# new value from one of those sources still goes through them. Nothing written changes: no stream
-# here has an external encoding of its own, so strings go out byte for byte. A name that is not
-# valid UTF-8 is tagged UTF-8 all the same, as under a UTF-8 locale: the result is that locale's.
+# Three kinds of value it does not reach: an environment value and a command-line argument are tagged
+# by the locale whenever they are read, after this line as before it, and this file's own folder
+# (__dir__) was tagged when the file was loaded. So utf8 and env_utf8 above are not leftovers: they
+# stay, and a new value from one of those sources goes through them before it meets a path (a relative
+# team file path is joined to the working folder, which is UTF-8 from here on: see initialize).
+# home_utf8 stays for its check: the home folder comes back UTF-8 now, valid or not. Nothing written
+# changes: no stream here has an external encoding of its own, so strings go out byte for byte. A name
+# that is not valid UTF-8 is tagged UTF-8 all the same, as under a UTF-8 locale: the result is that
+# locale's. ruby -w warns about this setter at every call, which is noise here, so it is set quietly.
+verbose = $VERBOSE
+$VERBOSE = nil
 Encoding.default_external = Encoding::UTF_8
+$VERBOSE = verbose
 
 TOP_KEYS = %w[team owner repo project storage state sessions display prompts kickoff permissions roles other_teams].freeze
 DISPLAY_KEYS = %w[iterm primary window].freeze
@@ -267,7 +274,9 @@ class TeamConfig
   attr_reader :path, :dir
 
   def initialize(path)
-    @path = utf8(File.expand_path(path), 'the team file path')
+    # The argument is read as UTF-8 before it is joined to the working folder: the locale tagged the one,
+    # the default external encoding the other, and with a non-ASCII byte in each the join raised (#360).
+    @path = File.expand_path(utf8(path, 'the team file path'))
     @dir = File.dirname(@path)
     die "cannot read #{@path}" unless File.file?(@path)
     begin
