@@ -190,7 +190,8 @@ answer: for any other failure, a green rerun is not evidence. See [The one failu
 tmux follows `$TMUX` when it is set, and falls back to the default server, without a word, when
 `TMUX_TMPDIR` is empty or names a folder that does not exist. Run live tests through
 `test/live-env.sh`, which unsets `TMUX`, points `TMUX_TMPDIR` at a folder of its own and checks that
-folder on every call. See [Live tests](testing.md#live-tests).
+folder on every call. It also puts a guard first on `PATH`, which fails any tmux call that would use a
+socket outside that folder. See [Live tests](testing.md#live-tests).
 
 ## For contributors
 
