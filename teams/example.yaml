@@ -351,8 +351,8 @@ roles:
         - Bash(gh api graphql*enablePullRequestAutoMerge*)
         - Bash(gh api graphql*mergeBranch*)
   # A Technical Writer keeps the documentation true: README, guides, reference pages, and the
-  # repo.docs_repos repositories. Start one when the project's docs fall behind its changes (README,
-  # "Right-sizing"). It writes docs and opens PRs like an engineer and never merges. Uncomment to use.
+  # repo.docs_repos repositories. Start one when the project's docs fall behind its changes
+  # (docs/right-sizing.md). It writes docs and opens PRs like an engineer and never merges. Uncomment to use.
   # dw:
   #   title: Technical Writer
   #   effort: medium
