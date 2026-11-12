@@ -29,7 +29,12 @@ the reference for each key, and the file to copy.
 - `sessions`: tmux name prefix, an optional claude `wrapper`, `args`, and an optional default `model`,
   `effort` and `permission_mode`. Unset means the flag is omitted and the seat inherits
   `~/.claude/settings.json`. `sessions.claude.plugin` (default `true`) loads the fabrikito plugin into
-  every seat: see [The fabrikito plugin](plugin.md).
+  every seat: see [The fabrikito plugin](plugin.md). Two teams on one tmux server need two prefixes:
+  `up` stores its state folder and `repo.github` in each session it starts, and `up`, `down`, `say`,
+  `flush`, `attach`, `view` and `titles` stop at a session whose stored state folder or repository is
+  not their own, naming the value that differs and the `tmux set-environment` command that hands the
+  session over (a session started before these were stored has neither, and is taken for the seat
+  until it next starts).
 - `permissions` (`deny`, `ask`, `allow`), at the top level and per role: see
   [Safety](safety.md).
 - `other_teams`: other teams' state folders that aren't beside this team's own, each with the

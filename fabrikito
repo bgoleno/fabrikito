@@ -126,25 +126,55 @@ check_role() {
 }
 alive() { tmux has-session -t "=$(session "$1")" 2>/dev/null; }
 
-# Why the session of role $1 is not this team file's to act on; nothing when it is, or when no such
+# Why the session of role $1 is not this team's to act on; nothing when it is, or when no such
 # session runs. Two team files with the same sessions.prefix give the same session names on one tmux
 # server (two files in teams/, or a copy of a team file on a private server): the second file's up
 # would take the first one's seats for its own and skip them, its down would stop them, and its say
-# would type into them. up stores the path of its team file in every session it starts (TEAM_CONFIG,
-# in cmd_up), so up, down, say, flush, attach, view and titles ask this before they act on a session,
-# and stop on an answer. The two paths are compared as real paths: a link to the file, or to its
-# folder, is the same file. A session with no TEAM_CONFIG was not started by up (someone made it by
-# hand under a seat's name): it counts as the seat, as before (caller_seat says why). This guards
-# against a mistake, not an attack: whoever can run tmux can set the variable. That is also how the
-# owner hands a session over to a team file that was moved or renamed, and the answer says so.
+# would type into them. So up, down, say, flush, attach, view and titles ask this before they act on
+# a session, and stop on an answer; status prints it, and caller_seat takes no label from such a
+# session.
+# What makes a session this team's is not the path of the team file: a team pinned to a release
+# runs from several copies of one file, one per checkout, and its upgrade stops and starts each seat
+# with the new copy while the old copy's seats run and message it (docs/pinned-release.md). What
+# those copies share, and another team or a throwaway copy does not, is the state folder; and a team
+# file copied for another project with `team:` and the prefix left as they were shares the state
+# folder too, but not the repository. So up stores both in every session it starts (TEAM_STATE_REAL,
+# the state folder's real path, so a link to it is the same folder, and TEAM_GITHUB, repo.github:
+# in cmd_up), and a session is another team's when a stored value differs from this command's.
+# One team file run with another state folder (TEAM_STATE_DIR on up and not on down, or the other
+# way round) is another team by that rule as well: its seats read and write the folder they were
+# started with, and this command would read and write another, so the answer names that case too.
+# A value the session does not have does not decide: a session started by a release before these
+# two were stored has neither, and one made by hand under a seat's name has none at all, and both
+# count as the seat, as before (caller_seat says why). TEAM_CONFIG is only printed, to say which
+# file started the session. This guards against a mistake, not an attack: whoever can run tmux can
+# set the values. That is also the way out when a state folder was moved or a repository renamed
+# while seats ran (down is refused then too), and the answer gives the command.
 foreign_session() {
-  local sess owner
+  local sess env line st="" gh="" file="" mine why="" fix=""
   sess=$(session "$1")
-  owner=$(tmux show-environment -t "=$sess" TEAM_CONFIG 2>/dev/null) || return 0
-  case $owner in TEAM_CONFIG=?*) owner=${owner#TEAM_CONFIG=} ;; *) return 0 ;; esac
-  [ "$owner" != "$CONFIG" ] || return 0
-  [ "$(real_path "$owner")" != "$(real_path "$CONFIG")" ] || return 0
-  echo "session $sess was started by another team file, $(log_field "$owner"), not by $CONFIG: two team files with the same sessions.prefix name the same sessions on one tmux server. Give this team a prefix of its own, or run the command with that file (-c). If it is this team's own file under a new name or in a new place, hand the session over: tmux set-environment -t '=$sess' TEAM_CONFIG $(printf '%q' "$CONFIG")"
+  env=$(tmux show-environment -t "=$sess" 2>/dev/null) || return 0
+  while IFS= read -r line; do
+    case $line in
+      TEAM_STATE_REAL=*) st=${line#*=} ;;
+      TEAM_GITHUB=*) gh=${line#*=} ;;
+      TEAM_CONFIG=*) file=${line#*=} ;;
+    esac
+  done <<<"$env"
+  # The stored path is a real one, so only a state folder written another way needs resolving.
+  if [ -n "$st" ] && [ "$st" != "$STATE" ]; then
+    mine=$(real_path "$STATE")
+    if [ "$st" != "$mine" ]; then
+      why="its state folder is $(log_field "$st"), this team's is $mine"
+      fix="tmux set-environment -t '=$sess' TEAM_STATE_REAL $(printf '%q' "$mine")"
+    fi
+  fi
+  if [ -n "$gh" ] && [ "$gh" != "$GITHUB" ]; then
+    why="${why:+$why, and }its repository is $(log_field "$gh"), this team's is $GITHUB"
+    fix="${fix:+$fix; }tmux set-environment -t '=$sess' TEAM_GITHUB $(printf '%q' "$GITHUB")"
+  fi
+  [ -n "$why" ] || return 0
+  echo "session $sess is another team's${file:+ (started with the team file $(log_field "$file"))}, not this team's ($CONFIG): $why. Two team files with the same sessions.prefix name the same sessions on one tmux server, and so does one team file run with two state folders (TEAM_STATE_DIR). Give this team a prefix of its own, or run the command as the session's team: with its team file (-c) and its state folder. If the session is this team's own (its state folder was moved, or its repository renamed, while the seat ran), hand it over: $fix"
 }
 
 # The socket a plain `tmux` command run from here reaches, worked out the way tmux 3.7 picks it: the
@@ -510,7 +540,7 @@ cmd_check() {
 }
 
 cmd_up() {
-  local want_view=1 started=0 args="" roles r sess dir launch a args_q settings default_ok=0 tdir ndir d gdirs hdirs t
+  local want_view=1 started=0 args="" roles r sess dir launch a args_q settings default_ok=0 tdir ndir d gdirs hdirs t sreal
   for a in "$@"; do
     case $a in
       --no-view) want_view=0 ;;
@@ -524,9 +554,13 @@ cmd_up() {
   command -v tmux >/dev/null || die "tmux not found"
   resolve_claude || die "$CLAUDE_ERR"
   for r in $roles; do check_role "$r"; done
-  # A session with a seat's name that another team file started is not this team's seat to skip
-  # (foreign_session), and none of this team is started beside it: before anything is made.
-  for r in $roles; do
+  # A session with a seat's name that is another team's is not this team's seat to skip
+  # (foreign_session), and none of this team is started beside it: before anything is made. Every
+  # role of the file is asked, not only the ones named: the mistake is in the two team files, not
+  # in the roles named, so `up <role>` must not start one seat beside another team's seats (and
+  # the view it opens at its end, which shows every running seat, would then refuse with the seat
+  # already started).
+  for r in $ROLES; do
     t=$(foreign_session "$r"); [ -z "$t" ] || die "refusing to start seats: $t"
   done
   # Before anything is made or started, so a refusal leaves no part of the team running.
@@ -577,6 +611,9 @@ cmd_up() {
   # mkdir -m sets the mode only on a folder it creates, so chmod gives an existing one the mode too.
   [ -z "$tdir" ] || { mkdir -p -m 700 "$tdir" && chmod 700 "$tdir"; }
   ensure_claude_copy
+  # What every session is given to say whose it is (foreign_session): the state folder exists by
+  # now, so this is its whole real path.
+  sreal=$(real_path "$STATE")
   # Roles start in the order given (file order by default).
   for r in $roles; do
     sess=$(session "$r")
@@ -649,9 +686,12 @@ cmd_up() {
     # TEAM_STATE_DIR only when up had it in its environment (a throwaway team, a test): the seat's
     # say then reads the same folder up did (#264). Without it the team file names the state, for
     # up and for the seat alike. Not always set: a seat that ran another team file would otherwise
-    # inherit this team's state folder and write into it.
+    # inherit this team's state folder and write into it. TEAM_STATE_REAL and TEAM_GITHUB are
+    # always set, and are no setting: nothing reads them from its own environment, only
+    # foreign_session from the session's, to tell this team's session from another team's.
     tmux new-session -d -s "$sess" -c "$dir" -x 220 -y 50 \
-      -e "TEAM_ROLE=$r" -e "TEAM_CONFIG=$CONFIG" -e "TEAM_SCRIPT=$SELF" ${TEAM_STATE_DIR+-e "TEAM_STATE_DIR=$STATE"}
+      -e "TEAM_ROLE=$r" -e "TEAM_CONFIG=$CONFIG" -e "TEAM_SCRIPT=$SELF" ${TEAM_STATE_DIR+-e "TEAM_STATE_DIR=$STATE"} \
+      -e "TEAM_STATE_REAL=$sreal" -e "TEAM_GITHUB=$GITHUB"
     apply_title "$r"
     tmux send-keys -t "=$sess:" "$launch" Enter
     echo "start  $r: $(title "$r") -> tmux session $sess ($dir)"
@@ -828,7 +868,7 @@ cmd_view() {
   for r in $ROLES; do
     if [ $print -eq 1 ] || alive "$r"; then list="$list $r"; fi
   done
-  # A view attaches to each session and sets its title: not to one another team file started
+  # A view attaches to each session and sets its title: not to one that is another team's
   # (foreign_session). --print reaches no session.
   if [ $print -eq 0 ]; then
     for r in $list; do
@@ -875,6 +915,12 @@ cmd_status() {
     fi
     printf '%-5s %-36s %-18s %-6s %s  %s\n' "$r" "$(title "$r")" "$sess" "$(alive "$r" && echo up || echo down)" "$where" \
       "$(if alive "$r"; then seat_exe "$r"; else echo -; fi)"
+  done
+  # STATE says up for any session with the seat's name. One that is another team's (foreign_session)
+  # gets a notice, since up, down, say, flush, attach, view and titles will all refuse it: the
+  # reader learns that here, before a say. status still only reads.
+  for r in $ROLES; do
+    d=$(foreign_session "$r"); [ -z "$d" ] || echo "NOTICE $r: $d"
   done
   status_box_notices
 }
@@ -1431,7 +1477,7 @@ send_one() {
     echo "not delivered: $to is down ($sess)" >&2
     return 1
   fi
-  # Never type into a session another team file started under this seat's name (foreign_session).
+  # Never type into another team's session that has this seat's name (foreign_session).
   why=$(foreign_session "$to")
   if [ -n "$why" ]; then
     echo "not delivered: $why" >&2
@@ -1534,14 +1580,19 @@ deliver_one() {
 # controls and DEL in a pasted buffer in caret form (^[ for ESC) and passes BEL, backspace, CR and the C1
 # code points as they are (seen 2026-11-11, paste-buffer -p into a raw pane); say does not rely on which
 # tmux it runs with, and a body the seat's box shows differently is refused after its paste anyway, with
-# its text left in the box. Text that is not valid UTF-8 loses its C0 controls and DEL byte by byte,
-# and is otherwise left as it is. Only what is delivered changes: messages.log keeps the message as it
-# was given, escaped (log_field), so the record shows what the sender sent.
+# its text left in the box. Only what is delivered changes: messages.log keeps the message as it was
+# given, escaped (log_field), so the record shows what the sender sent.
+# Text that is not valid UTF-8 is not made plain: this prints nothing and exits 3, and say sends
+# nothing. There is one path for every body that is delivered. A second, byte-by-byte path for such
+# text would leave in the C1 controls written as UTF-8 (C2 80 to C2 9F), which a pane reading UTF-8
+# takes as the same controls; and taking the bad bytes out first would deliver a text the sender
+# never wrote. Such a body was never delivered anyway: the seat's box shows it differently, so it
+# was refused after its paste, with its text left in the box. Refused here, it leaves nothing.
 say_plain() {
   ruby --disable-gems -e '
     s = ARGV[0].dup.force_encoding("UTF-8")
-    if s.valid_encoding? then print s.gsub(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/, "")
-    else print s.b.gsub(/[\x00-\x08\x0b-\x1f\x7f]/n, "") end' -- "$1"
+    exit 3 unless s.valid_encoding?
+    print s.gsub(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/, "")' -- "$1"
 }
 
 # One messages.log field, escaped so a record stays on one line and the terminal reading the log
@@ -1596,9 +1647,10 @@ log_field() {
 # started that session (#97). That is deliberate: say delivers to a seat by the same session name,
 # so a session holding that name is the seat as far as say is concerned, and a stricter test (the
 # session's TEAM_ROLE) is one anyone able to create the session can pass too. The one session say
-# does not take for the seat is one that another team file's up started (foreign_session).
+# does not take for the seat is one that up started for another team (foreign_session): say
+# delivers nothing to it, and a say run inside it gets no label of this team's from it either.
 caller_seat() {
-  local pid=$$ ppid tty comm ttys="" srvs="" panes line srv sess name n=0 r
+  local pid=$$ ppid tty comm ttys="" srvs="" panes line srv sess name n=0 r why
   local adv="set TEAM_ROLE to your role id"
   while [ "$pid" -gt 1 ] && [ $n -lt 100 ]; do
     # comm last: a command's name may hold spaces, and read gives the last field the rest.
@@ -1645,7 +1697,11 @@ caller_seat() {
     while IFS= read -r line; do
       line=${line#* }; tty=${line%% *}; name=${line#* }
       [ -n "$tty" ] && [ "$name" = "$sess" ] || continue
-      case $ttys in *" ${tty#/dev/} "*) echo "$r"; return 0 ;; esac
+      case $ttys in *" ${tty#/dev/} "*)
+        why=$(foreign_session "$r")
+        [ -z "$why" ] || { echo "this runs inside a session with the name of this team's seat $r, and $why; $adv"; return 1; }
+        echo "$r"; return 0 ;;
+      esac
     done <<<"$panes"
   done
   while IFS= read -r line; do
@@ -1695,7 +1751,11 @@ cmd_say() {
   [ "$to" = all ] || check_role "$to"
   shift
   # What is delivered is the message as plain text (say_plain); what is logged is the message as given.
-  text=$(say_plain "$*") || { text=""; why="the message could not be made plain text for delivery (ruby failed), so nothing was sent"; }
+  # A message that is not valid UTF-8 is refused before anything is pasted (say_plain says why).
+  text=$(say_plain "$*") || case $? in
+    3) text=""; why="the message is not valid UTF-8, so nothing was sent: a seat's input box cannot show such text. Send it as UTF-8" ;;
+    *) text=""; why="the message could not be made plain text for delivery (ruby failed), so nothing was sent" ;;
+  esac
   # An empty or whitespace-only message (a script bug, an unset variable) would go out as a bare label,
   # a turn of its own in the seat (#157). It is refused here, before caller_seat's tmux calls, and
   # logged like any refusal. With TEAM_ROLE unset the sender is logged as '?', since telling a seat
@@ -1831,7 +1891,7 @@ cmd_flush() {
   if [ -z "$why" ]; then
     if ! alive "$to"; then why="$to is down ($sess)"
     else
-      # As say: no key goes to a session another team file started under this seat's name.
+      # As say: no key goes to another team's session that has this seat's name.
       why=$(foreign_session "$to")
       if [ -n "$why" ]; then :
       elif ! has_claude "$to"; then why="$to has no claude process running (its pane is at a shell): nothing is sent"
@@ -1995,8 +2055,8 @@ cmd_down() {
   [ "$default_ok" = 1 ] || refuse_default_tmux down "stop seats"
   roles=${roles:-$ROLES}
   for r in $roles; do check_role "$r"; done
-  # Nothing is stopped, or listed as this team's to stop, while a session down would reach was
-  # started by another team file (foreign_session): checked for every role before the first kill.
+  # Nothing is stopped, or listed as this team's to stop, while a session down would reach is
+  # another team's (foreign_session): checked for every role before the first kill.
   for r in $roles; do
     a=$(foreign_session "$r"); [ -z "$a" ] || die "refusing to stop seats: $a"
   done

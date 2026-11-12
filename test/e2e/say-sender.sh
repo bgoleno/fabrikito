@@ -113,7 +113,12 @@ out=$(TEAM_STATE_DIR=$T/unlogstate TEAM_ROLE=w1 $S -c $T/team.yaml say w2 "log c
 [ $rc -ne 0 ] && echo "$out" | grep -qF "not delivered: w2 is down" && echo "$out" | grep -qF "record could not be written to $T/unlogstate/messages.log (the message was not delivered)" &&
   ok "say whose log cannot be written still shows why it did not deliver, and fails" || { bad "say with an unwritable log (rc=$rc)"; echo "$out"; }
 # Delivered, with the log unwritable: the note says it went out, so the caller does not send it again.
+# em was started with the state folder $T/state, and a say run with another one is another team's say
+# (test/e2e/tmpdir.sh has those cases): em is handed to this folder for the one say, with the command a
+# refusal gives, and back after it.
+tmux set-environment -t '=tt-em' TEAM_STATE_REAL "$(cd $T/unlogstate && pwd -P)"
 out=$(TEAM_STATE_DIR=$T/unlogstate TEAM_ROLE=w1 $S -c $T/team.yaml say em "delivered, log cannot be written" 2>&1); rc=$?; sleep 1
+tmux set-environment -t '=tt-em' TEAM_STATE_REAL "$(cd $T/state && pwd -P)"
 [ $rc -ne 0 ] && echo "$out" | grep -qF "(the message was delivered)" && tmux capture-pane -p -t "=tt-em:" | grep -qF "[from w1] delivered, log cannot be written" &&
   ok "say whose log cannot be written after delivering says the message was delivered" || { bad "say delivered with an unwritable log (rc=$rc)"; echo "$out"; }
 echo "--- say across tmux servers (#115): never [from owner] from a pane of another server"

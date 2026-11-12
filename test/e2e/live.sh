@@ -82,20 +82,10 @@ done
 # The owner's real team file (in teams/) works on the default server as before, and --default-socket
 # lets a team that is meant to run there through. None of these kills a seat or opens iTerm.
 cp $T/fw.yaml $T/inst/teams/fw.yaml
-# A command acts only on sessions its own team file started, on any server, and fw.yaml started these.
-# So each team file used below is first handed the two seats, the way the owner hands a session to a
-# team file that was moved (tmux set-environment ... TEAM_CONFIG), and fw.yaml gets them back at the end.
-fw_hand() { local s; for s in fw-fa fw-fb; do tmux -S $PRIV set-environment -t "=$s" TEAM_CONFIG "$1"; done; }
-fw_hand $T/inst/teams/fw.yaml
 fw $T/inst/fabrikito -c $T/inst/teams/fw.yaml down
 [ "$calls" -gt 0 ] && echo "$out" | grep -qF "would kill fa (fw-fa)" && [ "$(seats)" = "$before" ] && ok "down for a team file in teams/ goes ahead on the default server (would kill, nothing killed)" || { bad "down for a team file in teams/ (rc=$rc, calls=$calls)"; echo "$out"; }
 fw $T/inst/fabrikito -c $T/inst/teams/fw.yaml attach fa
 [ "$calls" -gt 0 ] && ! echo "$out" | grep -qF "default tmux server" && ok "attach for a team file in teams/ goes ahead on the default server" || { bad "attach for a team file in teams/ (rc=$rc, calls=$calls)"; echo "$out"; }
-# --default-socket lets a team file onto the default server; it does not make another file's seats its own.
-fw $S -c $T/copy.yaml down --default-socket
-[ $rc -ne 0 ] && ! echo "$out" | grep -qF "would kill" && echo "$out" | grep -qF "fw-fa" && echo "$out" | grep -qF "$T/inst/teams/fw.yaml" && [ "$(seats)" = "$before" ] && [ "$(keys)" = "$kb" ] \
-  && ok "down --default-socket with a copy of the team file lists none of the seats another team file holds as its own to stop, and names that file" || { bad "down --default-socket with a copy, seats held by another file (rc=$rc)"; echo "$out" | head -3; }
-fw_hand $T/copy.yaml
 fw $S -c $T/copy.yaml down --default-socket
 [ "$calls" -gt 0 ] && echo "$out" | grep -qF "would kill fa (fw-fa)" && [ "$(seats)" = "$before" ] && ok "down --default-socket goes ahead on the default server" || { bad "down --default-socket (rc=$rc, calls=$calls)"; echo "$out"; }
 fw $S -c $T/copy.yaml attach --default-socket fa
@@ -104,13 +94,10 @@ fw $S -c $T/copy.yaml view --print --default-socket
 [ $rc = 0 ] && echo "$out" | grep -qF "fw-fa" && ok "view --print --default-socket goes ahead on the default server" || { bad "view --print --default-socket (rc=$rc)"; echo "$out" | head -3; }
 fw $S -c $T/copy.yaml say --default-socket fb hello-from-the-default-socket
 ! echo "$out" | grep -qF "default tmux server" && [ "$calls" -gt 0 ] && ok "say --default-socket goes ahead on the default server" || { bad "say --default-socket (rc=$rc, calls=$calls)"; echo "$out"; }
-fw_hand $T/inst/teams/fw.yaml
 fw $T/inst/fabrikito -c $T/inst/teams/fw.yaml titles
 [ $rc = 0 ] && echo "$out" | grep -qF "set the terminal title of 2 running seat(s)" && [ "$(ttl)" = "$tb" ] && ok "titles for a team file in teams/ goes ahead on the default server" || { bad "titles for a team file in teams/ (rc=$rc, calls=$calls)"; echo "$out"; }
-fw_hand $T/copy.yaml
 fw $S -c $T/copy.yaml titles --default-socket
 [ $rc = 0 ] && ttl | grep -qxF "fa | COPY-A | fw-fa" && ok "titles --default-socket goes ahead on the default server (the copy's titles are set)" || { bad "titles --default-socket (rc=$rc, calls=$calls)"; echo "$out"; ttl; }
-fw_hand $T/fw.yaml
 TEAM_STATE_DIR=$T/fwstate $S -c $T/fw.yaml down --yes >/dev/null 2>&1
 # test/live-env.sh: new makes a private environment, run runs a command in it, down removes it.
 LE=$SRC/test/live-env.sh

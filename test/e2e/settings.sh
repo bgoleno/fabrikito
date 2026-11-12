@@ -547,7 +547,13 @@ senv=$(tmux show-environment -t '=tk-em:' TEAM_STATE_DIR 2>&1)
 env -u TEAM_STATE_DIR TEAM_CONFIG=$T/k.yaml TEAM_ROLE=em TEAM_SCRIPT=$S TEAM_VIEW=0 $S say em "hello-from-key-state" >/dev/null 2>&1; sleep 1
 grep -qF "hello-from-key-state" $T/ks3/messages.log 2>/dev/null && [ ! -e $SRC/.state/tk ] \
   && ok "state: a seat's say (TEAM_CONFIG and TEAM_SCRIPT, no TEAM_STATE_DIR) logs in the key's folder, outside the install" || { bad "state: a seat's say"; ls $T/ks3 $SRC/.state 2>&1 | head; }
-$S -c $T/k.yaml down --yes >/dev/null 2>&1
+# The seat was started with the key's folder. A down with the same team file and another state folder
+# (this run's TEAM_STATE_DIR) is not that team's down: the seat reads and writes the folder it was started
+# with. It stops nothing and names both folders; the down with the seat's own folder stops it.
+out=$($S -c $T/k.yaml down --yes 2>&1); rc=$?
+[ $rc -ne 0 ] && tmux has-session -t '=tk-em' 2>/dev/null && echo "$out" | grep -qF "its state folder is $RT/ks3, this team's is $RT/state" && echo "$out" | grep -qF "one team file run with two state folders (TEAM_STATE_DIR)" \
+  && ok "state: down with the seat's team file and another state folder stops nothing, and names both folders and TEAM_STATE_DIR" || { bad "state: down with another state folder than the seat's (rc=$rc)"; echo "$out" | tail -2; }
+nos $S -c $T/k.yaml down --yes >/dev/null 2>&1
 # up with TEAM_STATE_DIR set: the seat gets that folder (it wins over the key), so its say reads what up wrote.
 up=$(TEAM_STATE_DIR=$T/ks4 TEAM_VIEW=0 $S -c $T/k.yaml up --no-view em 2>&1); rc=$?; sleep 1
 senv=$(tmux show-environment -t '=tk-em:' TEAM_STATE_DIR 2>&1)

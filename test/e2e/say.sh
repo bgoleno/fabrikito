@@ -60,6 +60,15 @@ ctl_say() { # ctl_say <what> <body> <the text the seat must receive>
 }
 ctl_say "a body that holds ESC, an end-of-paste mark, BEL, CR and DEL" $'ctl \e[201~after \e]0;t\a cr\rdel\x7f end' 'ctl [201~after ]0;t crdel end'
 ctl_say "a body that holds C1 controls (CSI and OSC as code points)" $'c1 \xc2\x9b31m and \xc2\x9d0;t\xc2\x9c, utf-8 é ✓ kept' 'c1 31m and 0;t, utf-8 é ✓ kept'
+# A body that is not valid UTF-8 is refused before anything is pasted. No byte of it reaches the seat, so
+# the C1 controls written as UTF-8 in it do not either, and nothing is left in the seat's box.
+k0=$(wc -c < $T/keys-w1.log | tr -d ' '); n=$(wc -l < $T/state/messages.log)
+out=$(TEAM_ROLE=em $S -c $T/team.yaml say w1 $'bad \xff byte, c1 \xc2\x9b31m and \xc2\x9d0;t\xc2\x9c' 2>&1); rc=$?; sleep 1
+line=$(tail -n +$((n + 1)) $T/state/messages.log)
+if [ $rc -ne 0 ] && [ "$(wc -c < $T/keys-w1.log | tr -d ' ')" = "$k0" ] && echo "$out" | grep -qF "not valid UTF-8" && [ "$(printf '%s\n' "$line" | cut -f2-4)" = "em	w1	NOT-DELIVERED" ]; then
+  ok "say refuses a body that is not valid UTF-8, with C1 controls written as UTF-8 in it, before any paste: no byte reaches the seat, logged NOT-DELIVERED"
+else bad "say with a body that is not valid UTF-8 (rc=$rc)"; echo "$out" | tail -2; tail -c +$((k0 + 1)) $T/keys-w1.log | od -c | head -4; printf '%s\n' "$line" | cut -c1-200
+  tmux send-keys -t '=tt-w1:' Enter; sleep 1; fi
 # An empty or whitespace-only message is refused before any tmux call (#157), instead of a bare label
 # going out as a turn of its own. A tmux stand-in first on PATH logs each call and runs the real tmux,
 # so a say that did reach tmux would deliver as before and fail here.
@@ -175,11 +184,12 @@ rm $T/state/messages.log && mv $T/msglog.real $T/state/messages.log
 echo "--- say: sec's messages are logged without their body (#227)"
 sed 's|^  w2: .*|&\n  sec: { title: Security, workdir: { type: project, path: '$T'/proj }, prompt_text: "sec prompt" }|' $T/team.yaml > $T/team-sec.yaml
 mkdir -p $T/secstate
-# em and w1 were started by team.yaml, and a command acts only on sessions its own team file started: for
-# this section they are handed to team-sec.yaml, the way the owner hands a session to a team file that was
-# moved, and back to team.yaml at its end.
-say_hand() { local s; for s in tt-em tt-w1; do tmux set-environment -t "=$s" TEAM_CONFIG "$1"; done; }
-say_hand $T/team-sec.yaml
+# em and w1 were started with the state folder $T/state, and a command acts only on its own team's sessions:
+# one whose state folder or repository is another is another team's, whatever its name. team-sec.yaml runs
+# with a state folder of its own, so for this section the two seats are handed to it, the way the owner
+# hands a session over after a state folder was moved (the refusal gives the command), and back at its end.
+say_hand() { local s d; d=$(cd "$1" && pwd -P); for s in tt-em tt-w1; do tmux set-environment -t "=$s" TEAM_STATE_REAL "$d"; done; }
+say_hand $T/secstate
 SECLOG=$T/secstate/messages.log; : > $SECLOG
 SEC_MARK='[body not logged: sec]'
 # secsay <what> <from> <to> <message>: one line with time, sender, recipient, status, marker; the sentinel is nowhere in the log.
@@ -202,5 +212,5 @@ TEAM_STATE_DIR=$T/secstate TEAM_ROLE=em $S -c $T/team-sec.yaml say all "plain br
 n=$(wc -l < $SECLOG)
 TEAM_STATE_DIR=$T/secstate TEAM_ROLE=em $S -c $T/team-sec.yaml say w2 "plain SENTINEL-227-w2" >/dev/null 2>&1
 [ "$(tail -n +$((n + 1)) $SECLOG | cut -f2,3,4,5)" = "em	w2	NOT-DELIVERED	plain SENTINEL-227-w2" ] && ok "say log: a say between two other seats is logged in full, status as before" || { bad "say log: say between other seats"; tail -n +$((n + 1)) $SECLOG; }
-say_hand $T/team.yaml
+say_hand $T/state
 e2e_end=say # the last line: test/e2e.sh checks that the file ran to here

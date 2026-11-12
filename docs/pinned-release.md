@@ -166,8 +166,10 @@ seat has restarted. To see which release a seat runs:
 `tmux show-environment -t '=<prefix>-<role>' TEAM_SCRIPT`.
 
 During the overlap, old and new seats share the state folder: the message log, the notes, the locks
-`say` takes and the claude copies. They can message each other, and both write the same log. That is
-safe only while the two releases agree on two things:
+`say` takes and the claude copies. They can message each other, and both write the same log. The
+commands of one copy of the team file reach the seats the other copy started, because a session is the
+team's by the state folder and the repository `up` stored in it, not by the path of the team file
+([`sessions`](team-file.md)). That is safe only while the two releases agree on two things:
 
 - **The state layout.** If the new release's notes (its tag's message: `git -C <install> tag -n99 -l <new>`)
   say it changed what is kept in the state folder, or how, upgrade with a full restart instead.
