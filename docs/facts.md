@@ -23,7 +23,7 @@ Source: [How it works](how-it-works.md), first paragraph; the [README](../README
 | Generates, for each seat, a prompt (shared rules, role prompt, roster), a read-only settings file and a launch script. | [What a seat is made of](how-it-works.md#what-a-seat-is-made-of) |
 | Writes permission rules into each seat's settings: denies on the files that would change a seat's own rules, and an ask on a push to the base branch. | [Safety](safety.md), first list |
 | Lets seats message each other by session name with Claude Code's `SendMessage`, and lets you (or a script) type a message into a seat with `say`. | [How seats talk](how-it-works.md#how-seats-talk) |
-| Records every `say` and every `SendMessage` a seat sends in one message log per team. The text of a message to or from the security seat (`sec`) is left out. | [The message log](../README.md#the-message-log) |
+| Records every `say` and every `SendMessage` a seat sends in one message log per team. The text of a message to or from the security seat (`sec`) is left out. | [The message log](messaging.md#the-message-log) |
 | Shows each seat its own progress note, branch, uncommitted files and last commits at every start and after every compaction. | [Progress notes](workflow.md#progress-notes) |
 | Holds a seat with `gate_on_stop` to the repository's pass/fail command when it ends a turn with uncommitted work. | [The gate](gate.md) |
 | Runs one heavy command at a time across every team on the host, in arrival order (`run-exclusive`). | [One heavy run at a time](gate.md#one-heavy-run-at-a-time) |
@@ -102,12 +102,12 @@ Say these as the docs say them. Do not strengthen them.
   Source: [Safety](safety.md).
 - **`say` depends on how Claude Code draws its input box.** It recognises the box as Claude Code
   2.1.316 draws it, and refuses rather than guess, so a Claude Code update that changes the box makes
-  `say` refuse every seat until fabrikito is updated. Source: [`say`](../README.md#say).
+  `say` refuse every seat until fabrikito is updated. Source: [`say`](messaging.md#say).
 - **Messages between permission classes are held by default.** The launcher sets no
   `crossSessionInbound`, and with no such setting in force Claude Code holds a message between a seat
   in `bypassPermissions` and a seat in any other mode: it waits for a human in the receiver's pane, and
   is dropped if nobody answers. `check` warns when the team file's seats fall into both classes. Source:
-  [Which messages are held](../README.md#which-messages-are-held).
+  [Which messages are held](messaging.md#which-messages-are-held).
 - **Running seats do not know a seat added later.** A seat's roster is written into its prompt when it
   starts, so after a role is added to the team file the seats already running do not know it, and will
   not act on its messages, until each is restarted. Source: [What `up` does](how-it-works.md#what-up-does),
@@ -128,7 +128,7 @@ Say these as the docs say them. Do not strengthen them.
   Source: [Right-sizing a team](right-sizing.md).
 - **Behaviour measured on specific Claude Code versions.** Where a page says "checked on 2.1.316" (or
   another version), the statement was measured there and may differ on a later one. Source: the
-  version notes in [Safety](safety.md) and [`say`](../README.md#say).
+  version notes in [Safety](safety.md) and [`say`](messaging.md#say).
 
 ## Status
 
@@ -147,7 +147,9 @@ Say these as the docs say them. Do not strengthen them.
 
 These read well and are not true of the code on `main`:
 
-- That seats are sandboxed, isolated from each other, or unable to reach your files or credentials.
+- That seats are sandboxed, kept out of each other's files, or unable to reach your files or
+  credentials. A worktree of its own keeps a seat's work apart from the others'; it does not stop a
+  seat from reaching another's.
 - That a seat cannot merge, push to the base branch or change its own rules. The rules make these an
   accident a seat is stopped or asked at, not something it cannot do.
 - That messages are authenticated, or that the message log proves who sent what.
