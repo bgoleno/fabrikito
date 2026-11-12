@@ -121,6 +121,7 @@ The reference lives in [`docs/`](docs/README.md). Start with [How it works](docs
 |---|---|
 | [Commands](docs/commands.md) | Install and run a team: every command and option, which team file is used, the iTerm view. |
 | [The team file](docs/team-file.md) | Set up a team: what each part does, what is checked, how a new worktree is prepared. |
+| [Messaging](docs/messaging.md) | How seats talk, which messages are held, `say`, the kickoff and the message log. |
 | [Right-sizing a team](docs/right-sizing.md) | Choose the number of seats, effort and model per seat, and see the cost. |
 | [How work is tracked](docs/workflow.md) | The issues-first rule, progress notes and held security points. |
 | [The gate](docs/gate.md) | How a seat is held to the repository's checks, and one heavy run at a time. |
@@ -131,8 +132,6 @@ The reference lives in [`docs/`](docs/README.md). Start with [How it works](docs
 | [Project facts](docs/facts.md) | Describe the project elsewhere: checked statements on what it does, the safety model and its limits. |
 | [Testing](docs/testing.md) | A live test on a private tmux server, and the end-to-end test. |
 | [Troubleshooting](docs/troubleshooting.md) | Find what you see (an error, a refused message, a silent seat) and what to do. |
-
-Messaging (how seats talk, `say`, the message log) is documented at the end of this file for now.
 
 ## Reporting a vulnerability
 
@@ -157,39 +156,3 @@ Apache License 2.0. See [LICENSE](LICENSE).
 The `security-audit` plugin skill is a modified copy of Cloudflare's
 [security-audit-skill](https://github.com/cloudflare/security-audit-skill) (MIT); see
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-## Messaging
-
-This section moved to [Messaging](docs/messaging.md): how seats talk, which messages are held, `say`, the
-kickoff and the message log. The headings below stay so that older links and references still land here.
-
-## How seats talk
-
-Moved to [How seats talk](docs/messaging.md#how-seats-talk).
-
-### Which messages are held
-
-Moved to [Which messages are held](docs/messaging.md#which-messages-are-held).
-
-### `say`
-
-Moved to [`say`](docs/messaging.md#say).
-
-### The kickoff
-
-Moved to [The kickoff](docs/messaging.md#the-kickoff).
-
-### The message log
-
-Moved to [The message log](docs/messaging.md#the-message-log).
-
-## Safety
-
-This section moved to [Safety](docs/safety.md): the rules generated into each seat's settings, how auto
-memory is handled, and what the rules cannot do.
-
-## Updating Claude Code
-
-This section moved to [Updating Claude Code](docs/updating-claude-code.md): why an update needs care on
-a running team, the team's own copy of claude that each seat runs, how to update, and how to remove old
-copies.
