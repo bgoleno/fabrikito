@@ -1,6 +1,7 @@
 # Sourced by test/e2e.sh, in its shell and in the order of AREAS there (#70); not run alone.
 # run-exclusive (#214): one heavy run at a time on the host. Every case uses the run's own lock
-# (FABRIKITO_RUN_LOCK, set by test/e2e.sh), never the real one. Ordering is checked only from marks the
+# (FABRIKITO_RUN_LOCK and its old name, both set by test/e2e.sh), never the real one: the probe below stops
+# the run if the lib under test would. Ordering is checked only from marks the
 # commands record, never from how long anything took: these runs are meant for a loaded machine.
 echo "--- run-exclusive: one heavy run at a time (#214)"
 rx=$T/rx; mkdir -p $rx
@@ -12,11 +13,30 @@ rx_until() { local i=0; until eval "$1"; do i=$((i + 1)); [ $i -ge 150 ] && retu
 rx_wait() { local i=0; while kill -0 $1 2>/dev/null; do i=$((i + 1)); [ $i -ge 300 ] && { kill -KILL $1 2>/dev/null; break; }; sleep 0.2; done; wait $1; }
 # The same limit for a run in the foreground: it dies of the alarm (142).
 rx_bound() { perl -e 'alarm 60; exec @ARGV' "$@"; }
+# Runs a run_exclusive.rb with the user database's home replaced by the folder FAKE_HOME names, so its
+# default lock is under that folder and not the real one: ruby $rx/shim.rb <run_exclusive.rb> -- <command>.
+printf 'require "etc"\nmodule Etc; def self.getpwuid(*) Struct.new(:dir).new(ENV["FAKE_HOME"]) end; end\nload ARGV.shift\n' > $rx/shim.rb
 # A holder (a script: run-exclusive runs a program) that records its start, then waits for a go file
 # before it records its end: hold <name> <marks> <go file>.
 printf '#!/bin/sh\necho "$1 start" >> "$2"\nuntil [ -e "$3" ]; do sleep 0.1; done\necho "$1 end" >> "$2"\n' > $rx/hold; chmod +x $rx/hold
 real="$(ruby -retc -e 'print Etc.getpwuid(Process.uid).dir')/Library/Application Support/fabrikito"; [ -e "$real" ] && real_was=1 || real_was=0
 real_old="${real%/fabrikito}/software-factory"; [ -e "$real_old" ] && real_old_was=1 || real_old_was=0
+
+# Before any case: the lib under test must use the run's own lock (#273). The e2e clears the variables of
+# the run-exclusive it runs under, so a lib that does not know the name test/e2e.sh gives the run's lock
+# falls back to the default, the host's real lock, is not seen as nested, and waits there behind the very
+# run it is part of, with every run on the host behind both. That happened with these tests on a lib from
+# before the rename. So the lib runs once here with a stand-in home: a miss lands in that folder, and the
+# run stops before a case can reach the real queue.
+rx_ph=$rx/probe-home; mkdir -p "$rx_ph/Library/Application Support"
+HOME=$rx_ph FAKE_HOME=$rx_ph rx_bound ruby $rx/shim.rb $SRC/lib/run_exclusive.rb -- true >$rx/probe.out 2>&1; rc=$?
+if [ $rc = 0 ] && [ -e "$FABRIKITO_RUN_LOCK" ] && [ -z "$(ls -A "$rx_ph/Library/Application Support")" ]; then
+  ok "run-exclusive: the lib under test uses the run's own lock, so no case can reach the real one"
+else
+  echo "test/e2e/exclusive.sh: $SRC/lib/run_exclusive.rb did not use the run's own lock ($FABRIKITO_RUN_LOCK; rc=$rc, in the stand-in home: $(ls -A "$rx_ph/Library/Application Support" | tr '\n' ' ')). Its cases would wait on the host's real lock, so the run stops here." >&2
+  cat $rx/probe.out >&2
+  exit 2
+fi
 
 out=$($S run-exclusive -- sh -c 'echo ran; exit 7' 2>&1); rc=$?
 [ $rc = 7 ] && [ "$out" = ran ] && ok "run-exclusive runs the command and exits with its status" || { bad "run-exclusive status (rc=$rc)"; echo "$out" | tail -2; }
@@ -325,7 +345,6 @@ out=$(FABRIKITO_RUN_LOCK=$rx/ol/lock rx_bound $S run-exclusive -- sh -c 'FABRIKI
 # run_exclusive.rb runs here with the user database's home replaced by a folder of its own.
 fh=$rx/fh; legacy="$fh/Library/Application Support/software-factory/run-exclusive.lock"; newlock="$fh/Library/Application Support/fabrikito/run-exclusive.lock"
 mkdir -p "$fh/Library/Application Support"
-printf 'require "etc"\nmodule Etc; def self.getpwuid(*) Struct.new(:dir).new(ENV["FAKE_HOME"]) end; end\nload ARGV.shift\n' > $rx/shim.rb
 rx_def() { env -u FABRIKITO_RUN_LOCK -u FACTORY_RUN_LOCK -u FABRIKITO_RUN_EXCLUSIVE_HELD -u FACTORY_RUN_EXCLUSIVE_HELD FAKE_HOME=$fh ruby $rx/shim.rb $SRC/lib/run_exclusive.rb -- "$@"; }
 # What a checkout from before the rename does: flock the old file, write the old holder record, hold; and a probe.
 cat > $rx/oldhold.rb <<'R'
