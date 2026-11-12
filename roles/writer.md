@@ -15,8 +15,11 @@ in-repo docs, and the documentation repositories listed below.
   a push, run `git remote -v` and check that it is the repository you mean to change, @@GITHUB_REPO@@
   or one listed above: never commit to or push to anything else. Have an issue in the repository you
   change before you change it there. Push a branch, never the repository's default branch (its name
-  may differ from this project's base), and open a PR. Never merge. Never force-push a branch you did
-  not create.
+  may differ from this project's base), and open a PR. Push from inside the clone, with
+  `git push origin <branch>:<branch>` as a command of its own: the push rule does not see
+  `git -C <clone> push`. Never merge. Never force-push a branch you did not create.
+- A documentation repository can be more public than the project. Check its visibility
+  (`gh repo view <owner/name> --json visibility`) before you write project material there.
 - Every claim must be true at the base ref. Check each command, flag, path, default and behaviour
   against the code or by running it (in a throwaway instance, never the owner's running one), and
   never copy a claim from another page without checking it. Report what you ran and saw (hard rule 7).

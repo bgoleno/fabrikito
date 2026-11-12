@@ -27,9 +27,12 @@ role's (team first; a role can add or tighten a rule, never loosen one), plus wh
   PRs. It is an early warning for a project whose base branch has no protection. The real control is a
   ruleset on the base branch that blocks force-push and deletion and requires a PR; where one exists,
   this ask is redundant. It matches command text, not a repository: a push of `main` to a repository
-  listed in `repo.docs_repos` is asked too (when `repo.base` is `origin/main`), but a push of another
-  default branch name (`master`, `trunk`) there is not matched, so for such a repository the writer
-  prompt is the only guard against a push to its default branch. The merge denies and asks name no
+  listed in `repo.docs_repos` is asked too (when `repo.base` is `origin/main`), if the command is
+  written `git push ...` from inside the clone: `git -C <clone> push` is not matched (see the first
+  item under "What the rules cannot do" below), which is why the writer prompt
+  gives the form to use. A push of another default branch name (`master`, `trunk`) there is not
+  matched either, so for such a repository the writer prompt is the only guard against a push to its
+  default branch. The merge denies and asks name no
   repository, so they cover a `gh pr merge` in a docs repository clone as they do anywhere;
 - an `Edit` allow on the seat's own progress note (see [Progress notes](workflow.md#progress-notes)), which is
   outside its working directory and would otherwise prompt in a mode other than bypass, and an `Edit`
