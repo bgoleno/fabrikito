@@ -131,15 +131,18 @@ lenv $S -c $T/xs.yaml up --no-view em >/dev/null 2>&1; sleep 2; touch $XLOG $T/k
 lenv tmux has-session -t '=tx-em' 2>/dev/null && ok "a stand-in seat runs on a second tmux server (live-env)" || bad "seat on the second server"
 # waitfile <file> <lines before>: wait up to 10s for a line to be appended to the file.
 waitfile() { local i; for i in $(seq 1 20); do [ "$(wc -l < "$1")" -gt "$2" ] && return 0; sleep 0.5; done; return 1; }
+# Cases 1 and 2 address the other server on purpose, each from a pane whose tmux guard (#307) knows its own
+# server's folder only. So each names the folder it means to reach, in TMUX_GUARD_ROOTS, beside the
+# TMUX_TMPDIR that sends it there. Without that, say's first tmux call would fail at the guard.
 # 1. Inside seat w1 (server 1), say addressed to server 2 with TEAM_ROLE unset: refused, no keys.
 n=$(wc -l < $XLOG); k=$(wc -c < $T/keys-em.log)
-tmux send-keys -t '=tt-w1:' -l "!env -u TEAM_ROLE -u TMUX TMUX_TMPDIR=$LIVE_D/tmux TEAM_STATE_DIR=$LIVE_D/state $S -c $T/xs.yaml say em 'from w1 to server 2' > $T/xs1.out 2>&1"; tmux send-keys -t '=tt-w1:' Enter
+tmux send-keys -t '=tt-w1:' -l "!env -u TEAM_ROLE -u TMUX TMUX_TMPDIR=$LIVE_D/tmux TMUX_GUARD_ROOTS=$LIVE_D TEAM_STATE_DIR=$LIVE_D/state $S -c $T/xs.yaml say em 'from w1 to server 2' > $T/xs1.out 2>&1"; tmux send-keys -t '=tt-w1:' Enter
 waitfile $XLOG "$n"; sleep 1
 [ "$(tail -1 $XLOG | cut -f2-5)" = "?	em	NOT-DELIVERED	from w1 to server 2" ] && [ "$(wc -c < $T/keys-em.log)" = "$k" ] && grep -q "another tmux server" $T/xs1.out &&
   ok "say with TEAM_ROLE unset from a seat on one tmux server to another is refused (no keys, NOT-DELIVERED), not [from owner]" || { bad "say from a seat to another server"; tail -1 $XLOG; cat $T/xs1.out; }
 # 2. A plain pane on server 2, say addressed to server 1 with TEAM_ROLE unset: refused, no keys.
 n=$(wc -l < $T/state/messages.log); k=$(wc -c < $T/keys-w1.log)
-lenv tmux new-session -d -s tx-plain "env -u TEAM_ROLE -u TMUX TMUX_TMPDIR=$T/tmux TEAM_STATE_DIR=$T/state $S -c $T/team.yaml say w1 'from a pane on server 2' > $T/xs2.out 2>&1; sleep 30"
+lenv tmux new-session -d -s tx-plain "env -u TEAM_ROLE -u TMUX TMUX_TMPDIR=$T/tmux TMUX_GUARD_ROOTS=$T_TOP TEAM_STATE_DIR=$T/state $S -c $T/team.yaml say w1 'from a pane on server 2' > $T/xs2.out 2>&1; sleep 30"
 waitlog "$n"; sleep 1; lenv tmux kill-session -t '=tx-plain' 2>/dev/null
 lastlog '?' w1 'from a pane on server 2' && [ "$(wc -c < $T/keys-w1.log)" = "$k" ] && grep -q "another tmux server" $T/xs2.out && grep -q "terminal outside tmux" $T/xs2.out &&
   ok "say with TEAM_ROLE unset from a pane of another tmux server is refused, naming a terminal outside tmux" || { bad "say from a pane of another server"; tail -1 $T/state/messages.log; cat $T/xs2.out; }

@@ -26,6 +26,7 @@ This page shows how the parts fit together. Each section links to the page with 
 | `.state/<team>/` | Everything generated for a team (settings, launch scripts, prompts, the team's copy of claude), plus the message log, progress notes and the gate's state. Git-ignored. The team file's `state:` key moves it, and so does `TEAM_STATE_DIR`, which wins. |
 | `test/e2e.sh`, `test/live-env.sh` | The end-to-end test's entry point (the shared setup, the count and the cleanup), and the helper that runs a live test on a private tmux server. |
 | `test/e2e/` | The end-to-end cases, one file per area, which `test/e2e.sh` sources in the order of its `AREAS` list; `lib.sh` holds the helpers more than one area uses, and `fake-claude.c` is the stand-in for `claude`. |
+| `test/guard/tmux` | The tmux guard: the `tmux` first on the `PATH` of an end-to-end run and of `test/live-env.sh run`, which passes a call on only to a socket inside the run's own folders ([The tmux guard](testing.md#the-tmux-guard)). |
 
 ## What `up` does
 

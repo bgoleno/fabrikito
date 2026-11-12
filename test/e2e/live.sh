@@ -115,6 +115,11 @@ got=$(cd "$(dirname "$le")" && $LE run "$(basename "$le")" sh -c 'cd / && printf
 [ "$got" = "$lereal/tmux|$lereal/state" ] && ok "live-env run: a relative folder is exported as its absolute, resolved path" || bad "live-env run with a relative folder: $got"
 got=$($LE run "$le" tmux new-session -d -s le-probe 2>&1 && $LE run "$le" tmux display-message -p -t '=le-probe:' '#{socket_path}' 2>&1)
 [ "$got" = "$(cd "$le/tmux" && pwd -P)/tmux-$(id -u)/default" ] && ok "live-env run: tmux uses the private socket" || bad "live-env socket: $got"
+# Whether that server still runs is asked through live-env run from here on, and not by -S from this
+# shell: the tmux guard of this run (#307) knows the run's own folder, and $le is not in it. lepid is the
+# server's process, for the one question that cannot be asked through a folder that is gone.
+leprobe() { $LE run "$le" tmux has-session -t '=le-probe' 2>/dev/null; }
+lepid=$($LE run "$le" tmux display-message -p -t '=le-probe:' '#{pid}' 2>/dev/null)
 # refusals: the command must not run at all
 leref() { rm -f $T/le-ran; out=$($LE run "$1" touch $T/le-ran 2>&1); rc=$?; [ $rc -ne 0 ] && [ ! -e $T/le-ran ] && echo "$out" | grep -qF -- "$2"; }
 leref $T/le-missing "does not exist" && ok "live-env run refuses a folder that does not exist" || { bad "live-env missing folder (rc=$rc)"; echo "$out"; }
@@ -134,17 +139,17 @@ le3=$(env -u TMUX $LE new 2>/dev/null); [ -d "$le3/tmux" ] || { le3=$T/le3-none;
 ledir="$(cd "$le/tmux" && pwd -P)/tmux-$(id -u)"
 ln -s "$ledir" "$le3/tmux/tmux-$(id -u)"
 out=$($LE down "$le3" 2>&1); rc=$?
-[ $rc -ne 0 ] && [ -d "$le3" ] && tmux -S "$ledir/default" has-session -t '=le-probe' 2>/dev/null && ok "live-env down refuses a folder whose tmux-<uid> is a link, and the server it points at keeps running" || { bad "live-env down with a linked tmux-<uid> (rc=$rc)"; echo "$out"; }
+[ $rc -ne 0 ] && [ -d "$le3" ] && leprobe && ok "live-env down refuses a folder whose tmux-<uid> is a link, and the server it points at keeps running" || { bad "live-env down with a linked tmux-<uid> (rc=$rc)"; echo "$out"; }
 rm "$le3/tmux/tmux-$(id -u)"; mkdir -m 700 "$le3/tmux/tmux-$(id -u)"; ln -s "$ledir/default" "$le3/tmux/tmux-$(id -u)/default"
 leref "$le3" "is a link" && ok "live-env run refuses a folder whose socket is a link (the command does not run)" || { bad "live-env run with a linked socket (rc=$rc)"; echo "$out"; }
 out=$($LE down "$le3" 2>&1); rc=$?
-[ $rc -ne 0 ] && [ -d "$le3" ] && tmux -S "$ledir/default" has-session -t '=le-probe' 2>/dev/null && ok "live-env down refuses a folder whose socket is a link, and the server it points at keeps running" || { bad "live-env down with a linked socket (rc=$rc)"; echo "$out"; }
+[ $rc -ne 0 ] && [ -d "$le3" ] && leprobe && ok "live-env down refuses a folder whose socket is a link, and the server it points at keeps running" || { bad "live-env down with a linked socket (rc=$rc)"; echo "$out"; }
 rm -f "$le3/tmux/tmux-$(id -u)/default"; $LE down "$le3" >/dev/null 2>&1
 # ... and a tmux/ that links into another environment's tmux/ (the socket folder then looks like its own)
 le5=$(env -u TMUX $LE new 2>/dev/null); [ -d "$le5/tmux" ] || { le5=$T/le5-none; mkdir -p $le5/tmux; }   # never act on an empty path
 rmdir "$le5/tmux"; ln -s "$le/tmux" "$le5/tmux"
 out=$($LE down "$le5" 2>&1); rc=$?
-[ $rc -ne 0 ] && [ -d "$le5" ] && tmux -S "$ledir/default" has-session -t '=le-probe' 2>/dev/null && ok "live-env down refuses a folder whose tmux/ links into another one, and that server keeps running" || { bad "live-env down with tmux/ linked elsewhere (rc=$rc)"; echo "$out"; }
+[ $rc -ne 0 ] && [ -d "$le5" ] && leprobe && ok "live-env down refuses a folder whose tmux/ links into another one, and that server keeps running" || { bad "live-env down with tmux/ linked elsewhere (rc=$rc)"; echo "$out"; }
 rm "$le5/tmux"; mkdir "$le5/tmux"; $LE down "$le5" >/dev/null 2>&1
 # The folder is resolved physically, once: <link>/.. is the parent of where the link leads (as the
 # kernel and rm see it), not the folder that holds the link (as a logical cd sees it).
@@ -153,9 +158,12 @@ ln -s "$le4/tmux" $T/le4link
 out=$($LE down "$T/le4link/.." 2>&1); rc=$?
 [ $rc = 0 ] && [ ! -e "$le4" ] && [ -d $T ] && [ -L $T/le4link ] && ok "live-env down resolves <link>/.. physically: it removes the folder the link leads into, and nothing else" || { bad "live-env down with <link>/.. (rc=$rc)"; echo "$out"; }
 rm -f $T/le4link; [ -e "$le4" ] && $LE down "$le4" >/dev/null 2>&1
-srvsock="$(cd "$le/tmux" && pwd -P)/tmux-$(id -u)/default"
+case $lepid in ""|*[!0-9]*) lepid=; bad "test setup: the pid of the live-env server is not known" ;; esac
+leprobe || bad "test setup: the live-env server is not running before live-env down"
 out=$($LE down "$le" 2>&1); rc=$?
-[ $rc = 0 ] && [ ! -e "$le" ] && [ ! -e "$le2" ] && ! tmux -S "$srvsock" has-session 2>/dev/null && ok "live-env down stops the private server and removes the folder" || { bad "live-env down (rc=$rc)"; echo "$out"; ls -la "$le" 2>&1 | head -3; }
+# kill-server returns before the server's process has gone, so that is waited for, up to 3 seconds.
+for i in $(seq 1 15); do [ -n "$lepid" ] && kill -0 "$lepid" 2>/dev/null || break; sleep 0.2; done
+[ $rc = 0 ] && [ ! -e "$le" ] && [ ! -e "$le2" ] && [ -n "$lepid" ] && ! kill -0 "$lepid" 2>/dev/null && ok "live-env down stops the private server and removes the folder" || { bad "live-env down (rc=$rc)"; echo "$out"; ls -la "$le" 2>&1 | head -3; }
 # test/e2e.sh refuses a TMPDIR too long for tmux's socket, before it makes anything (#249). The stand-in
 # mktemp first on PATH fails and logs: without the refusal, this nested run stops at once instead of
 # running the whole test again, and the log shows it got past the check.

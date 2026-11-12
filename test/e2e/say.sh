@@ -149,10 +149,12 @@ out=$(rn C render TEAM_SCRIPT=$'/x/\xff/fabrikito'); [ $? != 0 ] && echo "$out" 
 out=$(rn none settings HOME=$'/tmp/x\xff'); [ $? != 0 ] && echo "$out" | grep -qF "the home folder (HOME) is not valid UTF-8" && ! echo "$out" | grep -q "Error)" \
   && ok "a home folder that is not UTF-8 is refused, naming HOME" || { bad "invalid HOME"; echo "$out" | tail -2; }
 # say validates and renders the whole team before it sends: from that team, under both locales.
+# env -i drops the tmux guard's variables with the rest, and the guard then refuses every call (#307), so
+# they are passed on beside TMUX_TMPDIR.
 for l in C none; do
   n=$(wc -l < $T/state/messages.log)
   if [ $l = C ]; then LC_ALL=C HOME="$T/home$E" TEAM_ROLE=em $S -c "$NT" say w2 "from a non-ASCII team ($l)" >/dev/null 2>&1
-  else env -i PATH="$PATH" HOME="$T/home$E" TMUX_TMPDIR="$TMUX_TMPDIR" TEAM_STATE_DIR="$TEAM_STATE_DIR" TEAM_ROLE=em $S -c "$NT" say w2 "from a non-ASCII team ($l)" >/dev/null 2>&1; fi
+  else env -i PATH="$PATH" HOME="$T/home$E" TMUX_TMPDIR="$TMUX_TMPDIR" TMUX_GUARD_ROOTS="$TMUX_GUARD_ROOTS" TMUX_GUARD_LOG="$TMUX_GUARD_LOG" TEAM_STATE_DIR="$TEAM_STATE_DIR" TEAM_ROLE=em $S -c "$NT" say w2 "from a non-ASCII team ($l)" >/dev/null 2>&1; fi
   [ "$(wc -l < $T/state/messages.log)" -eq $((n + 1)) ] && tail -1 $T/state/messages.log | grep -qF "from a non-ASCII team ($l)" \
     && ok "say from a team with a non-ASCII workdir, owner and home ($l)" || { bad "say from a non-ASCII team ($l)"; tail -1 $T/state/messages.log; }
 done
