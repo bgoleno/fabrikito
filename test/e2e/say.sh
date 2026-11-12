@@ -132,17 +132,24 @@ done
 # mount table came back as US-ASCII. The state folder above is empty, so nothing takes it for a team's
 # state and those cases never met this. up fills it (settings/, launch/, prompts/), and from then on
 # every command that loads the team file ended in a Ruby backtrace.
-# nr <C | none> <team file> <command> [VAR=value ...]: as rn, on any team file and without this run's
-# TEAM_STATE_DIR. With NRL set it runs under that locale instead: the UTF-8 reference, same environment.
-nr() { local l=$1 f=$2 c=$3; shift 3
+# The four names below steer the helpers. A caller's own value would change what the cases compare (with
+# NRL exported, the UTF-8 locale with itself), so none comes in from the environment (tl on #362).
+unset NRL NRD NSL NSANY
+# nr <C | latin1 | none> <team file> <command> [VAR=value ...]: as rn, on any team file and without this
+# run's TEAM_STATE_DIR; latin1 is en_US.ISO8859-1. With NRL set it runs under that locale instead: the
+# UTF-8 reference, same environment. With NRD set it runs in that folder (for a relative team file path).
+nr() { local l=$1 f=$2 c=$3 loc=C; shift 3
   set -- HOME="$T/home$E" CLAUDE_CONFIG_DIR="$T/home$E/.claude" "$@"
-  if [ $l = C ]; then env -u TEAM_STATE_DIR LC_ALL=${NRL:-C} "$@" ruby $SRC/lib/team_config.rb "$f" $c em 2>&1
-  else env -i PATH="$PATH" ${NRL:+LC_ALL=$NRL} "$@" ruby $SRC/lib/team_config.rb "$f" $c em 2>&1; fi; }
+  [ $l = latin1 ] && loc=en_US.ISO8859-1
+  ( [ -z "${NRD:-}" ] || cd "$NRD" || exit 1
+    if [ $l = none ]; then env -i PATH="$PATH" ${NRL:+LC_ALL=$NRL} "$@" ruby $SRC/lib/team_config.rb "$f" $c em 2>&1
+    else env -u TEAM_STATE_DIR LC_ALL=${NRL:-$loc} "$@" ruby $SRC/lib/team_config.rb "$f" $c em 2>&1; fi ); }
 # nsame <what> <team file> <lines the output must hold, one a line> [VAR=value ...]: validate, check's
 # report and em's settings come out under LC_ALL=C and with no locale exactly as under a UTF-8 locale,
-# each status included, with no Ruby error and with those lines (an empty line asks for nothing).
+# each status included, with no Ruby error and with those lines (an empty line asks for nothing). NSL
+# names other locales to run under, in nr's words.
 nsame() { local what=$1 f=$2 want=$3 l c w out ref good; shift 3
-  for l in C none; do
+  for l in ${NSL:-C none}; do
     out=$(for c in validate permissions_report settings; do nr $l "$f" $c "$@"; echo "$c: status $?"; done)
     ref=$(for c in validate permissions_report settings; do NRL=en_US.UTF-8 nr $l "$f" $c "$@"; echo "$c: status $?"; done)
     good=1; [ "$out" = "$ref" ] && { [ -n "${NSANY:-}" ] || ! echo "$out" | grep -q 'Error)'; } || good=0
@@ -158,6 +165,17 @@ other teams: $NA/two/other (found)" TEAM_STATE_DIR="$NA/two/s$E"
 nsame "another team's state folder with a non-ASCII name is found and denied" "$NT" "validate: status 0
 other teams: $NA/beside/o$E (found)
 \"Edit(/$NA/beside/o$E/**)\"" TEAM_STATE_DIR="$NA/beside/own"
+# Under a locale that is neither UTF-8 nor C the fault was silent: every command exited 0, and the other
+# team's folder was not found, so the seats got no deny for it (tl and sec2 on #362).
+NSL=latin1 nsame "another team's state folder with a non-ASCII name is found and denied, as under a UTF-8 locale" "$NT" "validate: status 0
+other teams: $NA/beside/o$E (found)
+\"Edit(/$NA/beside/o$E/**)\"" TEAM_STATE_DIR="$NA/beside/own"
+# The team file's own path comes from the command line, which the locale tags whatever the line in the
+# parser says, and a relative one is joined to the working folder, which that line makes UTF-8: the two
+# must not meet before the argument is read as UTF-8 too (tl on #362).
+nf "$NA/plain/own"
+NRD="$T/dir$E" nsame "a team file named by a relative path with a non-ASCII character, from a folder with one" "../dir$E/team.yaml" "validate: status 0
+other teams: none" TEAM_STATE_DIR="$NA/plain/own"
 # A state root with a non-ASCII name: joining any listed non-ASCII name to it raised, a plain file's too.
 nf "$NA/root$E/s$E"; nf "$NA/root$E/o$E"; : > "$NA/root$E/note$E.txt"
 nsame "a state root with a non-ASCII name that holds non-ASCII names" "$NT" "validate: status 0
