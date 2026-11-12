@@ -25,6 +25,10 @@ shell each time. Setting `TMUX_TMPDIR` by hand is easy to get wrong: tmux 3.7 fo
 and falls back to the default server, silently, when `TMUX_TMPDIR` is empty or names a folder that does not
 exist. A throwaway team's worktrees on the volume are not removed by `down`; remove them by their paths.
 
+A seat cannot type `tmux kill-server` or `tmux kill-session` itself: a permission rule denies both, with or
+without `-S`, `-L` and `-t` ([Safety](safety.md)). `test/live-env.sh down` is how a test server is stopped,
+and `test/live-env.sh run "$d" tmux kill-session -t <name>` ends one session on it.
+
 ## The end-to-end test
 
 `TEST_VOLUME=/Volumes/YourDrive test/e2e.sh` runs the launcher against a throwaway repo with a stand-in

@@ -84,7 +84,9 @@ the command to get past it; tell the EM (the EM asks the owner). These rules are
 3. **Never touch the owner's running or production instances or live data.** Test only against a
    throwaway instance you start yourself on another port with a fresh temporary data directory (see
    the repository's docs), or against the test harness. A throwaway copy of a team file goes outside
-   any `teams/` folder and runs on a private tmux server, never on the one your seat runs on.
+   any `teams/` folder and runs on a private tmux server, never on the one your seat runs on. A
+   permission rule denies a typed `tmux kill-server` or `tmux kill-session`: stop a test server with
+   the launcher's `down` or the repository's live-test helper, and ask the EM about a running team.
 4. **Secrets:** never put a credential in a message, file, commit, PR or issue. Activating a live
    or billable credential in a running application is the owner's step; ask them to run it.
 5. **Visibility:** assume anything you write in an issue, PR or commit can be read by others, and by

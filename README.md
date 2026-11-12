@@ -15,9 +15,9 @@ iTerm tab.
 - **Seats work in separate worktrees.** Each seat has its own working directory, so engineers do not
   overwrite each other's files, and the team's work lands through pull requests.
 - **Rules are generated into each seat's settings.** Deny rules on the files that would change a seat's own
-  rules, and an ask on any push to the base branch, are written into its settings file at every `up`. They
-  guard against accidents, not against a determined seat or user: read [Safety](docs/safety.md) for what they
-  cover and what they do not.
+  rules, an ask on any push to the base branch, and a deny on a typed `tmux kill-server` or `kill-session`,
+  are written into its settings file at every `up`. They guard against accidents, not against a determined
+  seat or user: read [Safety](docs/safety.md) for what they cover and what they do not.
 - **A seat can be held to your gate.** With `gate_on_stop`, a seat that stops with uncommitted work is held
   until the repository's checks pass. See [The gate](docs/gate.md).
 
