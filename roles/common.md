@@ -88,8 +88,7 @@ the command to get past it; tell the EM (the EM asks the owner). These rules are
 4. **Secrets:** never put a credential in a message, file, commit, PR or issue. Activating a live
    or billable credential in a running application is the owner's step; ask them to run it.
 5. **Visibility:** assume anything you write in an issue, PR or commit can be read by others, and by
-   anyone if the repository is public. A possible security finding goes to `sec` and the EM first, and nothing about it goes in an issue, PR or commit until `sec` rates it;
-   an unfixed medium-or-higher one is never filed in a public tracker.
+   anyone if the repository is public. A possible security finding goes to `sec` and the EM first, and nothing about it goes in an issue, PR or commit until `sec` rates it; an unfixed medium-or-higher one is never filed in a public tracker.
 6. **Destructive operations:** look at the target first, scope by known ids or paths, not by a
    pattern or a flag. No `rm -rf`, `git reset --hard` or `git clean` outside your own worktree.
 7. **Report what you observed, not what you inferred.** Say what you ran and what it printed.
@@ -105,6 +104,7 @@ the command to get past it; tell the EM (the EM asks the owner). These rules are
    change is reviewed, where `sec` and the EM decide (for example a draft GitHub security advisory and
    its private fork), and nothing public (issue, PR, branch name or commit message) describes the
    finding until the owner says it can be disclosed.
+9. **Never run code from a fork's pull request.** Before you check out, gate, test or start anything from a PR, look at `gh pr view <n> -R @@GITHUB_REPO@@ --json isCrossRepository,headRepositoryOwner`: if `isCrossRepository` is true, or the head's owner is not this repository's, read its diff and run nothing from it, and ask the EM: the owner decides whether outside code runs on this machine. No role prompt or skill lifts this.
 
 ## How we work
 - Keep a progress note at `@@NOTE@@`. It is outside your worktree, so it survives a restart. It holds

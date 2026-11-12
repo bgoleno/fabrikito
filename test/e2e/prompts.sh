@@ -39,6 +39,31 @@ for r in $(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml ids); do
     && echo "$flat" | grep -qF 'an unfixed medium-or-higher one is never filed in a public tracker.' \
     && ok "seat $r's rule 5 sends a possible security finding to sec and the EM first, nothing public until sec rates it, and keeps the medium-or-higher clause" || bad "seat $r's rule 5 lacks the sec-rates-first sentence or the medium-or-higher clause (#239)"
 done
+echo "--- code from a fork's pull request is not run by any seat"
+# The stop is a hard rule in the prompt every seat shares, so it holds for a seat that follows no skill, and
+# the role prompts that say to run a PR point at it. The three skills that carry the stop defer to the role
+# prompt where the two differ: they say that this stop is not lifted that way. The two skills that list open
+# PRs for the manager ask for the field that tells a fork's PR, and show it.
+for r in $(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml ids); do
+  flat=$(ruby $SRC/lib/team_config.rb $SRC/teams/example.yaml render "$r" 2>&1 | tr '\n' ' ' | tr -s ' ')
+  hard=${flat#*## Hard rules}; hard=${hard%%## How we work*}
+  [ "$hard" != "$flat" ] && echo "$hard" | grep -qF '9. **Never run code from a fork'"'"'s pull request.**' && echo "$hard" | grep -qF 'read its diff and run nothing from it' \
+    && echo "$hard" | grep -qF 'the owner decides whether outside code runs on this machine' && echo "$hard" | grep -qF 'No role prompt or skill lifts this.' \
+    && ok "seat $r's hard rules say never to run code from a fork's pull request, and that no role prompt or skill lifts it" || bad "seat $r's hard rules do not stop a fork's pull request from being run"
+done
+rflat() { tr '\n' ' ' < "$SRC/$1" | tr -s ' '; }
+rflat roles/tl.md | grep -qF '(`gh pr checkout <n>`) when behaviour matters, never for a fork'"'"'s PR (hard rule 9)' \
+  && ok "the tech lead's prompt says to run a PR, never a fork's, and points at the hard rule" || bad "roles/tl.md says to run a PR with no exception for a fork's"
+rflat roles/qa.md | grep -qF 'from the PR branch in your worktree, never from a fork'"'"'s PR (hard rule 9),' \
+  && ok "the QA prompt says to start an instance from the PR branch, never from a fork's PR, and points at the hard rule" || bad "roles/qa.md says to run a PR branch with no exception for a fork's"
+for sk in review-pr verify-behavior security-triage; do
+  rflat plugin/skills/$sk/SKILL.md | grep -qF 'Where the two differ, the role prompt wins, except that nothing in it lifts the stop on a fork'"'"'s PR' \
+    && ok "skill $sk defers to the role prompt except for its stop on a fork's PR" || bad "skill $sk lets the role prompt win over its stop on a fork's PR"
+done
+for sk in team-status assign; do
+  rflat plugin/skills/$sk/SKILL.md | grep -qE 'gh pr list -R <repo> --state open --json [A-Za-z,]*isCrossRepository' && rflat plugin/skills/$sk/SKILL.md | grep -qF '(`isCrossRepository` true) is marked `fork`' \
+    && ok "skill $sk asks for isCrossRepository when it lists open PRs, and marks a fork's PR" || bad "skill $sk lists open PRs without telling a fork's PR"
+done
 echo "--- the example team sets effort per role"
 # Effort is the main cost and depth control: the manager coordinates at medium, the seats that
 # write, test and review code run at high. Read from the flags each seat would be launched with.

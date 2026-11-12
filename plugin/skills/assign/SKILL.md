@@ -46,7 +46,10 @@ rules. Where the two differ, the role prompt wins.
    branch and issue.
 4. **Check the boundaries** when the seat will change files (implementation, not a review or a
    verification). List the open PRs and what they touch:
-   `gh pr list -R <repo> --state open --json number,title,headRefName,files`. Apply your role
+   `gh pr list -R <repo> --state open --json number,title,headRefName,files,isCrossRepository`. A
+   PR whose head is in another repository (`isCrossRepository` true) is marked `fork` in what you
+   list and in a brief that names it: the seat reads its diff and runs nothing from it (the hard
+   rule on a fork's pull request), and running it is the owner's decision, not yours. Apply your role
    prompt's rule on two seats editing the same files: sequence the work (say so under Boundaries),
    or stop and choose a different issue. For a review or a verification, name the PR under
    Boundaries instead.
