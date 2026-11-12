@@ -940,8 +940,11 @@ cmd_status() {
   done
   # STATE says up for any session with the seat's name. One that is another team's (foreign_session)
   # gets a notice, since up, down, say, flush, attach, view and titles will all refuse it: the
-  # reader learns that here, before a say. status still only reads.
+  # reader learns that here, before a say. status still only reads, and asks this only of a session
+  # that is there: for a seat that is down, and when tmux cannot be reached at all, it makes no call
+  # but has-session (a case of the tests' tmux guard holds status to that).
   for r in $ROLES; do
+    alive "$r" || continue
     d=$(foreign_session "$r"); [ -z "$d" ] || echo "NOTICE $r: $d"
   done
   status_box_notices
