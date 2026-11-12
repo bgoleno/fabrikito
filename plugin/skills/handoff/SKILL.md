@@ -58,8 +58,9 @@ about to lose its context. It does not restate them. Where the two differ, the r
    your branch whatever the configuration. If any condition fails, leave the commit local, and say
    so in the note. A local-only WIP commit is a normal handoff, not a gap: your worktree survives a
    restart, and a rule to push only when asked or when opening a PR is a reason not to push.
-4. **Rewrite the progress note** last, with the Write or Edit tool. A fresh session must be able
-   to carry on from it alone, so include:
+4. **Rewrite the progress note** last, with the Write or Edit tool. Keep its first line the
+   `Status:` line your role prompt gives, true for the task as you leave it. A fresh session must
+   be able to carry on from it alone, so include:
    - the task (issue or PR URL), the branch, and the WIP commit (short SHA, pushed or local only);
    - the state, and the exact next step;
    - what you are waiting for, and from whom;
