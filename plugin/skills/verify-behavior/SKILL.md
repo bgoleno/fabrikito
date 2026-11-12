@@ -1,6 +1,6 @@
 ---
 name: verify-behavior
-description: "For QA: verify one PR at its exact head against its issue (each one, when it closes several): a red run of its new tests on the old code, live checks in a throwaway environment, a control on the base, then one report naming the head: pass, fail or could not check, with evidence. Argument: <PR>."
+description: "For QA: verify one PR at its exact head against its issues: a red run of its new tests on the old code, live checks in a throwaway environment, a control on the base, then one report naming the head: pass, fail or could not check, with evidence. Argument: <PR>."
 argument-hint: <PR number or URL>
 ---
 
