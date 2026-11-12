@@ -41,7 +41,10 @@ tests, and wins over the key. (`up` gives the seat's session the folder it used 
 `TEAM_STATE_DIR` in its own environment.) `check` prints the state folder and where it came from, and
 warns when the default `<checkout>/.state/<team>` also exists and leads somewhere else: the key moves
 nothing, so a team that adds it to a running team's state moves the old folder there first. Running
-seats keep their old settings until they restart.
+seats keep their old settings until they restart. Stop them before the folder moves: once the team's
+state folder is another one, `down` and the other commands that reach a seat stop at a seat started
+with the old one, until it is handed over with the command the refusal prints
+([`sessions`](team-file.md)).
 
 ## Set up a release checkout
 
@@ -166,8 +169,10 @@ seat has restarted. To see which release a seat runs:
 `tmux show-environment -t '=<prefix>-<role>' TEAM_SCRIPT`.
 
 During the overlap, old and new seats share the state folder: the message log, the notes, the locks
-`say` takes and the claude copies. They can message each other, and both write the same log. That is
-safe only while the two releases agree on two things:
+`say` takes and the claude copies. They can message each other, and both write the same log. The
+commands of one copy of the team file reach the seats the other copy started, because a session is the
+team's by the state folder and the repository `up` stored in it, not by the path of the team file
+([`sessions`](team-file.md)). That is safe only while the two releases agree on two things:
 
 - **The state layout.** If the new release's notes (its tag's message: `git -C <install> tag -n99 -l <new>`;
   for 0.3.0 also [Release notes: 0.3.0](release-0.3.0.md), step 3)

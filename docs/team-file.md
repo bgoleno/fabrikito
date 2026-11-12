@@ -26,7 +26,9 @@ the reference for each key, and the file to copy.
   Precedence: `TEAM_STATE_DIR` (throwaway teams and tests), then `state`, then the default; `check`
   prints the folder and which of the three it is. The key moves nothing, so a team that adds it to an
   existing state folder moves that folder first; `check` warns when the default folder is still there
-  and is a different one. Running seats keep the state folder they started with until they restart.
+  and is a different one. Running seats keep the state folder they started with until they restart,
+  and a command run with another one stops at them (`sessions`, below): stop the seats before the
+  folder changes, or hand each over with the command the refusal prints.
   `check` refuses a relative path, the home folder or a folder holding it, a folder inside the
   repository, a seat's working directory, the worktree folder or a checkout of fabrikito (a folder under
   `<install>/.state/` is allowed, and only there), a volume that is not mounted, and a folder that is, holds or sits
@@ -36,7 +38,13 @@ the reference for each key, and the file to copy.
 - `sessions`: tmux name prefix, an optional claude `wrapper`, `args`, and an optional default `model`,
   `effort` and `permission_mode`. Unset means the flag is omitted and the seat inherits
   `~/.claude/settings.json`. `sessions.claude.plugin` (default `true`) loads the fabrikito plugin into
-  every seat: see [The fabrikito plugin](plugin.md).
+  every seat: see [The fabrikito plugin](plugin.md). Two teams on one tmux server need two prefixes:
+  `up` stores its state folder and `repo.github` in each session it starts, and `up`, `down`, `say`,
+  `flush`, `attach`, `view` and `titles` stop at a session whose stored state folder or repository is
+  not their own, naming the value that differs and the `tmux set-environment` command that hands the
+  session over (a session started before these were stored has neither, and is taken for the seat
+  until it next starts). One team file run with another state folder (`TEAM_STATE_DIR` on `up` and
+  not on `down`) is stopped the same way.
 - `permissions` (`deny`, `ask`, `allow`), at the top level and per role: see
   [Safety](safety.md).
 - `other_teams`: other teams' state folders that aren't beside this team's own, each with the

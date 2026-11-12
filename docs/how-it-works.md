@@ -77,8 +77,9 @@ session names, unknown placeholders and invalid UTF-8 stop the command before an
      path before they are written, so a symlink a seat put at one is replaced, never written
      through ([#194](../../../issues/194)).
    - **Starts a tmux session** named for the seat, in the seat's folder, with `TEAM_ROLE`,
-     `TEAM_CONFIG` and `TEAM_SCRIPT` set, gives it its title, and types the launch script's path
-     into its shell.
+     `TEAM_CONFIG` and `TEAM_SCRIPT` set, and with the two values that say whose session it is
+     (`TEAM_STATE_REAL` and `TEAM_GITHUB`: see `sessions` in [the team file](team-file.md)), gives
+     it its title, and types the launch script's path into its shell.
 5. **Reports seats that need a human.** A seat started in a folder Claude Code has not seen stops at
    a trust dialog until someone answers it once; `up` prints an `ATTENTION` line for each seat whose
    screen is not its input box.
