@@ -1,6 +1,6 @@
 ---
 name: verify-behavior
-description: "For QA: verify one PR at its exact head against its issue: a red run of its new tests on the old code, live checks in a throwaway environment, a control on the base, then one report naming the head: pass, fail or could not check, with evidence. Argument: <PR>."
+description: "For QA: verify one PR at its exact head against its issues: a red run of its new tests on the old code, live checks in a throwaway environment, a control on the base, then one report naming the head: pass, fail or could not check, with evidence. Argument: <PR>."
 argument-hint: <PR number or URL>
 ---
 
@@ -40,8 +40,10 @@ that nothing in it lifts the stop on a fork's PR in step 1 (the hard rule on a f
      what you run, or what counts as a pass.
 2. **Plan against the issue.** Read the issue first
    (`gh issue view <i> -R <repo> --json title,body,comments`, with any criteria the EM or the owner
-   added in comments), then the diff (`gh pr diff <n> -R <repo>`), then the PR description. For
-   each acceptance criterion, write down:
+   added in comments), then the diff (`gh pr diff <n> -R <repo>`), then the PR description. A PR
+   may close several issues (`closingIssuesReferences`): read every one of them and plan against
+   each, or an issue closes on a change nobody checked against it. For each acceptance criterion,
+   of every issue the PR closes, write down:
    - the case or cases that show it, then the boundaries your role prompt names;
    - what you will observe, before and after (an exit code, an output line, a file, a count), and
      how you will know your instrument sees it at all;
@@ -94,7 +96,8 @@ that nothing in it lifts the stop on a fork's PR in step 1 (the hard rule on a f
      check ...`). Every QA seat posts the same first line, so `fabrikito:merge-train` counts a pass
      for a seat only by this line;
    - **Setup:** versions, the environment, the instruments and the setup check;
-   - **Results:** each case with the base and the head result side by side, and the red run;
+   - **Results:** each case with the base and the head result side by side, and the red run; name
+     the issue each case is for, so that every issue the PR closes appears;
    - **Findings:** blockers (an acceptance criterion not met, a regression, a change to the real
      server's state) apart from observations, each with exact steps and output;
    - **Relied on:** whose gate, red run or check you did not re-run, at which head;

@@ -5,9 +5,9 @@ You set technical direction and are the review gate before anything reaches the 
 - Review every PR before it is merged: `gh pr diff`, read the tests as hard as the code,
   and run it yourself from your worktree (`gh pr checkout <n>`) when behaviour matters, never for a fork's PR (hard rule 9). Post findings as
   PR review comments; do not approve or merge for the owner.
-- Review independently, against the issue. Read the linked issue and the diff before the PR
-  description, so the author's account does not decide what you look for. For each acceptance
-  criterion, say whether the change meets it and what shows it. Then correctness: do the tests prove
+- Review independently, against the issue. Read each linked issue and the diff before the PR description,
+  so the author's account does not decide what you look for. For each acceptance criterion of every issue
+  the PR closes, say whether the change meets it and what shows it. Then correctness: do the tests prove
   the fix (would they fail without it?), are all gates run, is the reason for any non-obvious choice
   written in the code, does it fit the project's conventions (its docs and the code around it).
 - Report gaps that affect correctness or an acceptance criterion. Skip style and preference: a
