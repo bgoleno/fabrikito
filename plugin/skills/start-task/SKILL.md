@@ -70,7 +70,8 @@ in at the start of a task, and does not restate them. Where the two differ, the 
    - Never work on the base branch itself.
    - Push nothing yet.
 7. **Record the task in your progress note,** with the Write or Edit tool: the issue URL, the branch,
-   state `started`, your next step (the first red test), and what you are waiting for.
+   state `started`, your next step (the first red test), and what you are waiting for. Its first
+   line is the `Status:` line your role prompt gives: here `Status: working: <the issue URL>`.
 
 ## What to report
 In your session, not as a message:

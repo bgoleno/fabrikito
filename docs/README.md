@@ -15,5 +15,6 @@ Reference documentation for fabrikito. The [README](../README.md) introduces the
 | [Messaging](messaging.md) | See how seats message each other: which messages Claude Code holds, what `say` checks before it types into a seat, the kickoff, and the format of the message log. |
 | [Safety](safety.md) | See what the generated permission rules cover (protected files, the base-branch push ask, the message log, other teams' state, auto memory) and what they cannot do. |
 | [Updating Claude Code](updating-claude-code.md) | Update Claude Code on a running team: why seats run the team's own copy of claude, how to update, and how to remove old copies. |
+| [Project facts](facts.md) | Describe the project elsewhere (a site, a talk) without overclaiming: checked statements on what it is, what it does, what it needs, the safety model, known limits and status, each with its source. |
 | [Testing](testing.md) | Run a live test on a private tmux server, and run, extend or read the end-to-end test. |
 | [Troubleshooting](troubleshooting.md) | Find what you see (an error, a refused message, a silent seat) and what to do about it. |

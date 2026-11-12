@@ -209,7 +209,7 @@ roles:
       - "fabrikito:handoff": before /clear, /compact, a restart or the end of a session
       - "superpowers:brainstorming": to pin down a vague request from the owner before filing issues
       - "fabrikito:assign": to hand one issue to one seat with a complete brief
-      - "fabrikito:team-status": for the owner's status, or to see which PRs are ready and who owes the next move
+      - "fabrikito:team-status": for the owner's status, the seats without work, or which PRs are ready and who owes the next move
       - "fabrikito:retro": once an incident is finished, to propose the principle it taught, for the owner's approval
       - "fabrikito:merge-train": the owner starts it by typing /fabrikito:merge-train <PRs> [--dry-run] in your pane; you cannot start it yourself
     permissions:
