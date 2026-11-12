@@ -102,6 +102,12 @@ keeps out nobody on a volume mounted `noowners` (Finder's "ignore ownership on t
 seat runs as the same user in any case. Separate folders keep two teams' temp files apart by accident
 guard only, as with the other rules in [Safety](safety.md): this is not a security boundary.
 
+In a permission mode that prompts, a `Write` outside a seat's working directory would wait for a human, so
+the generated settings give each seat an `Edit` allow on everything in its own `tmpdir`
+([#252](../../../issues/252)), in both spellings of the path (as configured and with links resolved). No
+seat gets one on another role's or another team's folder, and a seat without `tmpdir` gets none. It is an
+allow, the weakest list: a deny rule above it still wins. `check` shows it on the seat's `added:` line.
+
 A role with no `tmpdir` behaves as before: the seat takes `TMPDIR` and `CLAUDE_CODE_TMPDIR` from whatever
 started it, and `check` shows `(inherit)`. There is no default folder, because the choice is explicit per role.
 
