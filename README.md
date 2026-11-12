@@ -66,8 +66,8 @@ can change any prompt.
    definition of done, branch, tools, boundaries and reviewers.
 3. **Pull request.** The engineer works on a branch in its worktree, runs the whole gate, and opens a PR
    with `Closes #<n>`. A seat held by `gate_on_stop` is also stopped at the gate.
-4. **Review.** The tech lead reviews every PR against its issue and gives one verdict at an exact commit,
-   `READY at <sha>` or `CHANGES NEEDED`.
+4. **Review.** The tech lead reviews every PR against each issue it closes and gives one verdict at an
+   exact commit, `READY at <sha>` or `CHANGES NEEDED`.
 5. **Verification.** QA runs the behavior in a throwaway environment and reports pass, fail or could not
    check, with evidence. The security seat reviews what is security-sensitive. A security point found in a
    review is sent privately to the security seat, and the PR gets a marker that the merge procedure
@@ -141,8 +141,9 @@ See [SECURITY.md](SECURITY.md).
 
 ## Contributing
 
-Every change starts as a GitHub issue, and its pull request links the issue and fills in the pull request
-template. Nothing tracked may name a specific project, person, drive or path. Before a pull request, run
+Every change starts as a GitHub issue, and its pull request links each issue it completes (one pull request
+may close several) and fills in the pull request template. Nothing tracked may name a specific project,
+person, drive or path. Before a pull request, run
 the gate: `bash -n fabrikito factory.sh test/e2e.sh test/e2e-exit-trap.sh lib/stop_gate.sh lib/session_start.sh lib/log_message.sh`,
 `ruby -c lib/team_config.rb`, and `env -u TMUX TEST_VOLUME=/Volumes/<a mounted, writable volume> test/e2e.sh`.
 See [Testing](docs/testing.md).
