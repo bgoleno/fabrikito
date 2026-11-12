@@ -1,5 +1,6 @@
 Closes #
-<!-- Use "Refs #" instead of "Closes #" when this PR does not complete the issue.
+<!-- Name at least one issue. A PR may close several issues: one "Closes #" line for each issue it completes.
+Use "Refs #" instead of "Closes #" for an issue this PR does not complete.
 GitHub closes an issue on merge when a closing keyword (close, closes, closed, fix, fixes, fixed, resolve,
 resolves, resolved) comes right before its reference, whatever the words around it: "does not close #N" and
 "will not fix #N" close it too. Write a closing keyword only before an issue this PR completes. For any
@@ -11,10 +12,14 @@ gh pr view <pr> --json closingIssuesReferences -->
 
 ## How it was tested
 <!-- The commands you ran and what they printed. This repository's gate is all three of:
-bash -n fabrikito factory.sh test/e2e.sh test/e2e-exit-trap.sh lib/stop_gate.sh lib/session_start.sh lib/log_message.sh
-ruby -c lib/team_config.rb
+bash -c 'rc=0; for f in "$@"; do bash -n "$f" || rc=1; done; exit $rc' gate fabrikito factory.sh lib/*.sh test/*.sh test/e2e/*.sh test/guard/tmux
+bash -c 'rc=0; for f in "$@"; do ruby -c "$f" || rc=1; done; exit $rc' gate lib/*.rb
 env -u TMUX TEST_VOLUME=/Volumes/<a mounted, writable volume> test/e2e.sh   (all assertions must pass)
-Run the e2e with TMUX unset, as CLAUDE.md requires, so it never touches the tmux server you work in. -->
+The first two run one check for each file: "bash -n a b" and "ruby -c a b" check only a.
+Run the e2e with TMUX unset, as CLAUDE.md requires, so it never touches the tmux server you work in.
+It takes the host's run lock itself and waits for its turn: no run-exclusive in front is needed.
+This text is public: write commands and log paths with placeholders (/Volumes/YourDrive, $TMPDIR/gate.log),
+never with a local path, a drive name or a user name. -->
 
 ## Not verified
 <!-- What you did not check or could not check, and why. Write "Nothing" only if that is true. -->

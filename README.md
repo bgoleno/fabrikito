@@ -31,7 +31,8 @@ seats message each other, and one iTerm tab shows them all.
   own cross-session messaging. Every message a seat sends, and every message you send with `say`, is
   appended to a log, `.state/<team>/messages.log`.
 - **Guardrails are generated, not hoped for.** Every `up` writes each seat a settings file with deny rules
-  on the files that would change its own rules, and an ask on any push to the base branch. The example
+  on the files that would change its own rules, a deny on a typed `tmux kill-server` or `kill-session`,
+  and an ask on any push to the base branch. The example
   team also denies `gh pr merge` to every role but the manager, whose rule is an ask. `check` lists what
   each seat gets and warns about a role left open to a merge.
 - **A seat can be held to your checks.** With `gate_on_stop`, a seat that stops with uncommitted work is
@@ -66,8 +67,8 @@ can change any prompt.
    definition of done, branch, tools, boundaries and reviewers.
 3. **Pull request.** The engineer works on a branch in its worktree, runs the whole gate, and opens a PR
    with `Closes #<n>`. A seat held by `gate_on_stop` is also stopped at the gate.
-4. **Review.** The tech lead reviews every PR against its issue and gives one verdict at an exact commit,
-   `READY at <sha>` or `CHANGES NEEDED`.
+4. **Review.** The tech lead reviews every PR against each issue it closes and gives one verdict at an
+   exact commit, `READY at <sha>` or `CHANGES NEEDED`.
 5. **Verification.** QA runs the behavior in a throwaway environment and reports pass, fail or could not
    check, with evidence. The security seat reviews what is security-sensitive. A security point found in a
    review is sent privately to the security seat, and the PR gets a marker that the merge procedure
@@ -121,6 +122,7 @@ The reference lives in [`docs/`](docs/README.md). Start with [How it works](docs
 |---|---|
 | [Commands](docs/commands.md) | Install and run a team: every command and option, which team file is used, the iTerm view. |
 | [The team file](docs/team-file.md) | Set up a team: what each part does, what is checked, how a new worktree is prepared. |
+| [Messaging](docs/messaging.md) | How seats talk, which messages are held, `say`, the kickoff and the message log. |
 | [Right-sizing a team](docs/right-sizing.md) | Choose the number of seats, effort and model per seat, and see the cost. |
 | [How work is tracked](docs/workflow.md) | The issues-first rule, progress notes and held security points. |
 | [The gate](docs/gate.md) | How a seat is held to the repository's checks, and one heavy run at a time. |
@@ -132,8 +134,6 @@ The reference lives in [`docs/`](docs/README.md). Start with [How it works](docs
 | [Testing](docs/testing.md) | A live test on a private tmux server, and the end-to-end test. |
 | [Troubleshooting](docs/troubleshooting.md) | Find what you see (an error, a refused message, a silent seat) and what to do. |
 
-Messaging (how seats talk, `say`, the message log) is documented at the end of this file for now.
-
 ## Reporting a vulnerability
 
 Report a vulnerability through GitHub's private vulnerability reporting:
@@ -142,10 +142,13 @@ See [SECURITY.md](SECURITY.md).
 
 ## Contributing
 
-Every change starts as a GitHub issue, and its pull request links the issue and fills in the pull request
-template. Nothing tracked may name a specific project, person, drive or path. Before a pull request, run
-the gate: `bash -n fabrikito factory.sh test/e2e.sh test/e2e-exit-trap.sh lib/stop_gate.sh lib/session_start.sh lib/log_message.sh`,
-`ruby -c lib/team_config.rb`, and `env -u TMUX TEST_VOLUME=/Volumes/<a mounted, writable volume> test/e2e.sh`.
+Every change starts as a GitHub issue, and its pull request links each issue it completes (one pull request
+may close several) and fills in the pull request template. Nothing tracked may name a specific project,
+person, drive or path. Before a pull request, run
+the gate: `bash -c 'rc=0; for f in "$@"; do bash -n "$f" || rc=1; done; exit $rc' gate fabrikito factory.sh lib/*.sh test/*.sh test/e2e/*.sh test/guard/tmux`,
+`bash -c 'rc=0; for f in "$@"; do ruby -c "$f" || rc=1; done; exit $rc' gate lib/*.rb`
+(one check for each file: `bash -n a b` and `ruby -c a b` check only `a`), and `env -u TMUX TEST_VOLUME=/Volumes/<a mounted, writable volume> test/e2e.sh`
+(it takes the host's run lock itself and waits for its turn).
 See [Testing](docs/testing.md).
 
 ## License
@@ -155,39 +158,3 @@ Apache License 2.0. See [LICENSE](LICENSE).
 The `security-audit` plugin skill is a modified copy of Cloudflare's
 [security-audit-skill](https://github.com/cloudflare/security-audit-skill) (MIT); see
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-## Messaging
-
-This section moved to [Messaging](docs/messaging.md): how seats talk, which messages are held, `say`, the
-kickoff and the message log. The headings below stay so that older links and references still land here.
-
-## How seats talk
-
-Moved to [How seats talk](docs/messaging.md#how-seats-talk).
-
-### Which messages are held
-
-Moved to [Which messages are held](docs/messaging.md#which-messages-are-held).
-
-### `say`
-
-Moved to [`say`](docs/messaging.md#say).
-
-### The kickoff
-
-Moved to [The kickoff](docs/messaging.md#the-kickoff).
-
-### The message log
-
-Moved to [The message log](docs/messaging.md#the-message-log).
-
-## Safety
-
-This section moved to [Safety](docs/safety.md): the rules generated into each seat's settings, how auto
-memory is handled, and what the rules cannot do.
-
-## Updating Claude Code
-
-This section moved to [Updating Claude Code](docs/updating-claude-code.md): why an update needs care on
-a running team, the team's own copy of claude that each seat runs, how to update, and how to remove old
-copies.

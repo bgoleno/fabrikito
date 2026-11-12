@@ -33,10 +33,21 @@ repo:
   # runs there with bash, no terminal input, and TEAM_ROLE and TEAM_REPO (the main checkout) set,
   # before the seat starts, its output shown as it runs. A failing or interrupted setup stops `up`
   # (and removes a worktree it has just made); a worktree whose setup did not finish is set up
-  # again by the next `up`. No real credentials in copy: each copy is another file. See README,
-  # "New worktrees", for where package stores should live when worktrees are on another volume.
+  # again by the next `up`. No real credentials in copy: each copy is another file. See
+  # docs/team-file.md, "New worktrees", for where package stores should live when worktrees are on another volume.
   # copy: [.env.local]
   # bootstrap: "npm ci"
+  # Other repositories (owner/name) a writer seat may also change, such as a documentation site or a
+  # handbook. Optional, at most 10, each written like `github`, none equal to `github`, none twice;
+  # `check` refuses anything else and lists the ones it accepts. They are rendered into every seat's
+  # prompt as @@DOCS_REPOS@@ (one line, or `none`); only roles/writer.md uses it. fabrikito makes no
+  # checkout or worktree of them and adds no permission rules for them: the writer clones one under
+  # its own TMPDIR, and the prompt restates hard rules 2 and 8 for it (see docs/safety.md, which
+  # says what the push and merge rules do for a repository that is not `github`). That clone is
+  # outside the seat's working directory: in a permission mode that prompts, an edit there waits for
+  # a human unless a permission rule allows it, so give the writer seat a `tmpdir` (docs/team-file.md,
+  # "Temp files").
+  # docs_repos: [owner/name-docs, owner/handbook]
 
 project:
   name: Your Project Board
@@ -117,6 +128,7 @@ prompts:
                                # @@GITHUB_REPO@@ @@GITHUB_URL@@ @@PROJECT_NAME@@ @@PROJECT_URL@@
                                # @@WORKDIR@@ @@WORKTREE_ROOT@@ @@VOLUME@@ @@ROSTER@@ @@GATE_MAX_BLOCKS@@
                                # @@NOTE@@ (the seat's progress note, <state>/notes/<role>.md)
+                               # @@DOCS_REPOS@@ (repo.docs_repos, one line, or none)
   # project: ../projects/myapp/project.md
                                # optional: your project's specifics (what the product is, folders
                                # that are off limits, a running instance never to touch, the gate,
@@ -141,9 +153,11 @@ kickoff: >-
 #   them one). The sandbox would hold whatever the command text, but fabrikito does not turn it on.
 # - Paths: //absolute, ~/home, ./relative or a bare name. A single leading / would anchor at the
 #   state folder that holds the generated file, so it is refused.
-# fabrikito adds two sets itself: an Edit deny on the files that change a seat's next start (team
-# file, prompts, launcher, generated state, Claude Code's own settings), and an ask on any push to
-# the base branch (from repo.base). `./fabrikito check` lists what each seat gets.
+# fabrikito adds three sets itself: an Edit deny on the files that change a seat's next start (team
+# file, prompts, launcher, generated state, Claude Code's own settings), an ask on any push to
+# the base branch (from repo.base), and a deny on a typed `tmux kill-server` or `tmux kill-session`
+# (so an ask or an allow on one of those patterns here is refused as having no effect).
+# `./fabrikito check` lists what each seat gets.
 permissions:
   deny:
     # Every .env on the machine, the main checkout's included. This also blocks .env.example: a
@@ -176,7 +190,7 @@ permissions:
 
 # Seats start in this order. Each needs: title, workdir, and one of `prompt` (a file) or
 # `prompt_text` (inline). `summary` is the line shown in the roster every seat sees.
-# Each seat costs tokens while it works, so start only the seats a task needs: README, "Right-sizing".
+# Each seat costs tokens while it works, so start only the seats a task needs: docs/right-sizing.md.
 # Optional per role: `gate_on_stop:` (see repo.gate), `model:`, `effort:` and `permission_mode:` (override sessions.claude),
 # `permissions:` (added to the team's), `session:` (tmux name), `kickoff:` (first message),
 # `skills:` (skills to name in the seat's prompt, below), `may_merge:` (below).
@@ -338,3 +352,30 @@ roles:
         - Bash(gh api graphql*mergePullRequest*)
         - Bash(gh api graphql*enablePullRequestAutoMerge*)
         - Bash(gh api graphql*mergeBranch*)
+  # A Technical Writer keeps the documentation true: README, guides, reference pages, and the
+  # repo.docs_repos repositories. Start one when the project's docs fall behind its changes
+  # (docs/right-sizing.md). It writes docs and opens PRs like an engineer and never merges. Uncomment to use.
+  # dw:
+  #   title: Technical Writer
+  #   effort: medium
+  #   summary: keeps the documentation true, small and findable
+  #   workdir: { type: worktree }
+  #   # Set a tmpdir when repo.docs_repos is used: the writer's clones go under it (see docs_repos above).
+  #   # tmpdir: /Volumes/YourDrive/tmp/example/dw
+  #   prompt: ../roles/writer.md
+  #   skills:
+  #     - "fabrikito:start-task": when you take an assigned issue, before changing anything
+  #     - "fabrikito:ready-for-review": when a change is done, or a new head goes back to review
+  #     - "fabrikito:handoff": before /clear, /compact, a restart or the end of a session
+  #     - "superpowers:verification-before-completion": before saying work is done or opening a PR
+  #     - "superpowers:receiving-code-review": before acting on review comments
+  #   permissions:
+  #     deny:
+  #       - Bash(gh pr merge *)
+  #       - Bash(gh pr -* merge *)
+  #       - Bash(gh pr -* merge)
+  #       - Bash(gh api *pulls/*/merge*)
+  #       - Bash(gh api *repos/*/merges*)
+  #       - Bash(gh api graphql*mergePullRequest*)
+  #       - Bash(gh api graphql*enablePullRequestAutoMerge*)
+  #       - Bash(gh api graphql*mergeBranch*)

@@ -10,9 +10,10 @@ You implement assigned issues end to end: server-side and client-side code, data
 - Red-green by hand (write the test, watch it fail without the fix, then pass with it; tests prove
   the absence of damage, not only the presence of an error), then run the whole gate and report it.
   A live check that starts tmux sessions or claude runs on a private tmux server, as qa's do (the
-  repository's live-test helper, if it has one).
+  repository's live-test helper, if it has one). Stop that server with the helper or the launcher's
+  `down`: a typed `tmux kill-server` or `tmux kill-session` is denied.
 - Before opening the PR: fetch, bring your own branch up to date with the base, re-run the gate, check
-  `git remote -v`, push, open the PR with a closing keyword for the issue.
+  `git remote -v`, push, open the PR with a closing keyword for each issue it completes.
 - Wait for CI. If a required check fails, investigate the cause and fix it; do not re-run and hope.
 - Then message `tl` for review (PR URL, what to look at hardest, what you did not verify), and `sec`
   too if the change touches auth, input handling, network fetches, data migrations or anything

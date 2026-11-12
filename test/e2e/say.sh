@@ -16,7 +16,7 @@ keytext $T/keys-w1.log 2>/dev/null | grep -q "from em\] hello w1" && ok "the sta
 tmux show-options -t '=tt-w1:' set-titles-string | grep -q 'set-titles-string "w1 | Worker One | tt-w1"' && ok "pane title set at startup: role | title | session" || bad "pane title at startup"
 tmux set-option -t '=tt-w1:' set-titles-string "stale" && $S -c $T/team.yaml titles >/dev/null && tmux show-options -t '=tt-w1:' set-titles-string | grep -q '"w1 | Worker One | tt-w1"' && ok "titles command repairs a changed title" || bad "titles command"
 # logged <to> <outcome> <message> <escaped> <what>: one say writes exactly one log line, whose
-# message field is <escaped>, and printf %b of that field gives back the message (README format).
+# message field is <escaped>, and printf %b of that field gives back the message (the format in docs/messaging.md).
 logged() {
   local n line
   n=$(wc -l < $T/state/messages.log)
@@ -117,10 +117,12 @@ out=$(rn C render TEAM_SCRIPT=$'/x/\xff/fabrikito'); [ $? != 0 ] && echo "$out" 
 out=$(rn none settings HOME=$'/tmp/x\xff'); [ $? != 0 ] && echo "$out" | grep -qF "the home folder (HOME) is not valid UTF-8" && ! echo "$out" | grep -q "Error)" \
   && ok "a home folder that is not UTF-8 is refused, naming HOME" || { bad "invalid HOME"; echo "$out" | tail -2; }
 # say validates and renders the whole team before it sends: from that team, under both locales.
+# env -i drops the tmux guard's variables with the rest, and the guard then refuses every call (#307), so
+# they are passed on beside TMUX_TMPDIR.
 for l in C none; do
   n=$(wc -l < $T/state/messages.log)
   if [ $l = C ]; then LC_ALL=C HOME="$T/home$E" TEAM_ROLE=em $S -c "$NT" say w2 "from a non-ASCII team ($l)" >/dev/null 2>&1
-  else env -i PATH="$PATH" HOME="$T/home$E" TMUX_TMPDIR="$TMUX_TMPDIR" TEAM_STATE_DIR="$TEAM_STATE_DIR" TEAM_ROLE=em $S -c "$NT" say w2 "from a non-ASCII team ($l)" >/dev/null 2>&1; fi
+  else env -i PATH="$PATH" HOME="$T/home$E" TMUX_TMPDIR="$TMUX_TMPDIR" TMUX_GUARD_ROOTS="$TMUX_GUARD_ROOTS" TMUX_GUARD_LOG="$TMUX_GUARD_LOG" TEAM_STATE_DIR="$TEAM_STATE_DIR" TEAM_ROLE=em $S -c "$NT" say w2 "from a non-ASCII team ($l)" >/dev/null 2>&1; fi
   [ "$(wc -l < $T/state/messages.log)" -eq $((n + 1)) ] && tail -1 $T/state/messages.log | grep -qF "from a non-ASCII team ($l)" \
     && ok "say from a team with a non-ASCII workdir, owner and home ($l)" || { bad "say from a non-ASCII team ($l)"; tail -1 $T/state/messages.log; }
 done

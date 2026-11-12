@@ -26,7 +26,27 @@ role's (team first; a role can add or tighten a rule, never loosen one), plus wh
 - an `ask` on any push to the base branch (from `repo.base`), forced or not, since changes land through
   PRs. It is an early warning for a project whose base branch has no protection. The real control is a
   ruleset on the base branch that blocks force-push and deletion and requires a PR; where one exists,
-  this ask is redundant;
+  this ask is redundant. It matches command text, not a repository, and it does not see a push from a
+  clone of a repository listed in `repo.docs_repos`, for any branch name. The clone is outside the
+  seat's working directory, where a `cd` does not last to the next command, so the writer prompt has
+  the seat write every git command there as `git -C <clone> ...`, and `git -C <clone> push` is not
+  matched (see the first item under "What the rules cannot do" below). The writer prompt is the only
+  guard the team provides against a push to such a repository's default branch. The real control is
+  the same as for the base: a ruleset on that repository's default branch that requires a PR. The
+  merge denies and asks name no
+  repository, so they cover a `gh pr merge` in a docs repository clone as they do anywhere;
+- a `Bash` deny on a typed `tmux kill-server` or `tmux kill-session` ([#308](../../../issues/308)), for
+  every seat: either one can end other seats, or every team on the machine, since teams share a tmux
+  server. It is a deny and not an ask, because an ask parks a seat at a prompt until someone answers,
+  and a deny answers at once in every mode. The 24 patterns are the command alone, with arguments
+  after it (`-t`), with options before it (`-S`, `-L`), and each of those behind `env`. Every pattern
+  starts at the command word, so a `grep` for these words, or a commit message that names them,
+  matches no rule. What a seat uses instead: `test/live-env.sh down <dir>` stops a test server (see
+  [Live tests](testing.md#live-tests)), and `test/live-env.sh run <dir> tmux ...` reaches one;
+  `fabrikito down` stops a team; anything on a running team goes to the EM. Those, and the e2e test,
+  make their tmux calls from scripts, which a Bash rule does not see, so they work as before. A team
+  file that has an `ask` or an `allow` on one of the same patterns is refused at load time, as for any
+  rule a stronger one makes useless: remove it;
 - an `Edit` allow on the seat's own progress note (see [Progress notes](workflow.md#progress-notes)), which is
   outside its working directory and would otherwise prompt in a mode other than bypass, and an `Edit`
   deny on every other seat's note: a note is put into its seat's context at each start, so a seat
@@ -154,14 +174,28 @@ What the rules cannot do:
   writes, so they do not stop the same command run through another shell or a script (`sh -c 'cp …'`,
   which qa checked gets through), or a program that writes the file itself, such as a Python or Node
   script.
-- A subagent a seat starts with worktree isolation runs under the seat's own rules, not under the
-  `.claude/settings.json` in its worktree (checked on Claude Code 2.1.316, [#53](../../../issues/53)):
-  the worktree's file held a deny, yet the subagent's matching command ran with no denial, because the
-  parent session had no deny loaded. Editing a worktree's settings therefore does not change what such a
-  subagent may do. Two paths were not checked: `EnterWorktree`, which moves the session itself into a
-  worktree, and a separate `claude` process a seat starts from Bash. That process loads the project
-  settings of its own folder and does not get the seat's generated `--settings` file at all, which is
-  the general limit above: the rules guard against accidents. Severity as sec rated it: low.
+- The deny on `tmux kill-server` and `tmux kill-session` catches the typed command and nothing else.
+  It does not catch a script that runs one (a stray `kill-server` in a test script is what stopped
+  every seat of two teams on 2026-11-10), `sh -c`, tmux under another path, tmux's own short forms
+  (`tmux kill-ser`), other commands that end a session (`kill-window`, `kill-pane`,
+  `respawn-pane -k`), or a signal to the tmux process itself (`pkill tmux`, `killall tmux`,
+  `kill $(pgrep tmux)`), which ends the same server. It is a guard against the accident of typing
+  one. The boundary is elsewhere: a tmux server per team ([#305](../../../issues/305)), and tests
+  whose tmux calls can reach only their own server ([#306](../../../issues/306),
+  [#307](../../../issues/307)). It also has false matches: any typed tmux command with one of the
+  two words as an argument of its own after the command, such as a `send-keys` of that text, is
+  denied too.
+- A subagent a seat starts with worktree isolation did not come under the `.claude/settings.json` in
+  its worktree: it behaved as its parent session did (one check on Claude Code 2.1.316,
+  [#53](../../../issues/53): a headless `claude -p` session in bypass mode in a throwaway repository,
+  one `Bash` deny in the worktree's file). The subagent's matching command ran with no denial, and the
+  parent session had no deny loaded. So a deny written into a worktree's settings did not bind such a
+  subagent. The reverse was not checked: that a deny in the seat's own settings refuses the same
+  command in its subagent. Two more paths were not checked: `EnterWorktree`, which moves the session
+  itself into a worktree, and a separate `claude` process a seat starts from Bash. That process loads
+  the project settings of its own folder and does not get the seat's generated `--settings` file at
+  all, which is the general limit above: the rules guard against accidents. Severity as sec rated it:
+  low (the checked path is ruled out; the unchecked ones fall under the general limit above).
 - The hard rules are prompt text, and the shared prompt treats a subagent as knowing only its brief.
   It tells a seat to put into the brief the rules that apply to the subagent's work (the hard rules,
   what is out of bounds, where temp files go), and that the seat answers for what the subagent does

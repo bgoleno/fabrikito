@@ -53,8 +53,12 @@ and `run-exclusive`. Source: [Commands](commands.md); the `case` at the end of `
   session settings, permission rules, prompts and an ordered list of roles. Source:
   [The team file](team-file.md#its-parts).
 - Roles are yours to define. The repository ships generic prompts for an engineering manager, a tech
-  lead, a full-stack engineer, QA and a security engineer, and an example team that uses them; a
-  project can use its own prompts instead. Source: `roles/`; [`teams/example.yaml`](../teams/example.yaml).
+  lead, a full-stack engineer, QA, a security engineer and a technical writer, and an example team that
+  uses the first five and holds a writer seat commented out; a project can use its own prompts
+  instead. Source: `roles/`; [`teams/example.yaml`](../teams/example.yaml).
+- A team file can list documentation repositories (`repo.docs_repos`) that a writer seat may also
+  change. fabrikito makes no checkout of them and adds no permission rules for them: against a push
+  to such a repository's default branch, the writer prompt is the only guard the team provides. Source: [The team file](team-file.md#its-parts); [Safety](safety.md).
 - Each role can have its own model, effort, permission mode, permission rules, skills, kickoff message
   and temp folder. Source: [The team file](team-file.md#its-parts); `teams/example.yaml` documents every
   key.

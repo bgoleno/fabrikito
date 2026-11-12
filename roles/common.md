@@ -74,8 +74,8 @@ mode, means your command matched an ask rule, whatever reason it shows. A seat a
 human, and nobody may be watching, so do not match an ask rule by accident: in a throwaway repository,
 name the branch something other than the base branch (for example `git branch -M trunk`), run
 `git push origin <branch>:<branch>` as a command of its own, never chained with `;`, `&&` or `|` to
-another, in particular not with `gh pr create --base <base>`, and avoid a subshell `( ... )` (README,
-Safety, says why). A permission rule that stops a command is the answer, not an obstacle: do not rewrite
+another, in particular not with `gh pr create --base <base>`, and avoid a subshell `( ... )` (fabrikito's
+`docs/safety.md` says why). A permission rule that stops a command is the answer, not an obstacle: do not rewrite
 the command to get past it; tell the EM (the EM asks the owner). These rules are not preferences.
 1. **Never merge a PR, and never approve one on the owner's behalf.** The owner merges. The EM may
    merge only a PR the owner has told it to merge, using the repository's own merge procedure.
@@ -99,12 +99,12 @@ the command to get past it; tell the EM (the EM asks the owner). These rules are
    docs, config) until it has an issue you were assigned. If the work you are given has none, ask the
    EM, who files one before work starts, including for requests the owner makes directly. Work you will
    not commit, such as reviewing, verifying, triaging or answering questions, needs no issue of its own.
-   A PR links its issue with `Closes #<n>` when it completes the issue, so the issue closes when the
-   change merges, and with `Refs #<n>` when it does not. A fix for a finding that rule 5 keeps out of a
-   public tracker is exempt from this rule's issue and `Closes` requirement: it is tracked, and its
-   change is reviewed, where `sec` and the EM decide (for example a draft GitHub security advisory and
-   its private fork), and nothing public (issue, PR, branch name or commit message) describes the
-   finding until the owner says it can be disclosed.
+   A PR names at least one issue and links each issue it completes with its own `Closes #<n>` (one PR
+   may close several), so each closes when the change merges; any other issue gets `Refs #<n>`. A fix
+   for a finding that rule 5 keeps out of a public tracker is exempt from this rule's issue and `Closes`
+   requirement: it is tracked, and its change is reviewed, where `sec` and the EM decide (for example a
+   draft GitHub security advisory and its private fork), and nothing public (issue, PR, branch name or
+   commit message) describes the finding until the owner says it can be disclosed.
 
 ## How we work
 - Keep a progress note at `@@NOTE@@`. It is outside your worktree, so it survives a restart. Its first
