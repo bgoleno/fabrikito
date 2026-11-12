@@ -9,13 +9,16 @@ exists, the latest release is still 0.2.0 (see [Project facts](facts.md#status))
 Do these in order. The first two apply to every team; the rest apply if the line names something you
 use.
 
-1. **Run `check` with the new version before you stop or restart anything.** One team file that 0.2.0
-   accepted is refused by 0.3.0: a role whose `tmpdir` is, holds or sits inside another role's
+1. **Run `check` with the new version before you stop or restart anything.** Two team files that 0.2.0
+   accepted are refused by 0.3.0. The first: a role whose `tmpdir` is, holds or sits inside another role's
    `tmpdir`, the team's state folder, the repository or a seat's working directory, or that is or holds
    the worktree folder
-   ([Temp files](team-file.md#temp-files), [#300](../../../issues/300)). Every command that loads the
-   team file refuses it, `say` and `down` included, so find out, and fix the file, before you depend
-   on the new version to stop a running team.
+   ([Temp files](team-file.md#temp-files), [#300](../../../issues/300)). The second: a team or a role
+   with an `ask` or an `allow` rule that is one of the patterns for `tmux kill-server` or
+   `tmux kill-session`, which every seat is now denied ([Safety](safety.md),
+   [#308](../../../issues/308)); the error names the rule and says it has no effect. Every command
+   that loads the team file refuses such a file, `say` and `down` included, so find out, and fix the
+   file, before you depend on the new version to stop a running team.
 2. **Restart every seat.** A seat's prompt, settings and hooks are written by `up` and read when the
    seat starts, so a running seat keeps the 0.2.0 rules until it is restarted: `down --yes <role>`,
    then `up <role>`, after the seat has written its handoff.
@@ -72,6 +75,9 @@ still there as a shim that prints a notice.
 - A seat in a permission mode that prompts may edit files under its own `tmpdir` without being asked:
   its settings carry an `Edit` allow on that folder and on no other role's
   ([Temp files](team-file.md#temp-files)).
+- Every seat is denied a typed `tmux kill-server` and `tmux kill-session`, which can end other seats
+  or every team on the machine. `test/live-env.sh down` stops a test server instead
+  ([Safety](safety.md), [Live tests](testing.md#live-tests)).
 - `repo.bootstrap` runs with the role's `tmpdir` as its `TMPDIR`
   ([New worktrees](team-file.md#new-worktrees)).
 - Each progress note starts with a `Status:` line, and the engineering manager's prompt has it
@@ -97,6 +103,8 @@ still there as a shim that prints a notice.
 
 - A role's `tmpdir` that overlaps another role's, the state folder, the repository, a working
   directory or the worktree folder is refused ([Temp files](team-file.md#temp-files)).
+- An `ask` or an `allow` rule on a `tmux kill-server` or `tmux kill-session` pattern is refused,
+  because the new deny makes it useless ([Safety](safety.md)).
 - A folder listed under `other_teams` that does not exist yet, or is still empty, is accepted, and a
   folder holding only a `.DS_Store` file counts as empty ([Safety](safety.md)).
 
@@ -138,6 +146,10 @@ that the changes in this release touch:
 - **The push ask does not see a push written `git -C <dir> push`,** which is the form the writer
   prompt gives for a documentation repository. The writer prompt is the only guard the team provides
   there ([#346](../../../issues/346)).
+- **The deny on `tmux kill-server` and `tmux kill-session` catches the typed command only.** A
+  script that runs one, `sh -c`, tmux under another path, and a signal to the tmux process
+  (`pkill tmux`) are not caught ([Safety](safety.md), "What the rules cannot do";
+  [#358](../../../issues/358)).
 - **The writer prompt is long.** The example's writer seat renders 195 lines of the 199 that `check`
   warns above, so a team with more than a few lines of `prompts.project` gets that warning for the
   writer ([#347](../../../issues/347)).
