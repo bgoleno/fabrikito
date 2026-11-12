@@ -177,8 +177,9 @@ What the rules cannot do:
 - The deny on `tmux kill-server` and `tmux kill-session` catches the typed command and nothing else.
   It does not catch a script that runs one (a stray `kill-server` in a test script is what stopped
   every seat of two teams on 2026-11-10), `sh -c`, tmux under another path, tmux's own short forms
-  (`tmux kill-ser`), or other commands that end a session (`kill-window`, `kill-pane`,
-  `respawn-pane -k`). It is a guard against the accident of typing one. The boundary is elsewhere: a
+  (`tmux kill-ser`), other commands that end a session (`kill-window`, `kill-pane`,
+  `respawn-pane -k`), or a signal to the tmux process itself (`pkill tmux`, `killall tmux`,
+  `kill $(pgrep tmux)`), which ends the same server. It is a guard against the accident of typing one. The boundary is elsewhere: a
   tmux server per team ([#305](../../../issues/305)), and tests whose tmux calls can reach only their
   own server ([#306](../../../issues/306), [#307](../../../issues/307)). It also has false matches: any
   typed tmux command with one of the two words as an argument of its own after the command, such as
