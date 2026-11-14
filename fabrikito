@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
 # Start, message and stop a team of Claude Code sessions, each in its own persistent tmux
-# session, each told its role, able to message each other through `say`. The team (roles,
-# prompts, session names, claude flags, and where worktrees live) is defined in a YAML file:
-# see teams/example.yaml, which documents every key.
+# session, each told its role. Seats message each other by session name with Claude Code's
+# SendMessage; `say` types a message into a seat (the owner, scripts, and the fallback). The team
+# (roles, prompts, session names, claude flags, worktrees) is a YAML file: see teams/example.yaml.
 #
 #   fabrikito [-c team.yaml] <command>
 #
@@ -17,7 +17,7 @@
 #                              (display.primary, default the first role) on the left at full height, the others
 #                              in rows on the right; the window is sized to its screen (display.window)
 #   status                     which seats are up, and where each one works
-#   say <role|all> <message>   type a message into a seat (this is how seats talk to each other)
+#   say <role|all> <message>   type a message into a seat's input box (seats use SendMessage; this is the fallback)
 #   flush <role>               submit, with one Enter, a message fragment say itself left in a seat's input box
 #   attach <role>              attach your terminal to a seat (detach: ctrl-b d)
 #   migrate [role...]          remove clean worktrees that are not under the configured storage
