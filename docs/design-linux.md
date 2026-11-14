@@ -26,8 +26,13 @@ Each claim on this page is marked with how it is known:
 
 - **[read]**: from reading the code at `66c43e7`.
 - **[ran]**: run in a throwaway `debian:bookworm-slim` container: Debian 12, GNU coreutils 9.1, bash
-  5.2.15, arm64. Debian is Ubuntu's base, but this is not Ubuntu. A container on a macOS host's VM is not
-  a Linux host either: it has no login session, no terminal, no tmux, no Ruby and no Claude Code.
+  5.2.15, arm64.
+- **[ran: Ubuntu]**: run in throwaway containers of the public `ubuntu:24.04` image (Ubuntu 24.04.5 LTS)
+  and `ubuntu:22.04` image (22.04.5 LTS), arm64, with packages installed by `apt-get` inside them. The
+  exact runs are listed under [The container runs](#the-container-runs).
+- A container on a macOS host's VM is **not a Linux host**. It has no login session, no `systemd`, no
+  real terminal and no Claude Code, and the Docker image is smaller than a server install, so "not in
+  the image" does not mean "not on a server".
 - **[docs]**: from Claude Code's documentation
   ([Message your other Claude Code sessions](https://code.claude.com/docs/en/cross-session-messaging)).
 - **[archive]**: from the Ubuntu archive's published source versions for the `jammy` (22.04) and `noble`
@@ -37,8 +42,10 @@ Each claim on this page is marked with how it is known:
 
 ## 1. What breaks on Linux today
 
-The issue's inventory was a starting point. The list below is longer. Most failures are loud, but four
-checks fail **open** under GNU tools: they do not refuse what they exist to refuse. That is the reason
+The issue's inventory was a starting point. The list below is longer. Most failures are loud, but some
+checks fail **open** under GNU tools: they do not refuse what they exist to refuse. These are say's
+hard-link guard on the message log and box records, the stop gate's on its log and count, and say's
+repeat refusal wherever `shasum` is missing. That is the reason
 the design keeps every BSD form out of the shared code (section 2), instead of fixing each call where it
 is found.
 
@@ -50,8 +57,8 @@ details for `f` on standard output (several lines: ID, name length, block counts
 | Where | What it guards | On Linux |
 |---|---|---|
 | `log_unsafe` in `fabrikito` (message log, box records) and the log and count checks in `lib/stop_gate.sh` | Refuses a hard link: `[ "$(stat -f %l "$p" 2>/dev/null \|\| echo 1)" -gt 1 ]` | **Fails open [ran]**: `[` gets text, prints "integer expression expected" and returns 2. The test is false for a file with two links, so the guard is off. |
-| `copy_same_or_die` (the team's copy of `claude`, #208) | The copy has one name and the same size | Fails closed (inferred from the run above): the output is never `1`, so every `up` after the first refuses the copy. |
-| `ensure_claude_copy` | The new copy has the source's size | Fails closed or passes by luck (inferred): each call prints free-block counts, which changed between two calls in the run. |
+| `copy_same_or_die` (the team's copy of `claude`, #208) | The copy has one name and the same size | Fails closed (inferred): the output is never `1`, so an `up` that finds a copy refuses it. The Ubuntu run never got this far (next row). |
+| `ensure_claude_copy` | The new copy has the source's size | **Fails closed [ran: Ubuntu]**: each call prints free-block counts, which change between the two calls, so every `up` stopped at the first copy with `the copy of claude in <dir> does not match <claude>; retry up`, and no seat started. |
 | `seat_exe` (status `EXE`, `REPLACED`) | The running file is still the one at its path | Wrong answer (read): with no `lsof` it is `?`, and with `lsof` it is `REPLACED`. |
 | e2e cases (`stat -f %Lp`, `%i`, `'%N %Lp %z %m'`) | Modes, inodes, a tree snapshot | Case failures (read). |
 
@@ -60,13 +67,17 @@ details for `f` on standard output (several lines: ID, name length, block counts
 - `date -r <epoch>` (status box notices, `flush` messages): GNU reads `-r` as a reference *file*, so it
   exits 1 and the time is left blank in the notice.
 - `shasum -a 256` (say's repeat refusal, #212): not in `debian:bookworm-slim` (exit 127), so the hash is
-  empty and the repeat refusal is **silently off**. On Ubuntu, `shasum` comes with the `perl` package,
-  and whether a server install has that package [not checked yet]. `sha256sum` is in coreutils.
+  empty and the repeat refusal is **silently off**. The `ubuntu:24.04` and `ubuntu:22.04` images have
+  it (`/usr/bin/shasum`, from `perl`) [ran: Ubuntu], so on Ubuntu this one holds. It fails open wherever
+  `perl` is only `perl-base`. `sha256sum` is in coreutils.
 - `cp -c` (an APFS clone of `claude`): GNU 9.1 rejects `-c` (exit 1), so the code falls back to a
   plain copy. Safe.
-- `mv -n` (never replace a copy a seat may run): GNU 9.1 exits 0 and leaves the source when the
-  target exists, as macOS does. Whether coreutils 9.4 (Ubuntu 24.04) exits the same way
-  [not checked yet]. The design stops depending on the exit status (issue B).
+- `mv -n` (never replace a copy a seat may run): when the target exists, GNU 8.32 (Ubuntu 22.04) and
+  9.1 (Debian 12) exit 0 and leave the source, as macOS does. **GNU 9.4 (Ubuntu 24.04) exits 1**, prints
+  `mv: not replacing '<target>'` and leaves the source [ran: Ubuntu]. `ensure_claude_copy` reads a
+  non-zero exit as a failure, so on 24.04 an `up` that loses the race to make the copy stops with "could
+  not copy claude", where macOS carries on with the other `up`'s copy. That fails closed, but the exit
+  status cannot be relied on, so the design stops depending on it (issue B).
 - `sed -i ''` (e2e cases): GNU reads `''` as the script and fails (exit 2).
 - `mount | grep " on <vol> ("` (storage proofs in `fabrikito`, `volume_mounted?` in
   `lib/team_config.rb`): Linux prints `<dev> on <dir> type <fs> (...)`, so the pattern never matches.
@@ -77,16 +88,37 @@ details for `f` on standard output (several lines: ID, name length, block counts
 - `osascript` in `cmd_view` [read]: on Linux `command -v osascript` fails and `die` *exits* the
   shell. `up` calls `cmd_view` at its end with `|| echo warning`, which does not catch an `exit`. So with
   `display.iterm: true` (the default), `up` would start every seat and then exit 1.
-- Ruby is not in the slim image, and the issue says the same of Ubuntu by default [not checked yet]. The
-  launcher's message says it "ships with macOS".
+- Ruby, tmux, git, `lsof` and a C compiler are in neither the slim Debian image nor the Ubuntu images
+  [ran: Ubuntu]. The Ubuntu images do have `perl`, `sha256sum`, `shasum` and `ps`, and leave `LANG`
+  unset. The launcher's message when ruby is missing says it "ships with macOS".
 - `RUBY_PLATFORM.include?('darwin')` [read]: path folding (NFC, lower case) for the overlap checks of
   `state:` and `other_teams` is off on Linux. A case-insensitive file system mounted on Linux (exFAT,
   vfat) would then let two spellings of one folder pass as different. That refuses less, not more.
 - `/Volumes/` [read]: `volume_mounted?`, the `state:` check and its messages assume removable volumes
   live there.
-- `~/Library/Application Support/fabrikito/` [read]: the run lock's folder. On Linux it would be made
-  under the home folder with that macOS name. It would work, but no Linux user would look for it there.
-- `cc` (the e2e stand-in) needs a C compiler: `build-essential` on Ubuntu [not checked yet].
+- `~/Library/Application Support/fabrikito/`, the run lock's folder: `lib/run_exclusive.rb` makes only
+  the last folder, and a Linux home has no `Library`. So `run-exclusive` stops with `cannot make
+  <home>/Library/Application Support/fabrikito: No such file or directory`, and so does `test/e2e.sh`,
+  which takes that lock before its first case [ran: Ubuntu]. This fails closed, but it means no gate
+  run or e2e run can start on Linux today without `E2E_NO_LOCK=1`.
+- The umask: a user who logs in on Ubuntu gets `0002`, not macOS's `0022`, because `/etc/login.defs`
+  sets `USERGROUPS_ENAB yes` [ran: Ubuntu: `umask` printed `0002`, and a plain `mkdir` made a `775`
+  folder]. Anything that relies on a plain `mkdir` or `>` being closed to the group is therefore wrong
+  on Linux. In the e2e run, `run-exclusive` refused its queue folder as "owned by another user or open
+  to others" 14 times. Which line made that folder group-writable was not traced. The rule for the
+  implementation: a folder or file that must be owner-only is made with an explicit mode and then
+  `chmod`ed, never left to the umask.
+- `cc` (the e2e stand-in) needs a C compiler: `build-essential` on Ubuntu, which is enough [ran: Ubuntu].
+
+**The whole e2e suite on Ubuntu 24.04 [ran: Ubuntu]**, at this design's first commit, with no fabrikito
+change: **pass=641 fail=402**, and only with `E2E_NO_LOCK=1`, since without it the run stops at the
+lock (above). Grouped from its log: 188 `integer expression expected` and about 100 `cannot read file
+system information` lines from `stat -f`; the claude copy mismatch, which stops every `up`, so most areas
+that need a running seat fail behind it (16 `error connecting to` the tmux server that was never
+started); the storage volume read as not mounted (the `mount` format); the queue refusals from the
+umask; and one case whose name was taken from `stat -f` output. None of the 402 was traced to a cause
+outside section 1's list, but most areas never ran past the first `up`, so the run cannot show what
+fails behind that.
 
 **Portable already [read]:** tmux, git, `df -P` (the field layout is POSIX), `ps -t <tty> -o pid=,comm=`
 and `ps -o ppid=,tty=,comm=` (procps takes `pts/N`), `perl` for `flock`, `alarm` and `setpgrp` (in
@@ -257,8 +289,9 @@ Kept on both platforms: `titles` and the title each seat sets (`set-titles`). An
 22.04 is not supported: its git is too old, and an older git from elsewhere would make it a different
 host from the one tested. Other distributions are not supported. They may work, and the CI job would be
 where support for one is proven. Packages to install on 24.04: `tmux git ruby` (plus `gh` and Claude
-Code as on macOS, and `build-essential` for the e2e). Which of these a 24.04 server install already has
-[not checked yet].
+Code as on macOS, and `build-essential` for the e2e). The `ubuntu:24.04` image has none of `tmux git
+ruby`, and `apt-get install ruby tmux git build-essential lsof procps` installs the versions in the table
+[ran: Ubuntu]. Which of them a 24.04 *server* install already has [not checked yet].
 
 **macOS.** Unchanged: bash 3.2, the system Ruby 2.6, tmux as the e2e runs it today (3.7b), git 2.36 or
 later. The code must keep running on bash 3.2 and Ruby 2.6, so nothing from bash 4 or later or Ruby 2.7
@@ -316,6 +349,12 @@ tmpfs the job mounts with `sudo`. A tmpfs holds owners and modes and allows `exe
   then see Linux results on every PR while the wiring issues land. The last implementation issue removes
   `continue-on-error`. Making the check required on `main` is a branch-protection setting, which is the
   owner's to change.
+
+**A container as an engineer's Linux loop.** This design's own run (section 1, and [The container
+runs](#the-container-runs)) shows that a throwaway `ubuntu:24.04` container on the macOS host can run the
+whole e2e, with a tmpfs as `TEST_VOLUME`. Engineers could get a Linux result in minutes instead of
+waiting for CI. Whether they may use Docker on the team's host, and where its storage may live, is the
+owner's call. The design works without it, because the CI job is the Linux result of record.
 
 A macOS CI job is not part of this design. The local gate runs on macOS on every PR already. A hosted
 macOS job would need a disk image as its volume and costs more runner time. The owner can ask for it as
@@ -420,6 +459,10 @@ Acceptance criteria:
   process works in, with no `lsof` installed.
 - Status box notices and `flush` messages show the time on both platforms.
 - With `shasum` missing, say's repeat refusal still works on Linux (`sha256sum`).
+- Under `umask 0002`, every folder and file the launcher and the stop hook make owner-only (say's state,
+  the box records, the claude copy's folder, the temp folders) has the same mode as under `0022`.
+- On Ubuntu 24.04, when two `up`s race to make the copy, the one that loses uses the other's copy, as on
+  macOS (coreutils 9.4's `mv -n` exits 1 there).
 - macOS: every existing case passes unchanged.
 
 ### C. The Ruby side through the layer
@@ -436,7 +479,11 @@ Acceptance criteria:
   one, with the message naming the mount point.
 - On Linux, `other_teams` and `state:` overlap checks refuse two paths that differ only in case.
 - On Linux, `run-exclusive` keeps its lock in `~/.local/state/fabrikito/` (home from the user database,
-  not `$HOME`), and two runs exclude each other. On macOS the path and the legacy handling are unchanged.
+  not `$HOME`), making any missing parent folder, and two runs exclude each other. On macOS the path and
+  the legacy handling are unchanged.
+- Under `umask 0002`, `run-exclusive` accepts its own lock folder and queue, and still refuses a queue
+  that is group-writable or owned by someone else.
+- `test/e2e.sh` on Linux takes the run lock without `E2E_NO_LOCK=1`.
 - `ruby -c` passes and the e2e passes under Ruby 2.6 (macOS) and Ruby 3.2 (CI).
 
 ### D. The storage volume and the view on Linux
@@ -502,17 +549,38 @@ Acceptance criteria:
 - The report names the Claude Code, tmux and Ruby versions it ran with, and anything that differed from
   macOS.
 
+## The container runs
+
+All were run from a macOS host, on Docker Desktop's Linux VM (arm64), as `docker run --rm` with no
+published port and no folder of the host mounted. The tree went in on standard input as `git archive` of
+the commit. None of these runs touched an existing container or image.
+
+| Image | Digest | What ran |
+|---|---|---|
+| `debian:bookworm-slim` (already present) | not recorded | `--network none`: the `stat -f`, `date -r`, `mv -n`, `cp -c` and `sed -i ''` probes, the hard-link guard expression on a file with two links, `mount` output, which tools the image has |
+| `ubuntu:24.04` (24.04.5 LTS, pulled) | `sha256:2198e4c65076e9cb0b3d695219df667c0e3b0072da64ca3c2648aca17dcecaf5` | `mv -n` onto an existing file; preinstalled tools and `LANG`; `apt-get install -y ruby tmux git build-essential lsof procps`, then the versions; `YAML.safe_load` with keywords and `Etc.uname`; the login user's `umask` and a plain `mkdir`'s mode; the whole e2e |
+| `ubuntu:22.04` (22.04.5 LTS, pulled) | `sha256:74b12b11ffa550fba1929ad4d8d16533c34f6612728469671afba1b03b66881c` | the same probes and versions, not the e2e |
+
+The e2e run, in outline: the container got `--tmpfs /mnt/fab-e2e:rw,exec,mode=1777,size=2g`, installed
+the packages above, made a non-root user, unpacked the tree in its home, and ran `env -u TMUX
+E2E_NO_LOCK=1 TMPDIR=<a folder in its home> TEST_VOLUME=/mnt/fab-e2e bash test/e2e.sh` as that user. A
+first run without `E2E_NO_LOCK=1` stopped at the lock. Both images were removed afterwards
+(`docker rmi ubuntu:24.04 ubuntu:22.04`). No image was built, so no build cache was made.
+
 ## Not verified
 
-- Nothing on this page was run on Ubuntu. Everything marked [ran] ran on Debian 12 (coreutils 9.1) in a
-  container. Whether Ubuntu 24.04's coreutils 9.4 behaves the same for `mv -n`, and what an Ubuntu server
-  install has by default (`ruby`, `lsof`, `shasum`, a C compiler, a UTF-8 locale), was not checked.
-- The e2e suite has never run on Linux. Which of its cases fail there beyond the forms listed in section 1
-  is not known.
-- Whether bash 5.2, Ruby 3.2, tmux 3.4 and mawk change any behaviour fabrikito relies on was not checked.
+- No Linux **host**. Everything marked [ran: Ubuntu] ran in a container of the Ubuntu image, which is
+  smaller than a server install and has no login session, `systemd`, real terminal or Claude Code. What
+  a 24.04 server install has by default (`ruby`, `lsof`, a compiler, a UTF-8 locale) was not checked.
+- The e2e was run once on Ubuntu, at this design's first commit, and stopped short in most areas behind
+  the first `up` (section 1). What fails behind that is not known until issue B lands.
+- Whether bash 5.2, Ruby 3.2, tmux 3.4 and mawk change any behaviour fabrikito relies on is only partly
+  known: the 641 cases that passed in the container are some evidence, not proof.
+- Which line makes the run-exclusive queue group-writable under the `0002` umask was not traced.
 - Cross-session messaging, `say` against the real Claude Code screen, and the hooks were not run on Linux
   (section 8).
-- The consequences in section 1 marked as inferred (the claude copy refused or mismatched, `seat_exe`'s
-  answers, `up` exiting 1 at the view) were read from the code and from the `stat` output above, not run
-  through `fabrikito` on Linux.
-- Package versions come from the archive's listing, not from an installed host.
+- The consequences in section 1 marked as inferred (`copy_same_or_die`, `seat_exe`'s answers, `up`
+  exiting 1 at the view) were read from the code and from the `stat` output, not seen in a run.
+- Ubuntu 22.04 was probed for versions only, never with the e2e. It is out of scope anyway.
+- The images were Docker Hub's arm64 builds. No amd64 run was made, although `ubuntu-24.04` CI runners
+  are amd64.
