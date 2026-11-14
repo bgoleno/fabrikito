@@ -179,11 +179,13 @@ a lint can enforce the rule mechanically.
 
 1. `test/lint-portable.sh`, run as part of the gate, fails on any of these outside `lib/platform.sh` and
    `lib/platform.rb`: `stat -f`, `stat -c`, `date -r`, `date -d`, `sed -i`, `mv -n`, `cp -c`,
-   `--reflink`, `lsof`, `osascript`, `shasum`, `sha256sum`, `/proc/`, `/Volumes/` in code (comments and
-   messages allowed), `Library/Application Support`, `RUBY_PLATFORM` and `uname`. It scans `fabrikito`,
-   `lib/`, `test/` and `test/guard/tmux`. A line that must keep one (for example a test that proves a
-   helper matches the raw form) ends with a marker comment, `# portable-ok: <reason>`, which a reviewer
-   sees in the diff.
+   `--reflink`, `lsof`, `osascript`, `shasum`, `sha256sum`, `/proc/`, `/Volumes/`, `Library/Application
+   Support` and a `"Library"` path component (as `lib/run_exclusive.rb` writes it, `File.join(home,
+   "Library", "Application Support")`), `RUBY_PLATFORM` and `uname`. It scans `fabrikito`, `lib/`,
+   `test/` and `test/guard/tmux`, and skips a line that is only a comment. Any other line with one of
+   them is either converted to the layer or ends with a marker comment, `# portable-ok: <reason>`,
+   which a reviewer sees in the diff. That covers a message that names a tool, a stand-in such as the
+   e2e's `osascript`, and a test that proves a helper matches the raw form.
 2. The Linux CI job (section 7) runs the whole gate, so a form the lint does not know still fails a run.
 
 **Folding on both platforms.** `Platform.fold` folds paths (NFC, lower case) on Linux too. Today's code
@@ -343,12 +345,19 @@ tmpfs the job mounts with `sudo`. A tmpfs holds owners and modes and allows `exe
   GitHub's runner with nothing to steal, and never on a team's host (hard rule 9 is about this host, and
   the job does not change it);
 - installs `tmux git ruby build-essential`, mounts a tmpfs at `/mnt/fab-e2e`, and runs the three gate
-  commands plus `test/lint-portable.sh` with `TMUX` unset and `TEST_VOLUME=/mnt/fab-e2e`, with a time
-  limit;
-- starts with `continue-on-error: true`, named `linux (not yet required)`. Engineers with no Linux host
-  then see Linux results on every PR while the wiring issues land. The last implementation issue removes
-  `continue-on-error`. Making the check required on `main` is a branch-protection setting, which is the
-  owner's to change.
+  commands with `TMUX` unset and `TEST_VOLUME=/mnt/fab-e2e`, with a time limit. `test/lint-portable.sh`
+  joins the job when E adds it;
+- until E lands, runs the e2e with `E2E_NO_LOCK=1`, with a comment that names E. On Linux the run lock
+  cannot be made until C lands, and without the variable the run stops before its first case, so it
+  prints no `RESULT` line (section 1). E removes the variable, so from then on CI also proves that the e2e
+  takes the run lock on Linux;
+- is not a required check at first, so a red run is seen on every PR but blocks no merge. Engineers with
+  no Linux host then see Linux results while the wiring issues land. The job itself has no
+  `continue-on-error`, so a failing case shows as a failed check. A required check on `main` is a
+  branch-protection setting, which is the owner's to change once E is green. Today `main` has no
+  branch protection, and its one active ruleset ("protect main") holds `deletion`, `non_fast_forward` and
+  `pull_request` rules and no required status check, so a red run blocks nothing (read from the
+  repository's API while writing this). F checks that again before it lands.
 
 **A container as an engineer's Linux loop.** This design's own run (section 1, and [The container
 runs](#the-container-runs)) shows that a throwaway `ubuntu:24.04` container on the macOS host can run the
@@ -405,14 +414,30 @@ Seven issues. The order keeps two engineers off one file at the same time. `fabr
 about 2,100 lines) is touched by A, B, D and E, so those four run one after another. C and F run beside
 them on other files.
 
+The file lists come from a grep, at `66c43e7`, of every form section 2's lint bans, on every line that is
+not only a comment. Each file with a hit is in exactly one issue, and in `fabrikito` each function with
+a hit is:
+
+- B: `run_osa` (and its time-out message), `status_box_notices`, `copy_same_or_die`,
+  `ensure_claude_copy`, `seat_exe`, `say_box_blocked`, `log_unsafe`, `cmd_flush`, `cwd_users` (and the
+  `migrate` messages that name `lsof`), `lib/stop_gate.sh`, and the e2e areas `boxtext.sh`,
+  `claude-copy.sh`, `hooks.sh`, `worktrees.sh`;
+- C: `lib/team_config.rb`, `lib/run_exclusive.rb`, and the e2e areas `exclusive.sh`, `say.sh`,
+  `settings.sh`;
+- D: `require_volume`, `prepare_tmpdir`, `cmd_check`'s volume line, `size_window`, `cmd_view`, and the
+  e2e areas `config.sh`, `live.sh`, `skills.sh`, `tmpdir.sh`;
+- E: `test/e2e.sh` (the `TEST_VOLUME` message and the stand-in `osascript` with its check) and
+  `test/e2e-tmux-guard.sh` (a `stat -f` with a `stat -c` fallback, which works on both platforms and is
+  marked `# portable-ok:` or moved to the helper).
+
 | Order | Issue | Runs beside | Files |
 |---|---|---|---|
 | 1 | A. Platform layer | (alone) | new `lib/platform.sh`, new `lib/platform.rb`, new `test/e2e/platform.sh`; `test/e2e.sh` (`AREAS`, the skip count); `test/e2e/lib.sh`; `fabrikito` (sources the layer, refuses an unknown platform: header only); `docs/how-it-works.md` (two rows in the parts table) |
 | 2 | B. File and process checks through the layer | C, F | `fabrikito` (`copy_same_or_die`, `ensure_claude_copy`, `seat_exe`, `cwd_users`, `log_unsafe`, `say_box_blocked`, `status_box_notices`, `flush`, `run_osa`); `lib/stop_gate.sh`; `test/e2e/claude-copy.sh`, `boxtext.sh`, `hooks.sh`, `worktrees.sh` |
 | 2 | C. Ruby side through the layer | B, F | `lib/team_config.rb`; `lib/run_exclusive.rb`; `test/e2e/exclusive.sh`, `settings.sh`, `say.sh` |
 | 2 | F. Linux CI job, not yet required | B, C | new `.github/workflows/linux.yml` |
-| 3 | D. Storage volume and view on Linux | (alone on `fabrikito`) | `fabrikito` (`require_volume`, `prepare_tmpdir`, `cmd_check` volume and view lines, `cmd_up`, `cmd_view`, launch-script comments); `test/e2e/view.sh`, `tmpdir.sh`, `config.sh`, `launch.sh`, `live.sh`; `test/live-env.sh` if needed |
-| 4 | E. Requirements, lint, CI required | (alone) | `fabrikito` (header: missing-tool messages; `cmd_check`: host block, warnings); new `test/lint-portable.sh`; `.github/pull_request_template.md` and `CLAUDE.md` (the gate list); `.github/workflows/linux.yml` (removes `continue-on-error`); `test/e2e/warnings.sh` |
+| 3 | D. Storage volume and view on Linux | (alone on `fabrikito`) | `fabrikito` (`require_volume`, `prepare_tmpdir`, `cmd_check` volume and view lines, `cmd_up`, `cmd_view`, `size_window`, launch-script comments); `test/e2e/view.sh`, `tmpdir.sh`, `config.sh`, `launch.sh`, `live.sh`, `skills.sh`; `test/live-env.sh` if needed |
+| 4 | E. Requirements, lint, CI takes the lock | (alone) | `fabrikito` (header: missing-tool messages; `cmd_check`: host block, warnings); new `test/lint-portable.sh`; `.github/pull_request_template.md` and `CLAUDE.md` (the gate list); `.github/workflows/linux.yml` (removes `E2E_NO_LOCK=1`, adds the lint step); `test/e2e.sh` (the `TEST_VOLUME` message, the stand-in `osascript`); `test/e2e-tmux-guard.sh`; `test/e2e/warnings.sh` |
 | 5 | G. Docs and live check on an Ubuntu host | (alone) | `README.md`, `docs/commands.md`, `docs/facts.md`, `docs/testing.md`, `docs/troubleshooting.md`, `docs/team-file.md`, `teams/example.yaml` (comments only); a live-check report as a comment on the issue |
 
 D depends on C (`Platform.mounted?` reached through `cfg`) and on B (both edit `fabrikito`). E depends
@@ -483,7 +508,10 @@ Acceptance criteria:
   the legacy handling are unchanged.
 - Under `umask 0002`, `run-exclusive` accepts its own lock folder and queue, and still refuses a queue
   that is group-writable or owned by someone else.
-- `test/e2e.sh` on Linux takes the run lock without `E2E_NO_LOCK=1`.
+- On Linux, `run-exclusive` with no lock variable set, and a stand-in home with no `.local` folder,
+  makes `<home>/.local/state/fabrikito/` (mode 700) and runs its command. This is an e2e case with a
+  stand-in home, like the existing ones for the macOS path. The CI job still runs with `E2E_NO_LOCK=1`
+  until E removes it, so this case is what shows C's change on Linux.
 - `ruby -c` passes and the e2e passes under Ruby 2.6 (macOS) and Ruby 3.2 (CI).
 
 ### D. The storage volume and the view on Linux
@@ -491,8 +519,9 @@ Acceptance criteria:
 Scope: `require_volume`, `prepare_tmpdir` and `cmd_check` prove the volume with `cfg mounted`. `check`
 shows the file-system type and the `noexec`, vfat/exFAT/NTFS and `/` notes of section 3. `up` skips the
 view on Linux with its one line, `view` refuses there with the attach commands, and `view --print`
-still prints. The launch script's comments no longer give macOS as the reason. Convert the e2e areas
-listed.
+still prints. `size_window`'s own `osascript` call goes through `run_osa`, which B moved into the
+layer. The launch script's comments no longer give macOS as the reason. Convert the e2e areas listed,
+`skills.sh`'s two `sed -i ''` among them.
 
 Acceptance criteria:
 - On Linux, `up` with `storage.volume` at an unmounted `/mnt/<name>` (an empty folder on `/`) refuses and
@@ -504,11 +533,14 @@ Acceptance criteria:
   volume line says when the volume is `/`.
 - macOS: every existing case passes unchanged, the iTerm view included.
 
-### E. Requirements, the portability lint, and the CI job required
+### E. Requirements, the portability lint, and the CI job on the run lock
 
 Scope: the `host` block and version warnings in `check`, and the missing-tool messages for the platform
-(section 6). Add `test/lint-portable.sh` (section 2) and add it to the gate list in `CLAUDE.md` and in the
-PR template. Remove `continue-on-error` from the CI job.
+(section 6). Add `test/lint-portable.sh` (section 2), add it to the gate list in `CLAUDE.md` and in the
+PR template, and add it to the CI job as a step. Remove `E2E_NO_LOCK=1` from the CI job. Convert or mark
+the last hits the lint finds outside the other issues' files: `test/e2e.sh` (the `TEST_VOLUME` message,
+the stand-in `osascript` and its check) and `test/e2e-tmux-guard.sh`. Once the job is green, tell the
+owner, through the EM, that it can be made a required check.
 
 Acceptance criteria:
 - `check` prints the platform and the version of each tool with its tested minimum, and warns for an
@@ -517,19 +549,24 @@ Acceptance criteria:
 - On Linux, a non-UTF-8 locale gives `check` a warning.
 - `test/lint-portable.sh` passes on the tree, fails on a line added with `stat -f %z` to `fabrikito`,
   and passes when that line carries `# portable-ok:`.
-- The CI job is green on `ubuntu-24.04` and fails the run when a case fails.
+- The CI job runs the e2e without `E2E_NO_LOCK=1`, the run takes the run lock (its log says so), and the
+  job is green on `ubuntu-24.04`. It fails the run when a case fails, and when the lint fails.
 
 ### F. A Linux CI job, not yet required
 
-Scope: `.github/workflows/linux.yml` as section 7 describes, with `continue-on-error: true`. Adding a
-workflow to a public repository is outward-facing, so the owner approves this issue on its own.
+Scope: `.github/workflows/linux.yml` as section 7 describes: the three gate commands, and the e2e with
+`E2E_NO_LOCK=1` and a comment naming E, which removes it. No `continue-on-error`. Adding a workflow to a
+public repository is outward-facing, so the owner approves this issue on its own. Before it lands,
+check again that `main`'s rules require no status check (section 7 says what they hold today): if they
+come to, a red run would block merges.
 
 Acceptance criteria:
 - The job runs on every PR and every push to `main`, on `ubuntu-24.04`, with `permissions: contents:
   read` and no secrets.
 - It runs the syntax gates and the whole e2e with `TMUX` unset and `TEST_VOLUME` on a tmpfs it mounts,
-  and its log shows the `pass=/fail=/skip=` summary.
-- A failing case shows in the job's result (the job is red) without blocking a merge.
+  and its log shows the e2e's `RESULT pass=/fail=/skip=` line (A's skip count has landed by then).
+- A failing case makes the job, and the PR's check, red. A merge is not blocked by it, because the check
+  is not required.
 
 ### G. Docs, and a live check on an Ubuntu host
 
